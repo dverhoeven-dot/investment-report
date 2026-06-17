@@ -1,10 +1,14 @@
 import type { ReactNode } from "react";
 
-const SHEET_URL =
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=csv";
 
 async function getSheetData() {
-  const res = await fetch(SHEET_URL, { cache: "no-store" });
+  const res = await fetch(`${SHEET_URL}&t=${Date.now()}`, {
+    cache: "no-store",
+    next: { revalidate: 0 },
+  });
   const csv = await res.text();
 
   const rows = csv
