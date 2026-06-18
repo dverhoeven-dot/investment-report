@@ -93,31 +93,39 @@ async function getRows(url: string) {
 async function getReportData() {
   const rows = await getRows(REPORTDATA_URL);
 
-  const raw = Object.fromEntries(
-    rows.map((row) => [keyName(row.key), cleanText(row.value)])
-  ) as Record<string, string>;
+  const data: Record<string, string> = {};
+
+  rows.forEach((row) => {
+    const values = Object.values(row);
+    const key = keyName(values[0] || "");
+    const value = cleanText(values[1] || "");
+
+    if (key) {
+      data[key] = value;
+    }
+  });
 
   return {
-    projectTitle: raw.projecttitle,
-    subtitle: raw.subtitle,
-    netProfit: raw.netprofit,
-    roi: raw.roi,
-    irr: raw.irr,
-    capitalDeployed: raw.capitaldeployed,
-    purchasePrice: raw.purchaseprice,
-    transferTax: raw.transfertax,
-    lawyerFee: raw.lawyerfee,
-    notaryFee: raw.notaryfee,
-    totalAcquisition: raw.totalacquisition,
-    projectType: raw.projecttype,
-    surface: raw.surface,
-    duration: raw.duration,
-    baseBuildCost: raw.basebuildcost,
-    contingency: raw.contingency,
-    totalProjectCost: raw.totalprojectcost,
-    grossSalePrice: raw.grosssaleprice,
-    agentCommission: raw.agentcommission,
-    netProceeds: raw.netproceeds,
+    projectTitle: data.projecttitle,
+    subtitle: data.subtitle,
+    netProfit: data.netprofit,
+    roi: data.roi,
+    irr: data.irr,
+    capitalDeployed: data.capitaldeployed,
+    purchasePrice: data.purchaseprice,
+    transferTax: data.transfertax,
+    lawyerFee: data.lawyerfee,
+    notaryFee: data.notaryfee,
+    totalAcquisition: data.totalacquisition,
+    projectType: data.projecttype,
+    surface: data.surface,
+    duration: data.duration,
+    baseBuildCost: data.basebuildcost,
+    contingency: data.contingency,
+    totalProjectCost: data.totalprojectcost,
+    grossSalePrice: data.grosssaleprice,
+    agentCommission: data.agentcommission,
+    netProceeds: data.netproceeds,
   } as Record<string, string>;
 }
 
@@ -218,7 +226,7 @@ function SensitivityTable({
 
 export default async function Home() {
   const data = await getReportData();
-  console.log("REPORT DATA", data);
+
   const cashFlowRows = await getRows(CASHFLOW_URL);
   const exitRows = await getRows(EXIT_TIMELINE_URL);
   const purchaseRows = await getRows(PURCHASE_SENSITIVITY_URL);
