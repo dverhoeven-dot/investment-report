@@ -93,9 +93,33 @@ async function getRows(url: string) {
 
 async function getReportData() {
   const rows = await getRows(REPORTDATA_URL);
-  return Object.fromEntries(
-    rows.map((row) => [cleanText(row.key), cleanText(row.value)])
+
+  const raw = Object.fromEntries(
+    rows.map((row) => [keyName(row.key), cleanText(row.value)])
   ) as Record<string, string>;
+
+  return {
+    projectTitle: raw.projecttitle,
+    subtitle: raw.subtitle,
+    netProfit: raw.netprofit,
+    roi: raw.roi,
+    irr: raw.irr,
+    capitalDeployed: raw.capitaldeployed,
+    purchasePrice: raw.purchaseprice,
+    transferTax: raw.transfertax,
+    lawyerFee: raw.lawyerfee,
+    notaryFee: raw.notaryfee,
+    totalAcquisition: raw.totalacquisition,
+    projectType: raw.projecttype,
+    surface: raw.surface,
+    duration: raw.duration,
+    baseBuildCost: raw.basebuildcost,
+    contingency: raw.contingency,
+    totalProjectCost: raw.totalprojectcost,
+    grossSalePrice: raw.grosssaleprice,
+    agentCommission: raw.agentcommission,
+    netProceeds: raw.netproceeds,
+  } as Record<string, string>;
 }
 
 function Row({
