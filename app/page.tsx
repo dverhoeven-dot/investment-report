@@ -321,12 +321,7 @@ export default async function Home() {
 
   return (
     <main className="bg-[#f4f3ef] py-8 font-sans text-[#1b1b1b] print:bg-white print:py-0">
-      <button
-  onClick={() => window.print()}
-  className="fixed right-6 top-6 z-50 rounded bg-black px-4 py-2 text-sm font-semibold text-white print:hidden"
->
-  Download PDF
-</button>
+      
       <style>{`
   @page {
     size: A4 portrait;
