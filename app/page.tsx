@@ -240,7 +240,7 @@ export default async function Home() {
     ...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0)
   );
 
-  const cashByNotaryRow 
+  const cashByNotaryRow = 
     cashFlowRows.find((r) =>
       cleanText(r.event).toLowerCase().includes("construction draw 1")
     ) || cashFlowRows.find((r) => cleanText(r.month) === "12");
