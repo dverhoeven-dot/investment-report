@@ -3,28 +3,23 @@ import type { ReactNode } from "react";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=csv";
+const REPORTDATA_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=tsv";
 
-async function getSheetData() {
-  const res = await fetch(`${SHEET_URL}&t=${Date.now()}`, {
-    cache: "no-store",
-    next: { revalidate: 0 },
-  });
+const CASHFLOW_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1281963356&single=true&output=csv";
 
-  const csv = await res.text();
+const EXIT_TIMELINE_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1488394284&single=true&output=csv";
 
-  const rows = csv
-    .trim()
-    .split("\n")
-    .slice(1)
-    .map((row) => {
-      const [key, ...rest] = row.split(",");
-      return [cleanText(key), cleanText(rest.join(","))];
-    });
+const SALE_SENSITIVITY_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1161652721&single=true&output=tsv";
 
-  return Object.fromEntries(rows) as Record<string, string>;
-}
+const PROJECT_COST_SENSITIVITY_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1902577654&single=true&output=tsv";
+
+const PURCHASE_SENSITIVITY_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1171110990&single=true&output=tsv";
 
 function cleanText(value?: string) {
   return String(value || "")
@@ -33,9 +28,14 @@ function cleanText(value?: string) {
     .trim();
 }
 
+function keyName(value: string) {
+  return cleanText(value).replace(/\s+/g, "").toLowerCase();
+}
+
 function parseNumber(value?: string) {
   const cleaned = cleanText(value)
     .replaceAll("€", "")
+    .replaceAll("%", "")
     .replaceAll(" ", "")
     .replaceAll(".", "")
     .replace(",", ".");
@@ -44,23 +44,58 @@ function parseNumber(value?: string) {
   return Number.isNaN(number) ? null : number;
 }
 
-function money(value?: string) {
-  const number = parseNumber(value);
-  if (number === null) return cleanText(value);
+function money(value?: string | number) {
+  const number =
+    typeof value === "number" ? value : parseNumber(String(value || ""));
 
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(number);
+  if (number === null) return cleanText(String(value || ""));
+
+  const sign = number < 0 ? "-" : "";
+  const abs = Math.abs(number);
+
+  return (
+    sign +
+    new Intl.NumberFormat("nl-NL", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+    }).format(abs)
+  );
 }
 
-function percent(value?: string) {
-  const number = parseNumber(value);
-  if (number === null) return cleanText(value);
+function percent(value?: string | number) {
+  const number =
+    typeof value === "number" ? value : parseNumber(String(value || ""));
 
-  const pct = number <= 1 ? number * 100 : number;
-  return `+${pct.toFixed(1)}%`;
+  if (number === null) return cleanText(String(value || ""));
+
+  const pct = Math.abs(number) <= 1 ? number * 100 : number;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+}
+
+async function getRows(url: string) {
+  const res = await fetch(`${url}&t=${Date.now()}`, {
+    cache: "no-store",
+    next: { revalidate: 0 },
+  });
+
+  const text = await res.text();
+  const delimiter = text.includes("\t") ? "\t" : ",";
+
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(delimiter).map(keyName);
+
+  return lines.slice(1).map((line) => {
+    const values = line.split(delimiter).map(cleanText);
+    return Object.fromEntries(headers.map((h, i) => [h, values[i] || ""]));
+  }) as Record<string, string>[];
+}
+
+async function getReportData() {
+  const rows = await getRows(REPORTDATA_URL);
+  return Object.fromEntries(
+    rows.map((row) => [cleanText(row.key), cleanText(row.value)])
+  ) as Record<string, string>;
 }
 
 function Row({
@@ -77,11 +112,7 @@ function Row({
   return (
     <div className="flex justify-between border-b border-gray-200 py-1.5 text-[13px]">
       <span className={bold ? "font-semibold" : ""}>{label}</span>
-      <span
-        className={`${bold ? "font-semibold" : ""} ${
-          green ? "text-[#1f7a4d]" : ""
-        }`}
-      >
+      <span className={`${bold ? "font-semibold" : ""} ${green ? "text-[#1f7a4d]" : ""}`}>
         {value}
       </span>
     </div>
@@ -104,11 +135,7 @@ function Kpi({
       <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gray-400">
         {label}
       </div>
-      <div
-        className={`mt-1 text-[18px] font-bold leading-tight ${
-          green ? "text-[#1f7a4d]" : "text-black"
-        }`}
-      >
+      <div className={`mt-1 text-[18px] font-bold leading-tight ${green ? "text-[#1f7a4d]" : "text-black"}`}>
         {value}
       </div>
       {sub && <div className="mt-1 text-[10px] text-gray-400">{sub}</div>}
@@ -139,7 +166,7 @@ function SensitivityTable({
 }: {
   title: string;
   assumption: string;
-  rows: string[][];
+  rows: Record<string, string>[];
 }) {
   return (
     <div className="mt-7">
@@ -153,16 +180,13 @@ function SensitivityTable({
         <div className="text-right pr-2">IRR</div>
       </div>
 
-      {rows.map((row) => (
-        <div
-          key={row[0]}
-          className="grid grid-cols-5 border-b border-gray-200 py-1.5 text-[12px]"
-        >
-          <div className="pl-2 font-semibold">{row[0]}</div>
-          <div>{row[1]}</div>
-          <div className="text-right text-[#1f7a4d]">{row[2]}</div>
-          <div className="text-right text-[#1f7a4d]">{row[3]}</div>
-          <div className="text-right pr-2 text-[#1f7a4d]">{row[4]}</div>
+      {rows.map((row, i) => (
+        <div key={i} className="grid grid-cols-5 border-b border-gray-200 py-1.5 text-[12px]">
+          <div className="pl-2 font-semibold">{row.case}</div>
+          <div>{money(row.assumption)}</div>
+          <div className="text-right text-[#1f7a4d]">{money(row.netprofit)}</div>
+          <div className="text-right text-[#1f7a4d]">{percent(row.roi)}</div>
+          <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.irr)}</div>
         </div>
       ))}
     </div>
@@ -170,11 +194,51 @@ function SensitivityTable({
 }
 
 export default async function Home() {
-  const data = await getSheetData();
+  const data = await getReportData();
+  const cashFlowRows = await getRows(CASHFLOW_URL);
+  const exitRows = await getRows(EXIT_TIMELINE_URL);
+  const purchaseRows = await getRows(PURCHASE_SENSITIVITY_URL);
+  const saleRows = await getRows(SALE_SENSITIVITY_URL);
+  const projectCostRows = await getRows(PROJECT_COST_SENSITIVITY_URL);
 
   const netProfit = money(data.netProfit);
   const roi = percent(data.roi);
   const irr = percent(data.irr);
+
+  const grossSale = parseNumber(data.grossSalePrice) || 1;
+  const acquisitionPct = ((parseNumber(data.totalAcquisition) || 0) / grossSale) * 100;
+  const projectPct = ((parseNumber(data.totalProjectCost) || 0) / grossSale) * 100;
+  const commissionPct = ((parseNumber(data.agentCommission) || 0) / grossSale) * 100;
+  const profitPct = ((parseNumber(data.netProfit) || 0) / grossSale) * 100;
+
+  const cashMonth0 = Math.abs(parseNumber(cashFlowRows[0]?.outflow) || 0);
+  const peakDeployed = Math.max(
+    ...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0)
+  );
+
+  const cashByNotaryRow =
+    cashFlowRows.find((r) =>
+      cleanText(r.event).toLowerCase().includes("construction draw 1")
+    ) || cashFlowRows.find((r) => cleanText(r.month) === "12");
+
+  const cashByNotary = parseNumber(cashByNotaryRow?.runningcapital) || 0;
+  const cashByNotaryPct = peakDeployed ? (cashByNotary / peakDeployed) * 100 : 0;
+
+  const avgCapitalDuration = (() => {
+    let total = 0;
+
+    for (let i = 0; i < cashFlowRows.length - 1; i++) {
+      const currentMonth = parseNumber(cashFlowRows[i].month) || 0;
+      const nextMonth = parseNumber(cashFlowRows[i + 1].month) || currentMonth;
+      const capital = parseNumber(cashFlowRows[i].runningcapital) || 0;
+
+      if (capital > 0 && nextMonth > currentMonth) {
+        total += capital * (nextMonth - currentMonth);
+      }
+    }
+
+    return peakDeployed ? total / peakDeployed : 0;
+  })();
 
   return (
     <main className="bg-[#f4f3ef] py-8 font-sans text-[#1b1b1b] print:bg-white print:py-0">
@@ -192,8 +256,7 @@ export default async function Home() {
             {data.projectTitle || "Naguëles Project"}
           </h1>
           <p className="mt-1 text-[12px] text-gray-400">
-            {data.subtitle ||
-              "Deal Analysis · 15 June 2026 · Custom cash schedule"}
+            {data.subtitle || "Deal Analysis · 15 June 2026 · Custom cash schedule"}
           </p>
           <div className="mt-4 border-t-[3px] border-black" />
         </header>
@@ -202,9 +265,7 @@ export default async function Home() {
           <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
             01 · Overview
           </div>
-          <h2 className="mt-1 text-[22px] font-bold leading-none">
-            Deal Metrics
-          </h2>
+          <h2 className="mt-1 text-[22px] font-bold leading-none">Deal Metrics</h2>
           <p className="mt-2 border-b border-gray-200 pb-3 text-[12px] text-gray-400">
             Headline return metrics, cost structure, and exit timeline.
           </p>
@@ -258,24 +319,31 @@ export default async function Home() {
           </div>
 
           <div className="flex h-7 overflow-hidden rounded-sm text-center text-[10px] font-bold text-white">
-            <div className="w-[27%] bg-black pt-1.5">27%</div>
-            <div className="w-[39%] bg-[#5e5a52] pt-1.5">39%</div>
-            <div className="w-[6%] bg-[#aaa9a2]" />
-            <div className="w-[28%] bg-[#1f7a4d] pt-1.5">28%</div>
+            <div className="bg-black pt-1.5" style={{ width: `${acquisitionPct}%` }}>
+              {acquisitionPct.toFixed(0)}%
+            </div>
+            <div className="bg-[#5e5a52] pt-1.5" style={{ width: `${projectPct}%` }}>
+              {projectPct.toFixed(0)}%
+            </div>
+            <div className="bg-[#aaa9a2]" style={{ width: `${commissionPct}%` }} />
+            <div className="bg-[#1f7a4d] pt-1.5" style={{ width: `${profitPct}%` }}>
+              {profitPct.toFixed(0)}%
+            </div>
           </div>
 
           <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-gray-500">
-            <div>■ Acquisition&nbsp;&nbsp; {money(data.totalAcquisition)} · 27%</div>
-            <div>■ Build / project&nbsp;&nbsp; {money(data.totalProjectCost)} · 39%</div>
-            <div>■ Commission&nbsp;&nbsp; {money(data.agentCommission)} · 6%</div>
+            <div>■ Acquisition&nbsp;&nbsp; {money(data.totalAcquisition)} · {acquisitionPct.toFixed(0)}%</div>
+            <div>■ Build / project&nbsp;&nbsp; {money(data.totalProjectCost)} · {projectPct.toFixed(0)}%</div>
+            <div>■ Commission&nbsp;&nbsp; {money(data.agentCommission)} · {commissionPct.toFixed(0)}%</div>
             <div className="text-[#1f7a4d]">
-              ■ Net profit&nbsp;&nbsp; {netProfit} · 28%
+              ■ Net profit&nbsp;&nbsp; {netProfit} · {profitPct.toFixed(0)}%
             </div>
           </div>
         </div>
 
         <div className="mt-6">
           <SectionLabel>Returns by exit timeline</SectionLabel>
+
           <div className="grid grid-cols-4 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500">
             <div className="pl-2">Exit</div>
             <div className="text-right pr-2">Net Profit</div>
@@ -283,19 +351,12 @@ export default async function Home() {
             <div className="text-right pr-2">IRR (Ann.)</div>
           </div>
 
-          {[
-            ["6 months †", "+199.0%"],
-            ["12 months †", "+72.9%"],
-            ["18 months †", "+44.1%"],
-            ["24 months †", "+31.5%"],
-            ["36 months †", "+20.0%"],
-            ["48 months ←", irr],
-          ].map((r) => (
-            <div key={r[0]} className="grid grid-cols-4 border-b border-gray-200 py-1.5 text-[12px]">
-              <div className="pl-2 font-semibold">{r[0]}</div>
-              <div className="text-right pr-2 text-[#1f7a4d]">{netProfit}</div>
-              <div className="text-right pr-2 text-[#1f7a4d]">{roi}</div>
-              <div className="text-right pr-2 text-[#1f7a4d]">{r[1]}</div>
+          {exitRows.map((row, i) => (
+            <div key={i} className="grid grid-cols-4 border-b border-gray-200 py-1.5 text-[12px]">
+              <div className="pl-2 font-semibold">{row.exit || row.month}</div>
+              <div className="text-right pr-2 text-[#1f7a4d]">{money(row.netprofit)}</div>
+              <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.roi)}</div>
+              <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.irr)}</div>
             </div>
           ))}
         </div>
@@ -313,10 +374,10 @@ export default async function Home() {
         </p>
 
         <div className="mt-5 grid grid-cols-4">
-          <Kpi label="Cash @ Month 0" value="€ 45.000" sub="0.4% of total capital" />
-          <Kpi label="Cash by Notary" value="€ 6.102.000" sub="By month 12 · 58.1% deployed" />
-          <Kpi label="Peak Deployed" value="€ 10.557.000" sub="Reached at month 36" />
-          <Kpi label="Avg. Capital Duration" value="30.6m" sub="Weighted by € × months" />
+          <Kpi label="Cash @ Month 0" value={money(cashMonth0)} sub="Initial reservation deposit" />
+          <Kpi label="Cash by Notary" value={money(cashByNotary)} sub={`By month 12 · ${cashByNotaryPct.toFixed(1)}% deployed`} />
+          <Kpi label="Peak Deployed" value={money(peakDeployed)} sub="Maximum capital deployed" />
+          <Kpi label="Avg. Capital Duration" value={`${avgCapitalDuration.toFixed(1)}m`} sub="Weighted by € × months" />
         </div>
 
         <div className="mt-6 rounded border border-gray-200 p-4">
@@ -325,7 +386,7 @@ export default async function Home() {
               Capital Deployment
             </div>
             <div className="text-[10px] text-gray-500">
-              Peak <b>€ 10.557.000</b> @ m36
+              Peak <b>{money(peakDeployed)}</b>
             </div>
           </div>
 
@@ -336,14 +397,8 @@ export default async function Home() {
                 <stop offset="100%" stopColor="#111111" stopOpacity="0" />
               </linearGradient>
             </defs>
-
             <line x1="25" y1="118" x2="680" y2="118" stroke="#e5e5e5" />
-            <line x1="25" y1="15" x2="25" y2="118" stroke="#eeeeee" />
-            <line x1="190" y1="15" x2="190" y2="118" stroke="#eeeeee" />
-            <line x1="360" y1="15" x2="360" y2="118" stroke="#eeeeee" />
-            <line x1="530" y1="15" x2="530" y2="118" stroke="#eeeeee" />
             <line x1="680" y1="15" x2="680" y2="118" stroke="#1f7a4d" strokeDasharray="3 3" />
-
             <path
               d="M25 112 C45 108, 65 104, 82 95 C105 83, 118 62, 152 55 C165 52, 178 50, 190 50 C222 50, 231 40, 265 36 C300 32, 320 22, 360 20 C405 18, 443 18, 480 13 C500 10, 515 9, 530 9 L680 9"
               fill="none"
@@ -351,23 +406,21 @@ export default async function Home() {
               strokeWidth="2.4"
               strokeLinecap="round"
             />
-
             <path
               d="M25 112 C45 108, 65 104, 82 95 C105 83, 118 62, 152 55 C165 52, 178 50, 190 50 C222 50, 231 40, 265 36 C300 32, 320 22, 360 20 C405 18, 443 18, 480 13 C500 10, 515 9, 530 9 L680 9 L680 118 L25 118 Z"
               fill="url(#deploymentFill)"
             />
-
             <text x="20" y="134" fontSize="9" fill="#999">m0</text>
             <text x="182" y="134" fontSize="9" fill="#999">m12</text>
             <text x="352" y="134" fontSize="9" fill="#999">m24</text>
             <text x="522" y="134" fontSize="9" fill="#999">m36</text>
             <text x="672" y="134" fontSize="9" fill="#999">m48</text>
-            <text x="663" y="13" fontSize="9" fill="#1f7a4d">Exit</text>
           </svg>
         </div>
 
         <div className="mt-6">
           <SectionLabel>Cash Flow Detail</SectionLabel>
+
           <div className="grid grid-cols-5 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
             <div className="pl-2">Month</div>
             <div>Event</div>
@@ -376,28 +429,22 @@ export default async function Home() {
             <div className="text-right pr-2">Running Capital</div>
           </div>
 
-          {[
-            ["m0", "Reservation Deposit (1%)", "-€ 45.000", "—", "€ 45.000"],
-            ["m1", "PPC — Private Contract (9%)", "-€ 405.000", "—", "€ 450.000"],
-            ["m12", "Notary — Balance (90%)", "-€ 4.050.000", "—", "€ 4.500.000"],
-            ["m12", "Side-costs at notary", "-€ 117.000", "—", "€ 4.617.000"],
-            ["m12", "Construction Draw 1/4", "-€ 1.485.000", "—", "€ 6.102.000"],
-            ["m18", "Construction Draw 2/4", "-€ 1.485.000", "—", "€ 7.587.000"],
-            ["m24", "Construction Draw 3/4", "-€ 1.485.000", "—", "€ 9.072.000"],
-            ["m36", "Construction Draw 4/4", "-€ 1.485.000", "—", "€ 10.557.000"],
-            ["m48", "Sale Proceeds (net)", "—", "€ 15.040.000", "-€ 4.483.000"],
-          ].map((row, index) => (
+          {cashFlowRows.map((row, index) => (
             <div
               key={index}
               className={`grid grid-cols-5 border-b border-gray-200 py-1.5 text-[11px] ${
-                index === 8 ? "bg-[#eef6f0]" : ""
+                index === cashFlowRows.length - 1 ? "bg-[#eef6f0]" : ""
               }`}
             >
-              <div className="pl-2">{row[0]}</div>
-              <div className="whitespace-nowrap font-semibold">{row[1]}</div>
-              <div className="text-right pr-2 text-red-800">{row[2]}</div>
-              <div className="text-right pr-2 text-[#1f7a4d] font-semibold">{row[3]}</div>
-              <div className="text-right pr-2">{row[4]}</div>
+              <div className="pl-2">{row.month}</div>
+              <div className="whitespace-nowrap font-semibold">{row.event}</div>
+              <div className="text-right pr-2 text-red-800">
+                {(parseNumber(row.outflow) || 0) === 0 ? "—" : money(row.outflow)}
+              </div>
+              <div className="text-right pr-2 text-[#1f7a4d] font-semibold">
+                {(parseNumber(row.inflow) || 0) === 0 ? "—" : money(row.inflow)}
+              </div>
+              <div className="text-right pr-2">{money(row.runningcapital)}</div>
             </div>
           ))}
         </div>
@@ -411,52 +458,15 @@ export default async function Home() {
           Sensitivity Analysis
         </h2>
         <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
-          Impact of ±15% variations on each key assumption, holding everything else constant.
+          Impact of key assumption variations, holding everything else constant.
         </p>
 
-        <SensitivityTable
-          title="Purchase Price Sensitivity"
-          assumption="Purchase Price"
-          rows={[
-            ["-15%", "€ 3.400.000", "€ 5.194.400", "+52.8%", "+17.9%"],
-            ["-10%", "€ 3.600.000", "€ 4.977.600", "+49.5%", "+16.8%"],
-            ["-5%", "€ 3.800.000", "€ 4.760.800", "+46.3%", "+15.7%"],
-            ["Base", money(data.purchasePrice), netProfit, roi, irr],
-            ["+5%", "€ 4.200.000", "€ 4.327.200", "+40.4%", "+13.7%"],
-            ["+10%", "€ 4.400.000", "€ 4.110.400", "+37.6%", "+12.7%"],
-            ["+15%", "€ 4.600.000", "€ 3.893.600", "+34.9%", "+11.8%"],
-          ]}
-        />
-
-        <SensitivityTable
-          title="Sale Price Sensitivity"
-          assumption="Sale Price"
-          rows={[
-            ["-15%", "€ 13.600.000", "€ 2.288.000", "+21.8%", "+7.7%"],
-            ["-10%", "€ 14.400.000", "€ 3.040.000", "+29.0%", "+10.1%"],
-            ["-5%", "€ 15.200.000", "€ 3.792.000", "+36.1%", "+12.4%"],
-            ["Base", money(data.grossSalePrice), netProfit, roi, irr],
-            ["+5%", "€ 16.800.000", "€ 5.296.000", "+50.5%", "+16.8%"],
-            ["+10%", "€ 17.600.000", "€ 6.048.000", "+57.6%", "+18.9%"],
-            ["+15%", "€ 18.400.000", "€ 6.800.000", "+64.8%", "+20.9%"],
-          ]}
-        />
+        <SensitivityTable title="Purchase Price Sensitivity" assumption="Purchase Price" rows={purchaseRows} />
+        <SensitivityTable title="Sale Price Sensitivity" assumption="Sale Price" rows={saleRows} />
       </Page>
 
       <Page>
-        <SensitivityTable
-          title="Project Cost Sensitivity"
-          assumption="Project Cost"
-          rows={[
-            ["-15%", "€ 5.236.000", "€ 5.468.000", "+57.1%", "+18.3%"],
-            ["-10%", "€ 5.544.000", "€ 5.160.000", "+52.2%", "+17.1%"],
-            ["-5%", "€ 5.852.000", "€ 4.852.000", "+47.6%", "+15.9%"],
-            ["Base", money(data.totalProjectCost), netProfit, roi, irr],
-            ["+5%", "€ 6.468.000", "€ 4.236.000", "+39.2%", "+13.5%"],
-            ["+10%", "€ 6.776.000", "€ 3.928.000", "+35.3%", "+12.4%"],
-            ["+15%", "€ 7.084.000", "€ 3.620.000", "+31.7%", "+11.3%"],
-          ]}
-        />
+        <SensitivityTable title="Project Cost Sensitivity" assumption="Project Cost" rows={projectCostRows} />
       </Page>
 
       <Page>
@@ -464,24 +474,11 @@ export default async function Home() {
           <SectionLabel>Property Photos</SectionLabel>
 
           <div className="mt-4 space-y-3">
-            <img
-              src="/photos/photo1.jpg"
-              alt=""
-              className="h-[220px] w-full rounded object-cover"
-            />
+            <img src="/photos/photo1.jpg" alt="" className="h-[220px] w-full rounded object-cover" />
 
             <div className="grid grid-cols-2 gap-3">
-              <img
-                src="/photos/photo2.jpg"
-                alt=""
-                className="h-[160px] w-full rounded object-cover"
-              />
-
-              <img
-                src="/photos/photo3.jpg"
-                alt=""
-                className="h-[160px] w-full rounded object-cover"
-              />
+              <img src="/photos/photo2.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
+              <img src="/photos/photo3.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
             </div>
           </div>
 
