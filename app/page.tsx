@@ -92,6 +92,7 @@ async function getRows(url: string) {
 
 async function getReportData() {
   const rows = await getRows(REPORTDATA_URL);
+  console.log(rows.slice(0,5))
 
   const data: Record<string, string> = {};
 
