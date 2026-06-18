@@ -4,8 +4,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const REPORTDATA_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=tsv";
-
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=csv";
 const CASHFLOW_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1281963356&single=true&output=csv";
 
@@ -219,6 +218,7 @@ function SensitivityTable({
 
 export default async function Home() {
   const data = await getReportData();
+  console.log("REPORT DATA", data);
   const cashFlowRows = await getRows(CASHFLOW_URL);
   const exitRows = await getRows(EXIT_TIMELINE_URL);
   const purchaseRows = await getRows(PURCHASE_SENSITIVITY_URL);
@@ -240,7 +240,7 @@ export default async function Home() {
     ...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0)
   );
 
-  const cashByNotaryRow =
+  const cashByNotaryRow 
     cashFlowRows.find((r) =>
       cleanText(r.event).toLowerCase().includes("construction draw 1")
     ) || cashFlowRows.find((r) => cleanText(r.month) === "12");
