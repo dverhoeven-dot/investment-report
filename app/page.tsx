@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const REPORTDATA_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=csv";
-  
-  const CASHFLOW_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=tsv";
+
+const CASHFLOW_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1281963356&single=true&output=csv";
 
 const EXIT_TIMELINE_URL =
@@ -22,52 +22,78 @@ const PURCHASE_SENSITIVITY_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1171110990&single=true&output=tsv";
 
 function cleanText(value?: string) {
-  return String(value || "")
-    .replaceAll('"', "")
-    .replaceAll("\r", "")
-    .trim();
+  return String(value || "").replaceAll('"', "").replaceAll("\r", "").trim();
 }
 
-function keyName(value: string) {
+function keyName(value?: string) {
   return cleanText(value).replace(/\s+/g, "").toLowerCase();
 }
 
-function parseNumber(value?: string) {
-  const cleaned = cleanText(value)
+function splitLine(line: string, delimiter: string) {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current);
+  return result.map(cleanText);
+}
+
+function parseNumber(value?: string | number) {
+  if (typeof value === "number") return value;
+
+  let cleaned = cleanText(value)
     .replaceAll("€", "")
     .replaceAll("%", "")
-    .replaceAll(" ", "")
-    .replaceAll(".", "")
-    .replace(",", ".");
+    .replaceAll(" ", "");
+
+  if (!cleaned) return null;
+
+  if (cleaned.includes(",")) {
+    cleaned = cleaned.replaceAll(".", "").replace(",", ".");
+  } else {
+    const parts = cleaned.split(".");
+    if (parts.length > 2) {
+      cleaned = cleaned.replaceAll(".", "");
+    } else if (parts.length === 2 && parts[0] !== "0" && parts[1].length === 3) {
+      cleaned = cleaned.replaceAll(".", "");
+    }
+  }
 
   const number = Number(cleaned);
   return Number.isNaN(number) ? null : number;
 }
 
 function money(value?: string | number) {
-  const number =
-    typeof value === "number" ? value : parseNumber(String(value || ""));
-
-  if (number === null) return cleanText(String(value || ""));
+  const number = parseNumber(value);
+  if (number === null) return "";
 
   const sign = number < 0 ? "-" : "";
-  const abs = Math.abs(number);
-
   return (
     sign +
     new Intl.NumberFormat("nl-NL", {
       style: "currency",
       currency: "EUR",
       maximumFractionDigits: 0,
-    }).format(abs)
+    }).format(Math.abs(number))
   );
 }
 
 function percent(value?: string | number) {
-  const number =
-    typeof value === "number" ? value : parseNumber(String(value || ""));
-
-  if (number === null) return cleanText(String(value || ""));
+  const number = parseNumber(value);
+  if (number === null) return "";
 
   const pct = Math.abs(number) <= 1 ? number * 100 : number;
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
@@ -80,55 +106,69 @@ async function getRows(url: string) {
   });
 
   const text = await res.text();
-  const delimiter = text.includes("\t") ? "\t" : ",";
+  const delimiter = url.includes("output=tsv") || text.includes("\t") ? "\t" : ",";
+  const lines = text.trim().split("\n").filter(Boolean);
 
-  const lines = text.trim().split("\n");
-  const headers = lines[0].split(delimiter).map(keyName);
+  const headers = splitLine(lines[0], delimiter).map(keyName);
 
   return lines.slice(1).map((line) => {
-    const values = line.split(delimiter).map(cleanText);
+    const values = splitLine(line, delimiter);
     return Object.fromEntries(headers.map((h, i) => [h, values[i] || ""]));
   }) as Record<string, string>[];
 }
 
 async function getReportData() {
   const rows = await getRows(REPORTDATA_URL);
-  console.log(rows.slice(0,5))
-
-  const data: Record<string, string> = {};
+  const raw: Record<string, string> = {};
 
   rows.forEach((row) => {
     const values = Object.values(row);
-    const key = keyName(values[0] || "");
-    const value = cleanText(values[1] || "");
+    const key = keyName(values[0]);
+    const value = cleanText(values[1]);
 
-    if (key) {
-      data[key] = value;
+    if (key && key !== "key") {
+      raw[key] = value;
     }
   });
 
   return {
-    projectTitle: data.projecttitle,
-    subtitle: data.subtitle,
-    netProfit: data.netprofit,
-    roi: data.roi,
-    irr: data.irr,
-    capitalDeployed: data.capitaldeployed,
-    purchasePrice: data.purchaseprice,
-    transferTax: data.transfertax,
-    lawyerFee: data.lawyerfee,
-    notaryFee: data.notaryfee,
-    totalAcquisition: data.totalacquisition,
-    projectType: data.projecttype,
-    surface: data.surface,
-    duration: data.duration,
-    baseBuildCost: data.basebuildcost,
-    contingency: data.contingency,
-    totalProjectCost: data.totalprojectcost,
-    grossSalePrice: data.grosssaleprice,
-    agentCommission: data.agentcommission,
-    netProceeds: data.netproceeds,
+    projectTitle: raw.projecttitle,
+    subtitle: raw.subtitle,
+    netProfit: raw.netprofit,
+    roi: raw.roi,
+    irr: raw.irr,
+    capitalDeployed: raw.capitaldeployed,
+    purchasePrice: raw.purchaseprice,
+    transferTax: raw.transfertax,
+    lawyerFee: raw.lawyerfee,
+    notaryFee: raw.notaryfee,
+    totalAcquisition: raw.totalacquisition,
+    projectType: raw.projecttype,
+    surface: raw.surface,
+    duration: raw.duration,
+    baseBuildCost: raw.basebuildcost,
+    contingency: raw.contingency,
+    totalProjectCost: raw.totalprojectcost,
+    grossSalePrice: raw.grosssaleprice,
+    agentCommission: raw.agentcommission,
+    netProceeds: raw.netproceeds,
   } as Record<string, string>;
+}
+
+function Page({ children }: { children: ReactNode }) {
+  return (
+    <section className="mx-auto mb-8 min-h-[297mm] w-[210mm] bg-white px-[15mm] py-[14mm] shadow-sm print:mb-0 print:shadow-none">
+      {children}
+    </section>
+  );
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-1 border-b border-gray-200 pb-1 text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+      {children}
+    </div>
+  );
 }
 
 function Row({
@@ -173,22 +213,6 @@ function Kpi({
       </div>
       {sub && <div className="mt-1 text-[10px] text-gray-400">{sub}</div>}
     </div>
-  );
-}
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <div className="mb-1 border-b border-gray-200 pb-1 text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
-      {children}
-    </div>
-  );
-}
-
-function Page({ children }: { children: ReactNode }) {
-  return (
-    <section className="mx-auto mb-8 min-h-[297mm] w-[210mm] bg-white px-[15mm] py-[14mm] shadow-sm print:mb-0 print:shadow-none">
-      {children}
-    </section>
   );
 }
 
@@ -246,14 +270,11 @@ export default async function Home() {
   const profitPct = ((parseNumber(data.netProfit) || 0) / grossSale) * 100;
 
   const cashMonth0 = Math.abs(parseNumber(cashFlowRows[0]?.outflow) || 0);
-  const peakDeployed = Math.max(
-    ...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0)
-  );
+  const peakDeployed = Math.max(...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0));
 
-  const cashByNotaryRow = 
-    cashFlowRows.find((r) =>
-      cleanText(r.event).toLowerCase().includes("construction draw 1")
-    ) || cashFlowRows.find((r) => cleanText(r.month) === "12");
+  const cashByNotaryRow =
+    cashFlowRows.find((r) => cleanText(r.event).toLowerCase().includes("construction draw 1")) ||
+    cashFlowRows.find((r) => cleanText(r.month) === "12");
 
   const cashByNotary = parseNumber(cashByNotaryRow?.runningcapital) || 0;
   const cashByNotaryPct = peakDeployed ? (cashByNotary / peakDeployed) * 100 : 0;
@@ -287,10 +308,10 @@ export default async function Home() {
       <Page>
         <header>
           <h1 className="text-[29px] font-bold leading-none">
-            {data.projectTitle || "Naguëles Project"}
+            {data.projectTitle || "Investment Project"}
           </h1>
           <p className="mt-1 text-[12px] text-gray-400">
-            {data.subtitle || "Deal Analysis · 15 June 2026 · Custom cash schedule"}
+            {data.subtitle || "Deal Analysis"}
           </p>
           <div className="mt-4 border-t-[3px] border-black" />
         </header>
@@ -369,9 +390,7 @@ export default async function Home() {
             <div>■ Acquisition&nbsp;&nbsp; {money(data.totalAcquisition)} · {acquisitionPct.toFixed(0)}%</div>
             <div>■ Build / project&nbsp;&nbsp; {money(data.totalProjectCost)} · {projectPct.toFixed(0)}%</div>
             <div>■ Commission&nbsp;&nbsp; {money(data.agentCommission)} · {commissionPct.toFixed(0)}%</div>
-            <div className="text-[#1f7a4d]">
-              ■ Net profit&nbsp;&nbsp; {netProfit} · {profitPct.toFixed(0)}%
-            </div>
+            <div className="text-[#1f7a4d]">■ Net profit&nbsp;&nbsp; {netProfit} · {profitPct.toFixed(0)}%</div>
           </div>
         </div>
 
@@ -400,9 +419,7 @@ export default async function Home() {
         <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
           02 · Cash Plan
         </div>
-        <h2 className="mt-1 text-[22px] font-bold leading-none">
-          Capital Deployment Schedule
-        </h2>
+        <h2 className="mt-1 text-[22px] font-bold leading-none">Capital Deployment Schedule</h2>
         <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
           Custom schedule · 8 tranches · 48 months to exit
         </p>
@@ -412,44 +429,6 @@ export default async function Home() {
           <Kpi label="Cash by Notary" value={money(cashByNotary)} sub={`By month 12 · ${cashByNotaryPct.toFixed(1)}% deployed`} />
           <Kpi label="Peak Deployed" value={money(peakDeployed)} sub="Maximum capital deployed" />
           <Kpi label="Avg. Capital Duration" value={`${avgCapitalDuration.toFixed(1)}m`} sub="Weighted by € × months" />
-        </div>
-
-        <div className="mt-6 rounded border border-gray-200 p-4">
-          <div className="mb-3 flex justify-between">
-            <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-500">
-              Capital Deployment
-            </div>
-            <div className="text-[10px] text-gray-500">
-              Peak <b>{money(peakDeployed)}</b>
-            </div>
-          </div>
-
-          <svg viewBox="0 0 700 140" className="h-[140px] w-full">
-            <defs>
-              <linearGradient id="deploymentFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#111111" stopOpacity="0.18" />
-                <stop offset="100%" stopColor="#111111" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            <line x1="25" y1="118" x2="680" y2="118" stroke="#e5e5e5" />
-            <line x1="680" y1="15" x2="680" y2="118" stroke="#1f7a4d" strokeDasharray="3 3" />
-            <path
-              d="M25 112 C45 108, 65 104, 82 95 C105 83, 118 62, 152 55 C165 52, 178 50, 190 50 C222 50, 231 40, 265 36 C300 32, 320 22, 360 20 C405 18, 443 18, 480 13 C500 10, 515 9, 530 9 L680 9"
-              fill="none"
-              stroke="#1f1f1f"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-            />
-            <path
-              d="M25 112 C45 108, 65 104, 82 95 C105 83, 118 62, 152 55 C165 52, 178 50, 190 50 C222 50, 231 40, 265 36 C300 32, 320 22, 360 20 C405 18, 443 18, 480 13 C500 10, 515 9, 530 9 L680 9 L680 118 L25 118 Z"
-              fill="url(#deploymentFill)"
-            />
-            <text x="20" y="134" fontSize="9" fill="#999">m0</text>
-            <text x="182" y="134" fontSize="9" fill="#999">m12</text>
-            <text x="352" y="134" fontSize="9" fill="#999">m24</text>
-            <text x="522" y="134" fontSize="9" fill="#999">m36</text>
-            <text x="672" y="134" fontSize="9" fill="#999">m48</text>
-          </svg>
         </div>
 
         <div className="mt-6">
@@ -488,9 +467,7 @@ export default async function Home() {
         <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
           03 · Sensitivity
         </div>
-        <h2 className="mt-1 text-[22px] font-bold leading-none">
-          Sensitivity Analysis
-        </h2>
+        <h2 className="mt-1 text-[22px] font-bold leading-none">Sensitivity Analysis</h2>
         <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
           Impact of key assumption variations, holding everything else constant.
         </p>
@@ -504,23 +481,19 @@ export default async function Home() {
       </Page>
 
       <Page>
-        <div>
-          <SectionLabel>Property Photos</SectionLabel>
+        <SectionLabel>Property Photos</SectionLabel>
 
-          <div className="mt-4 space-y-3">
-            <img src="/photos/photo1.jpg" alt="" className="h-[220px] w-full rounded object-cover" />
+        <div className="mt-4 space-y-3">
+          <img src="/photos/photo1.jpg" alt="" className="h-[220px] w-full rounded object-cover" />
 
-            <div className="grid grid-cols-2 gap-3">
-              <img src="/photos/photo2.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
-              <img src="/photos/photo3.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <img src="/photos/photo2.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
+            <img src="/photos/photo3.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
           </div>
+        </div>
 
-          <div className="mt-5 border-t border-gray-200 pt-2 text-[11px] text-gray-300">
-            15 June 2026 · Confidential — for internal use only
-          </div>
-
-          <div className="mt-8 h-[110mm] bg-[#f3f2ef]" />
+        <div className="mt-5 border-t border-gray-200 pt-2 text-[11px] text-gray-300">
+          15 June 2026 · Confidential — for internal use only
         </div>
       </Page>
     </main>
