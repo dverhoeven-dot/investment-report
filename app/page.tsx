@@ -253,7 +253,22 @@ function SensitivityTable({
 export default async function Home() {
   const data = await getReportData();
 
-  const cashFlowRows = await getRows(CASHFLOW_URL);
+  const cashFlowRowsRaw = await getRows(CASHFLOW_URL);
+
+  const cashFlowRows = cashFlowRowsRaw.filter((row) => {
+    const month = cleanText(row.month);
+    return month !== "" && !Number.isNaN(Number(month));
+  });
+
+  const cashFlowMetrics = Object.fromEntries(
+    cashFlowRowsRaw
+      .filter((row) => {
+        const month = cleanText(row.month);
+        return month && Number.isNaN(Number(month)) && month.toLowerCase() !== "metric";
+      })
+      .map((row) => [keyName(row.month), cleanText(row.event)])
+  );
+
   const exitRows = await getRows(EXIT_TIMELINE_URL);
   const purchaseRows = await getRows(PURCHASE_SENSITIVITY_URL);
   const saleRows = await getRows(SALE_SENSITIVITY_URL);
@@ -264,36 +279,40 @@ export default async function Home() {
   const irr = percent(data.irr);
 
   const grossSale = parseNumber(data.grossSalePrice) || 1;
-  const acquisitionPct = ((parseNumber(data.totalAcquisition) || 0) / grossSale) * 100;
-  const projectPct = ((parseNumber(data.totalProjectCost) || 0) / grossSale) * 100;
-  const commissionPct = ((parseNumber(data.agentCommission) || 0) / grossSale) * 100;
-  const profitPct = ((parseNumber(data.netProfit) || 0) / grossSale) * 100;
 
-  const cashMonth0 = Math.abs(parseNumber(cashFlowRows[0]?.outflow) || 0);
-  const peakDeployed = Math.max(...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0));
+  const acquisitionPct =
+    ((parseNumber(data.totalAcquisition) || 0) / grossSale) * 100;
+  const projectPct =
+    ((parseNumber(data.totalProjectCost) || 0) / grossSale) * 100;
+  const commissionPct =
+    ((parseNumber(data.agentCommission) || 0) / grossSale) * 100;
+  const profitPct =
+    ((parseNumber(data.netProfit) || 0) / grossSale) * 100;
+
+  const cashMonth0 =
+    parseNumber(cashFlowMetrics.cashmonth0) ??
+    Math.abs(parseNumber(cashFlowRows[0]?.outflow) || 0);
+
+  const peakDeployed =
+    parseNumber(cashFlowMetrics.peakdeployed) ||
+    Math.max(...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0));
 
   const cashByNotaryRow =
-    cashFlowRows.find((r) => cleanText(r.event).toLowerCase().includes("construction draw 1")) ||
-    cashFlowRows.find((r) => cleanText(r.month) === "12");
+    cashFlowRows.find((r) =>
+      cleanText(r.event).toLowerCase().includes("construction draw 1")
+    ) || cashFlowRows.find((r) => cleanText(r.month) === "12");
 
-  const cashByNotary = parseNumber(cashByNotaryRow?.runningcapital) || 0;
-  const cashByNotaryPct = peakDeployed ? (cashByNotary / peakDeployed) * 100 : 0;
+  const cashByNotary =
+    parseNumber(cashFlowMetrics.cashbynotary) ||
+    parseNumber(cashByNotaryRow?.runningcapital) ||
+    0;
 
-  const avgCapitalDuration = (() => {
-    let total = 0;
+  const cashByNotaryPct = peakDeployed
+    ? (cashByNotary / peakDeployed) * 100
+    : 0;
 
-    for (let i = 0; i < cashFlowRows.length - 1; i++) {
-      const currentMonth = parseNumber(cashFlowRows[i].month) || 0;
-      const nextMonth = parseNumber(cashFlowRows[i + 1].month) || currentMonth;
-      const capital = parseNumber(cashFlowRows[i].runningcapital) || 0;
-
-      if (capital > 0 && nextMonth > currentMonth) {
-        total += capital * (nextMonth - currentMonth);
-      }
-    }
-
-    return peakDeployed ? total / peakDeployed : 0;
-  })();
+  const avgCapitalDuration =
+    parseNumber(cashFlowMetrics.avgcapitalduration) || 0;
 
   return (
     <main className="bg-[#f4f3ef] py-8 font-sans text-[#1b1b1b] print:bg-white print:py-0">
@@ -428,7 +447,14 @@ export default async function Home() {
           <Kpi label="Cash @ Month 0" value={money(cashMonth0)} sub="Initial reservation deposit" />
           <Kpi label="Cash by Notary" value={money(cashByNotary)} sub={`By month 12 · ${cashByNotaryPct.toFixed(1)}% deployed`} />
           <Kpi label="Peak Deployed" value={money(peakDeployed)} sub="Maximum capital deployed" />
-          <Kpi label="Avg. Capital Duration" value={`${avgCapitalDuration.toFixed(1)}m`} sub="Weighted by € × months" />
+          <Kpi
+  label="Avg. Capital Duration"
+  value={`${
+    parseNumber(cashFlowMetrics.avgcapitalduration)?.toFixed(1) ||
+    avgCapitalDuration.toFixed(1)
+  }m`}
+  sub="Weighted by € × months"
+/>
         </div>
 
         <div className="mt-6">
