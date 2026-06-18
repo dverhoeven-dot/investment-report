@@ -152,6 +152,11 @@ async function getReportData() {
     grossSalePrice: raw.grosssaleprice,
     agentCommission: raw.agentcommission,
     netProceeds: raw.netproceeds,
+    transferTaxPct: raw.transfertaxpct,
+lawyerFeePct: raw.lawyerfeepct,
+notaryFeePct: raw.notaryfeepct,
+agentCommissionPct: raw.agentcommissionpct,
+contingencyPct: raw.contingencypct,
   } as Record<string, string>;
 }
 
@@ -356,10 +361,9 @@ export default async function Home() {
           <div>
             <SectionLabel>Acquisition</SectionLabel>
             <Row label="Purchase Price" value={money(data.purchasePrice)} />
-            <Row label="Transfer Tax (7%)" value={money(data.transferTax)} />
-            <div className="h-3" />
-            <Row label="Lawyer Fee (1%)" value={money(data.lawyerFee)} />
-            <Row label="Notary Fee (0.4%)" value={money(data.notaryFee)} />
+            <Row label={`Transfer Tax (${percent(data.transferTaxPct).replace("+", "")})`} value={money(data.transferTax)} />
+<Row label={`Lawyer Fee (${percent(data.lawyerFeePct).replace("+", "")})`} value={money(data.lawyerFee)} />
+<Row label={`Notary Fee (${percent(data.notaryFeePct).replace("+", "")})`} value={money(data.notaryFee)} />
             <Row label="Total Acquisition" value={money(data.totalAcquisition)} bold />
           </div>
 
@@ -369,7 +373,7 @@ export default async function Home() {
             <Row label="Surface" value={data.surface || ""} bold />
             <Row label="Duration" value={data.duration || ""} bold />
             <Row label="Base Build Cost" value={money(data.baseBuildCost)} bold />
-            <Row label="Contingency (10%)" value={money(data.contingency)} />
+            <Row label={`Contingency (${percent(data.contingencyPct).replace("+", "")})`} value={money(data.contingency)} />
             <Row label="Total Project Cost" value={money(data.totalProjectCost)} bold />
           </div>
         </div>
@@ -377,7 +381,7 @@ export default async function Home() {
         <div className="mt-6">
           <SectionLabel>Exit & Returns</SectionLabel>
           <Row label="Gross Sale Price" value={money(data.grossSalePrice)} bold />
-          <Row label="Agent Commission (6%)" value={money(data.agentCommission)} />
+          <Row label={`Agent Commission (${percent(data.agentCommissionPct).replace("+", "")})`} value={money(data.agentCommission)} />
           <Row label="Net Proceeds" value={money(data.netProceeds)} bold />
           <Row label="Net Profit / (Loss)" value={netProfit} bold green />
         </div>
