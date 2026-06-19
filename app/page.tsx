@@ -477,7 +477,11 @@ export default async function Home() {
         </p>
 
         <div className="mt-5 grid grid-cols-4">
-          <Kpi label="Cash @ Month 0" value={money(cashMonth0)} sub="Initial reservation deposit" />
+        <Kpi
+  label="Cash @ Month 0"
+  value={money(cashMonth0)}
+  sub={`${cashFlowMetrics.cashmonth0pct || "0"}% of total capital`}
+/>
           <Kpi
   label="Cash by Notary"
   value={money(cashByNotary)}
