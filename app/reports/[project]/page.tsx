@@ -553,17 +553,25 @@ export default async function Home({
         <SectionLabel>Property Photos</SectionLabel>
 
         <div className="mt-4 space-y-3">
-          <img src="/photos/photo1.jpg" alt="" className="h-[220px] w-full rounded object-cover" />
+  {projectConfig.photos?.[0] && (
+    <img
+      src={projectConfig.photos[0]}
+      alt=""
+      className="h-[220px] w-full rounded object-cover"
+    />
+  )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <img src="/photos/photo2.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
-            <img src="/photos/photo3.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
-          </div>
-        </div>
-
-        <div className="mt-5 border-t border-gray-200 pt-2 text-[11px] text-gray-300">
-          15 June 2026 · Confidential — for internal use only
-        </div>
+  <div className="grid grid-cols-3 gap-3">
+    {projectConfig.photos?.slice(1).map((photo, index) => (
+      <img
+        key={index}
+        src={photo}
+        alt=""
+        className="h-[160px] w-full rounded object-cover"
+      />
+    ))}
+  </div>
+</div>
       </Page>
     </main>
   );
