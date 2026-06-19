@@ -18,11 +18,11 @@ export const PROJECTS = {
       projectCostSensitivity:
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1902577654&single=true&output=tsv",
   
-      photos: [
-        "/photos/los-naranjos/photo1.jpg",
-        "/photos/los-naranjos/photo2.jpg",
-        "/photos/los-naranjos/photo3.jpg",
-      ],
+        photos: [
+            "/photos/losnaranjos/photo1.jpg",
+            "/photos/losnaranjos/photo2.jpg",
+            "/photos/losnaranjos/photo3.jpg",
+          ],
     },
   
     "la-carolina": {
