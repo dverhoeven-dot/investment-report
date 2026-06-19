@@ -1,0 +1,570 @@
+import type { ReactNode } from "react";
+import { notFound } from "next/navigation";
+import { PROJECTS } from "../../projects";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+
+function cleanText(value?: string) {
+  return String(value || "").replaceAll('"', "").replaceAll("\r", "").trim();
+}
+
+function keyName(value?: string) {
+  return cleanText(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function splitLine(line: string, delimiter: string) {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current);
+  return result.map(cleanText);
+}
+
+function parseNumber(value?: string | number) {
+  if (typeof value === "number") return value;
+
+  let cleaned = cleanText(value)
+    .replaceAll("€", "")
+    .replaceAll("%", "")
+    .replaceAll(" ", "");
+
+  if (!cleaned) return null;
+
+  if (cleaned.includes(",")) {
+    cleaned = cleaned.replaceAll(".", "").replace(",", ".");
+  } else {
+    const parts = cleaned.split(".");
+    if (parts.length > 2) {
+      cleaned = cleaned.replaceAll(".", "");
+    } else if (parts.length === 2 && parts[0] !== "0" && parts[1].length === 3) {
+      cleaned = cleaned.replaceAll(".", "");
+    }
+  }
+
+  const number = Number(cleaned);
+  return Number.isNaN(number) ? null : number;
+}
+
+function money(value?: string | number) {
+  const number = parseNumber(value);
+  if (number === null) return "";
+
+  const sign = number < 0 ? "-" : "";
+  return (
+    sign +
+    new Intl.NumberFormat("nl-NL", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+    }).format(Math.abs(number))
+  );
+}
+
+function percent(value?: string | number) {
+  const number = parseNumber(value);
+  if (number === null) return "";
+
+  const pct = Math.abs(number) <= 1 ? number * 100 : number;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+}
+
+async function getRows(url: string) {
+  const res = await fetch(`${url}&t=${Date.now()}`, {
+    cache: "no-store",
+    next: { revalidate: 0 },
+  });
+
+  const text = await res.text();
+  const delimiter = url.includes("output=tsv") || text.includes("\t") ? "\t" : ",";
+  const lines = text.trim().split("\n").filter(Boolean);
+
+  const headers = splitLine(lines[0], delimiter).map(keyName);
+
+  return lines.slice(1).map((line) => {
+    const values = splitLine(line, delimiter);
+    return Object.fromEntries(headers.map((h, i) => [h, values[i] || ""]));
+  }) as Record<string, string>[];
+}
+
+async function getReportData(reportDataUrl: string) {
+    const rows = await getRows(reportDataUrl);
+  const raw: Record<string, string> = {};
+
+  rows.forEach((row) => {
+    const values = Object.values(row);
+    const key = keyName(values[0]);
+    const value = cleanText(values[1]);
+
+    if (key && key !== "key") {
+      raw[key] = value;
+    }
+  });
+
+  return {
+    projectTitle: raw.projecttitle,
+    subtitle: raw.subtitle,
+    netProfit: raw.netprofit,
+    roi: raw.roi,
+    irr: raw.irr,
+    capitalDeployed: raw.capitaldeployed,
+    purchasePrice: raw.purchaseprice,
+    transferTax: raw.transfertax,
+    lawyerFee: raw.lawyerfee,
+    notaryFee: raw.notaryfee,
+    totalAcquisition: raw.totalacquisition,
+    projectType: raw.projecttype,
+    surface: raw.surface,
+    duration: raw.duration,
+    baseBuildCost: raw.basebuildcost,
+    contingency: raw.contingency,
+    totalProjectCost: raw.totalprojectcost,
+    grossSalePrice: raw.grosssaleprice,
+    agentCommission: raw.agentcommission,
+    netProceeds: raw.netproceeds,
+    transferTaxPct: raw.transfertaxpct,
+lawyerFeePct: raw.lawyerfeepct,
+notaryFeePct: raw.notaryfeepct,
+agentCommissionPct: raw.agentcommissionpct,
+contingencyPct: raw.contingencypct,
+  } as Record<string, string>;
+}
+
+function Page({ children }: { children: ReactNode }) {
+  return (
+    <section className="mx-auto mb-8 min-h-[297mm] w-[210mm] bg-white px-[15mm] py-[14mm] shadow-sm print:mb-0 print:shadow-none">
+      {children}
+    </section>
+  );
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-1 border-b border-gray-200 pb-1 text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+      {children}
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  bold = false,
+  green = false,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  green?: boolean;
+}) {
+  return (
+    <div className="flex justify-between border-b border-gray-200 py-1.5 text-[13px]">
+      <span className={bold ? "font-semibold" : ""}>{label}</span>
+      <span className={`${bold ? "font-semibold" : ""} ${green ? "text-[#1f7a4d]" : ""}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Kpi({
+  label,
+  value,
+  sub,
+  green = false,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  green?: boolean;
+}) {
+  return (
+    <div className="border border-gray-300 px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gray-400">
+        {label}
+      </div>
+      <div className={`mt-1 text-[18px] font-bold leading-tight ${green ? "text-[#1f7a4d]" : "text-black"}`}>
+        {value}
+      </div>
+      {sub && <div className="mt-1 text-[10px] text-gray-400">{sub}</div>}
+    </div>
+  );
+}
+
+function SensitivityTable({
+  title,
+  assumption,
+  rows,
+}: {
+  title: string;
+  assumption: string;
+  rows: Record<string, string>[];
+}) {
+  return (
+    <div className="mt-7">
+      <SectionLabel>{title}</SectionLabel>
+
+      <div className="grid grid-cols-5 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
+        <div className="pl-2"></div>
+        <div>{assumption}</div>
+        <div className="text-right">Net Profit</div>
+        <div className="text-right">ROI</div>
+        <div className="text-right pr-2">IRR</div>
+      </div>
+
+      {rows.map((row, i) => (
+        <div key={i} className="grid grid-cols-5 border-b border-gray-200 py-1.5 text-[12px]">
+          <div className="pl-2 font-semibold">{row.case}</div>
+          <div>{money(row.assumption)}</div>
+          <div className="text-right text-[#1f7a4d]">{money(row.netprofit)}</div>
+          <div className="text-right text-[#1f7a4d]">{percent(row.roi)}</div>
+          <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.irr)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default async function Home({
+    params,
+  }: {
+    params: Promise<{ project: string }>;
+  }) {
+    const { project } = await params;
+    const projectConfig = PROJECTS[project as keyof typeof PROJECTS];
+  
+    if (!projectConfig) {
+      notFound();
+    }
+  
+    const data = await getReportData(projectConfig.reportData);
+  
+    const cashFlowRowsRaw = await getRows(projectConfig.cashFlow);
+
+  const cashFlowRows = cashFlowRowsRaw.filter((row) => {
+    const month = cleanText(row.month);
+    return month !== "" && !Number.isNaN(Number(month));
+  });
+
+  const cashFlowMetrics = Object.fromEntries(
+    cashFlowRowsRaw
+      .filter((row) => {
+        const month = cleanText(row.month);
+        return month && Number.isNaN(Number(month)) && month.toLowerCase() !== "metric";
+      })
+      .map((row) => [keyName(row.month), cleanText(row.event)])
+  );
+
+  const exitRows = await getRows(projectConfig.exitTimeline);
+  const purchaseRows = await getRows(projectConfig.purchaseSensitivity);
+  const saleRows = await getRows(projectConfig.saleSensitivity);
+  const projectCostRows = await getRows(projectConfig.projectCostSensitivity);
+
+  const netProfit = money(data.netProfit);
+  const roi = percent(data.roi);
+  const irr = percent(data.irr);
+
+  const grossSale = parseNumber(data.grossSalePrice) || 1;
+
+  const acquisitionPct =
+    ((parseNumber(data.totalAcquisition) || 0) / grossSale) * 100;
+  const projectPct =
+    ((parseNumber(data.totalProjectCost) || 0) / grossSale) * 100;
+  const commissionPct =
+    ((parseNumber(data.agentCommission) || 0) / grossSale) * 100;
+  const profitPct =
+    ((parseNumber(data.netProfit) || 0) / grossSale) * 100;
+
+  const cashMonth0 =
+    parseNumber(cashFlowMetrics.cashmonth0) ??
+    Math.abs(parseNumber(cashFlowRows[0]?.outflow) || 0);
+
+  const peakDeployed =
+    parseNumber(cashFlowMetrics.peakdeployed) ||
+    Math.max(...cashFlowRows.map((r) => parseNumber(r.runningcapital) || 0));
+
+  const cashByNotaryRow =
+    cashFlowRows.find((r) =>
+      cleanText(r.event).toLowerCase().includes("construction draw 1")
+    ) || cashFlowRows.find((r) => cleanText(r.month) === "12");
+
+  const cashByNotary =
+    parseNumber(cashFlowMetrics.cashbynotary) ||
+    parseNumber(cashByNotaryRow?.runningcapital) ||
+    0;
+
+  const cashByNotaryPct = peakDeployed
+    ? (cashByNotary / peakDeployed) * 100
+    : 0;
+
+  const avgCapitalDuration =
+    parseNumber(cashFlowMetrics.avgcapitalduration) || 0;
+
+  return (
+    <main className="bg-[#f4f3ef] py-8 font-sans text-[#1b1b1b] print:bg-white print:py-0">
+      
+      <style>{`
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  @media print {
+    html,
+    body {
+      width: 210mm;
+      height: 297mm;
+      margin: 0;
+      padding: 0;
+      background: white;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    main {
+      background: white !important;
+      padding: 0 !important;
+    }
+
+    section {
+      width: 210mm !important;
+      height: 297mm !important;
+      min-height: 297mm !important;
+      margin: 0 !important;
+      padding: 10mm 14mm !important;
+      box-shadow: none !important;
+      page-break-after: always;
+      overflow: hidden;
+    }
+  }
+`}</style>
+
+      <Page>
+        <header>
+          <h1 className="text-[29px] font-bold leading-none">
+            {data.projectTitle || "Investment Project"}
+          </h1>
+          <p className="mt-1 text-[12px] text-gray-400">
+            {data.subtitle || "Deal Analysis"}
+          </p>
+          <div className="mt-4 border-t-[3px] border-black" />
+        </header>
+
+        <div className="mt-6">
+          <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+            01 · Overview
+          </div>
+          <h2 className="mt-1 text-[22px] font-bold leading-none">Deal Metrics</h2>
+          <p className="mt-2 border-b border-gray-200 pb-3 text-[12px] text-gray-400">
+            Headline return metrics, cost structure, and exit timeline.
+          </p>
+        </div>
+
+        <div className="mt-5 grid grid-cols-4">
+          <Kpi label="Net Profit" value={netProfit} green />
+          <Kpi label="ROI" value={roi} green />
+          <Kpi label="IRR (48M Exit)" value={irr} green />
+          <Kpi label="Capital Deployed" value={money(data.capitalDeployed)} />
+        </div>
+
+        <div className="mt-6 grid grid-cols-2 gap-8">
+          <div>
+            <SectionLabel>Acquisition</SectionLabel>
+            <Row label="Purchase Price" value={money(data.purchasePrice)} />
+            <Row label={`Transfer Tax (${percent(data.transferTaxPct).replace("+", "")})`} value={money(data.transferTax)} />
+<Row label={`Lawyer Fee (${percent(data.lawyerFeePct).replace("+", "")})`} value={money(data.lawyerFee)} />
+<Row label={`Notary Fee (${percent(data.notaryFeePct).replace("+", "")})`} value={money(data.notaryFee)} />
+            <Row label="Total Acquisition" value={money(data.totalAcquisition)} bold />
+          </div>
+
+          <div>
+            <SectionLabel>Project</SectionLabel>
+            <Row label="Type" value={data.projectType || ""} bold />
+            <Row label="Surface" value={data.surface || ""} bold />
+            <Row label="Duration" value={data.duration || ""} bold />
+            <Row label="Base Build Cost" value={money(data.baseBuildCost)} bold />
+            <Row label={`Contingency (${percent(data.contingencyPct).replace("+", "")})`} value={money(data.contingency)} />
+            <Row label="Total Project Cost" value={money(data.totalProjectCost)} bold />
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <SectionLabel>Exit & Returns</SectionLabel>
+          <Row label="Gross Sale Price" value={money(data.grossSalePrice)} bold />
+          <Row label={`Agent Commission (${percent(data.agentCommissionPct).replace("+", "")})`} value={money(data.agentCommission)} />
+          <Row label="Net Proceeds" value={money(data.netProceeds)} bold />
+          <Row label="Net Profit / (Loss)" value={netProfit} bold green />
+        </div>
+
+        <div className="mt-6">
+          <div className="mb-2 flex justify-between">
+            <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+              Where the sale price goes
+            </div>
+            <div className="text-[10px] text-gray-400">
+              Gross sale {money(data.grossSalePrice)}
+            </div>
+          </div>
+
+          <div className="flex h-7 overflow-hidden rounded-sm text-center text-[10px] font-bold text-white">
+            <div className="bg-black pt-1.5" style={{ width: `${acquisitionPct}%` }}>
+              {acquisitionPct.toFixed(0)}%
+            </div>
+            <div className="bg-[#5e5a52] pt-1.5" style={{ width: `${projectPct}%` }}>
+              {projectPct.toFixed(0)}%
+            </div>
+            <div className="bg-[#aaa9a2]" style={{ width: `${commissionPct}%` }} />
+            <div className="bg-[#1f7a4d] pt-1.5" style={{ width: `${profitPct}%` }}>
+              {profitPct.toFixed(0)}%
+            </div>
+          </div>
+
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-gray-500">
+            <div>■ Acquisition&nbsp;&nbsp; {money(data.totalAcquisition)} · {acquisitionPct.toFixed(0)}%</div>
+            <div>■ Build / project&nbsp;&nbsp; {money(data.totalProjectCost)} · {projectPct.toFixed(0)}%</div>
+            <div>■ Commission&nbsp;&nbsp; {money(data.agentCommission)} · {commissionPct.toFixed(0)}%</div>
+            <div className="text-[#1f7a4d]">■ Net profit&nbsp;&nbsp; {netProfit} · {profitPct.toFixed(0)}%</div>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <SectionLabel>Returns by exit timeline</SectionLabel>
+
+          <div className="grid grid-cols-4 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500">
+            <div className="pl-2">Exit</div>
+            <div className="text-right pr-2">Net Profit</div>
+            <div className="text-right pr-2">ROI</div>
+            <div className="text-right pr-2">IRR (Ann.)</div>
+          </div>
+
+          {exitRows.map((row, i) => (
+            <div key={i} className="grid grid-cols-4 border-b border-gray-200 py-1.5 text-[12px]">
+              <div className="pl-2 font-semibold">{row.exit || row.month}</div>
+              <div className="text-right pr-2 text-[#1f7a4d]">{money(row.netprofit)}</div>
+              <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.roi)}</div>
+              <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.irr)}</div>
+            </div>
+          ))}
+        </div>
+      </Page>
+
+      <Page>
+        <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+          02 · Cash Plan
+        </div>
+        <h2 className="mt-1 text-[22px] font-bold leading-none">Capital Deployment Schedule</h2>
+        <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
+          Custom schedule · 8 tranches · 48 months to exit
+        </p>
+
+        <div className="mt-5 grid grid-cols-4">
+        <Kpi
+  label="Cash @ Month 0"
+  value={money(cashMonth0)}
+  sub={`${cashFlowMetrics.cashmonth0pct || "0"}% of total capital`}
+/>
+          <Kpi
+  label="Cash by Notary"
+  value={money(cashByNotary)}
+  sub={`By month ${cashFlowMetrics.cashbynotarymonth || "12"} · ${
+    cashFlowMetrics.cashbynotarypct || cashByNotaryPct.toFixed(1)
+  }% deployed`}
+/>
+<Kpi
+  label="Peak Deployed"
+  value={money(peakDeployed)}
+  sub={`Reached at month ${cashFlowMetrics.peakmonth || "36"}`}
+/>
+          <Kpi
+  label="Avg. Capital Duration"
+  value={`${
+    parseNumber(cashFlowMetrics.avgcapitalduration)?.toFixed(1) ||
+    avgCapitalDuration.toFixed(1)
+  }m`}
+  sub="Weighted by € × months"
+/>
+        </div>
+
+        <div className="mt-6">
+          <SectionLabel>Cash Flow Detail</SectionLabel>
+
+          <div className="grid grid-cols-5 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
+            <div className="pl-2">Month</div>
+            <div>Event</div>
+            <div className="text-right">Outflow</div>
+            <div className="text-right">Inflow</div>
+            <div className="text-right pr-2">Running Capital</div>
+          </div>
+
+          {cashFlowRows.map((row, index) => (
+            <div
+              key={index}
+              className={`grid grid-cols-5 border-b border-gray-200 py-1.5 text-[11px] ${
+                index === cashFlowRows.length - 1 ? "bg-[#eef6f0]" : ""
+              }`}
+            >
+              <div className="pl-2">{row.month}</div>
+              <div className="whitespace-nowrap font-semibold">{row.event}</div>
+              <div className="text-right pr-2 text-red-800">
+                {(parseNumber(row.outflow) || 0) === 0 ? "—" : money(row.outflow)}
+              </div>
+              <div className="text-right pr-2 text-[#1f7a4d] font-semibold">
+                {(parseNumber(row.inflow) || 0) === 0 ? "—" : money(row.inflow)}
+              </div>
+              <div className="text-right pr-2">{money(row.runningcapital)}</div>
+            </div>
+          ))}
+        </div>
+      </Page>
+
+      <Page>
+        <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+          03 · Sensitivity
+        </div>
+        <h2 className="mt-1 text-[22px] font-bold leading-none">Sensitivity Analysis</h2>
+        <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
+          Impact of key assumption variations, holding everything else constant.
+        </p>
+
+        <SensitivityTable title="Purchase Price Sensitivity" assumption="Purchase Price" rows={purchaseRows} />
+        <SensitivityTable title="Sale Price Sensitivity" assumption="Sale Price" rows={saleRows} />
+      </Page>
+
+      <Page>
+        <SensitivityTable title="Project Cost Sensitivity" assumption="Project Cost" rows={projectCostRows} />
+      </Page>
+
+      <Page>
+        <SectionLabel>Property Photos</SectionLabel>
+
+        <div className="mt-4 space-y-3">
+          <img src="/photos/photo1.jpg" alt="" className="h-[220px] w-full rounded object-cover" />
+
+          <div className="grid grid-cols-2 gap-3">
+            <img src="/photos/photo2.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
+            <img src="/photos/photo3.jpg" alt="" className="h-[160px] w-full rounded object-cover" />
+          </div>
+        </div>
+
+        <div className="mt-5 border-t border-gray-200 pt-2 text-[11px] text-gray-300">
+          15 June 2026 · Confidential — for internal use only
+        </div>
+      </Page>
+    </main>
+  );
+}

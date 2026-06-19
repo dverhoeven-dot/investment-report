@@ -1,0 +1,41 @@
+export const PROJECTS = {
+    "los-naranjos": {
+      reportData:
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=81309822&single=true&output=tsv",
+  
+      cashFlow:
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1281963356&single=true&output=csv",
+  
+      exitTimeline:
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1488394284&single=true&output=csv",
+  
+      purchaseSensitivity:
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1171110990&single=true&output=tsv",
+  
+      saleSensitivity:
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1161652721&single=true&output=tsv",
+  
+      projectCostSensitivity:
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vSSAh0SETpPSy_H-xXq-EQweLnUcvbEwoBqIp5QD9mFEquqLAceyabdeyo4sJEpGV3s4LjYDN6Z1lTA/pub?gid=1902577654&single=true&output=tsv",
+    },
+
+  "la-carolina": {
+  reportData:
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vTvDZDVHa7ABPeFS6i-AIa0qk1ZliqgEuBuTXaAuw6_dAdZGNjup1id6zoykerBewyXQW6RgGEjSuC2/pub?gid=81309822&single=true&output=csv",
+
+  cashFlow:
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vTvDZDVHa7ABPeFS6i-AIa0qk1ZliqgEuBuTXaAuw6_dAdZGNjup1id6zoykerBewyXQW6RgGEjSuC2/pub?gid=1281963356&single=true&output=csv",
+
+  exitTimeline:
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vTvDZDVHa7ABPeFS6i-AIa0qk1ZliqgEuBuTXaAuw6_dAdZGNjup1id6zoykerBewyXQW6RgGEjSuC2/pub?gid=1488394284&single=true&output=csv",
+
+  purchaseSensitivity:
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vTvDZDVHa7ABPeFS6i-AIa0qk1ZliqgEuBuTXaAuw6_dAdZGNjup1id6zoykerBewyXQW6RgGEjSuC2/pub?gid=1171110990&single=true&output=csv",
+
+  saleSensitivity:
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vTvDZDVHa7ABPeFS6i-AIa0qk1ZliqgEuBuTXaAuw6_dAdZGNjup1id6zoykerBewyXQW6RgGEjSuC2/pub?gid=1161652721&single=true&output=csv",
+
+  projectCostSensitivity:
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vTvDZDVHa7ABPeFS6i-AIa0qk1ZliqgEuBuTXaAuw6_dAdZGNjup1id6zoykerBewyXQW6RgGEjSuC2/pub?gid=1902577654&single=true&output=csv",
+},
+};
