@@ -478,8 +478,18 @@ export default async function Home() {
 
         <div className="mt-5 grid grid-cols-4">
           <Kpi label="Cash @ Month 0" value={money(cashMonth0)} sub="Initial reservation deposit" />
-          <Kpi label="Cash by Notary" value={money(cashByNotary)} sub={`By month 12 · ${cashByNotaryPct.toFixed(1)}% deployed`} />
-          <Kpi label="Peak Deployed" value={money(peakDeployed)} sub="Maximum capital deployed" />
+          <Kpi
+  label="Cash by Notary"
+  value={money(cashByNotary)}
+  sub={`By month ${cashFlowMetrics.cashbynotarymonth || "12"} · ${
+    cashFlowMetrics.cashbynotarypct || cashByNotaryPct.toFixed(1)
+  }% deployed`}
+/>
+<Kpi
+  label="Peak Deployed"
+  value={money(peakDeployed)}
+  sub={`Reached at month ${cashFlowMetrics.peakmonth || "36"}`}
+/>
           <Kpi
   label="Avg. Capital Duration"
   value={`${
