@@ -121,13 +121,13 @@ export default async function PortfolioPage() {
   const portfolioValue = totalSalesRevenue + expectedEndValue;
 
   return (
-    <main className="min-h-screen bg-[#f7f7f3] text-[#111] px-10 py-12">
+    <main className="min-h-screen bg-[#f7f7f3] text-[#111] px-4 sm:px-8 lg:px-10 py-8 lg:py-12">
       <section className="max-w-6xl mx-auto">
         <div className="border-b-4 border-black pb-6 mb-10">
           <p className="text-xs uppercase tracking-[0.35em] text-gray-500 font-bold">
             Confidential Portfolio Report
           </p>
-          <h1 className="text-5xl font-bold mt-3">
+          <h1 className="text-4xl lg:text-5xl font-bold mt-3">
             Spanish Real Estate Portfolio
           </h1>
           <p className="text-gray-500 mt-2">
@@ -140,14 +140,14 @@ export default async function PortfolioPage() {
         </p>
         <h2 className="text-3xl font-bold mt-2 mb-6">Portfolio Metrics</h2>
 
-        <div className="grid grid-cols-4 border border-gray-300 bg-white mb-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-gray-300 bg-white mb-10">
           <Kpi label="Portfolio Value" value={money(portfolioValue)} />
           <Kpi label="Expected Profit" value={money(expectedProfit)} green />
           <Kpi label="Sold Projects" value={String(sold.length)} />
           <Kpi label="Current Projects" value={String(current.length)} />
         </div>
 
-        <div className="grid grid-cols-3 gap-6 mb-14">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-14">
           <InfoCard label="Track Record Revenue" value={money(totalSalesRevenue)} />
           <InfoCard label="Realized Gross Profit" value={money(realizedGrossProfit)} green />
           <InfoCard label="Total Mortgages" value={money(totalMortgages)} />
@@ -158,7 +158,7 @@ export default async function PortfolioPage() {
         </p>
         <h2 className="text-3xl font-bold mt-2 mb-6">Value Creation Overview</h2>
 
-        <div className="grid grid-cols-2 gap-8 mb-14">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-14">
           <ChartCard title="Purchase Value vs End Value">
             {current.map((project) => {
               const name = clean(project.project);
@@ -246,7 +246,7 @@ export default async function PortfolioPage() {
                   <h3 className="text-3xl font-bold mt-2">{name}</h3>
                   <p className="text-gray-500 mt-2">{project.address}</p>
 
-                  <div className="grid grid-cols-3 gap-6 mt-8">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
                     <BigMetric label="Expected Exit Value" value={money(end)} dark />
                     <BigMetric label="Expected Profit" value={money(profit)} green />
                     {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} />}
@@ -296,7 +296,7 @@ export default async function PortfolioPage() {
         </p>
         <h2 className="text-3xl font-bold mt-2 mb-6">Realized Projects</h2>
 
-        <div className="grid grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {sold.map((project) => {
             const name = clean(project.project);
             const photos = getPhotos(name);
