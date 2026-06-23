@@ -13,12 +13,19 @@ export default function Home() {
           Los Naranjos Hill Club Project
         </a>
 
-        <a
-          href="/reports/la-carolina"
-          className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
-        >
-          La Carolina Project
-        </a>
+          <a
+            href="/reports/la-carolina"
+            className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
+          >
+            La Carolina Project
+          </a>
+
+          <a
+            href="/reports/new-project"
+            className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
+          >
+            New Project
+          </a>
       </div>
     </main>
   );
