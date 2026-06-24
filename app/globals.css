@@ -24,3 +24,46 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+@media print {
+  main > section > div:first-child {
+    padding-bottom: 12px !important;
+    margin-bottom: 18px !important;
+  }
+
+  main h1 {
+    font-size: 28px !important;
+  }
+
+  main h2 {
+    font-size: 20px !important;
+    margin-bottom: 10px !important;
+  }
+
+  main p {
+    margin-top: 4px !important;
+  }
+
+  main .mb-10 {
+    margin-bottom: 18px !important;
+  }
+
+  main .mb-14 {
+    margin-bottom: 20px !important;
+  }
+
+  main .mt-16 {
+    margin-top: 22px !important;
+  }
+
+  main .p-6 {
+    padding: 14px !important;
+  }
+
+  main .text-3xl {
+    font-size: 20px !important;
+  }
+
+  main .text-2xl {
+    font-size: 18px !important;
+  }
+}
