@@ -6,6 +6,15 @@ export const revalidate = 0;
 
 type CsvRow = Record<string, string>;
 
+const COLORS = {
+  ink: "#0E0E12",
+  ivory: "#FAF7EE",
+  travertine: "#E4D8C2",
+  brass: "#8C6F47",
+  pool: "#7FA8A4",
+  cypress: "#2B3A33",
+};
+
 function clean(value: unknown) {
   return String(value ?? "").replaceAll('"', "").replaceAll("\r", "").trim();
 }
@@ -29,7 +38,9 @@ function splitCsvLine(line: string) {
     else if (char === "," && !inQuotes) {
       result.push(clean(current));
       current = "";
-    } else current += char;
+    } else {
+      current += char;
+    }
   }
 
   result.push(clean(current));
@@ -59,12 +70,7 @@ function money(value: number) {
 }
 
 function hasValue(value: unknown) {
-  const cleaned = String(value ?? "")
-    .replaceAll('"', "")
-    .replaceAll("\r", "")
-    .replaceAll("\n", "")
-    .trim();
-
+  const cleaned = clean(value);
   return cleaned !== "" && cleaned !== "-" && cleaned !== "—";
 }
 
@@ -75,6 +81,16 @@ function getPhotos(name: string) {
         projectName.toLowerCase().trim() === name.toLowerCase().trim()
     )?.[1] || []
   );
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+
+  return chunks;
 }
 
 async function fetchCsv(url: string): Promise<CsvRow[]> {
@@ -90,205 +106,490 @@ async function fetchCsv(url: string): Promise<CsvRow[]> {
 }
 
 export default async function PortfolioPage() {
-  const sold = await fetchCsv(PORTFOLIO.soldProjects);
-  const current = await fetchCsv(PORTFOLIO.currentProjects);
-  const pipeline = await fetchCsv(PORTFOLIO.pipeline);
+  const sold = (await fetchCsv(PORTFOLIO.soldProjects)).filter((p) =>
+    hasValue(p.project)
+  );
 
-  const activeCurrent = current.filter((p) => hasValue(p.project));
-  const activeSold = sold.filter((p) => hasValue(p.project));
-  const activePipeline = pipeline.filter((p) => hasValue(p.project));
+  const current = (await fetchCsv(PORTFOLIO.currentProjects)).filter((p) =>
+    hasValue(p.project)
+  );
 
-  const totalSalesRevenue = activeSold.reduce(
+  const pipeline = (await fetchCsv(PORTFOLIO.pipeline)).filter((p) =>
+    hasValue(p.project)
+  );
+
+  const totalSalesRevenue = sold.reduce(
     (sum, p) => sum + parseNumber(p.saleprice),
     0
   );
 
-  const realizedGrossProfit = activeSold.reduce(
+  const realizedGrossProfit = sold.reduce(
     (sum, p) => sum + parseNumber(p.realizedgrossprofit),
     0
   );
 
-  const expectedEndValue = activeCurrent.reduce(
+  const expectedEndValue = current.reduce(
     (sum, p) => sum + parseNumber(p.expectedendvalue),
     0
   );
 
-  const totalMortgages = activeCurrent.reduce(
+  const totalMortgages = current.reduce(
     (sum, p) => sum + parseNumber(p.mortgage),
     0
   );
 
-  const expectedProfit = activeCurrent.reduce(
+  const expectedProfit = current.reduce(
     (sum, p) => sum + parseNumber(p.expectedgrossprofit),
     0
   );
 
   const portfolioValue = totalSalesRevenue + expectedEndValue;
-  const allocationMax = expectedEndValue || 1;
+
+  const allocationItems = current.map((project) => ({
+    name: clean(project.project),
+    value: parseNumber(project.expectedendvalue),
+  }));
+
+  const allocationLimit = 6;
+  const visibleAllocation =
+    allocationItems.length > allocationLimit
+      ? [
+          ...allocationItems.slice(0, allocationLimit - 1),
+          {
+            name: "Other",
+            value: allocationItems
+              .slice(allocationLimit - 1)
+              .reduce((sum, item) => sum + item.value, 0),
+          },
+        ]
+      : allocationItems;
+
+  const allocationColors = [
+    COLORS.cypress,
+    COLORS.pool,
+    COLORS.brass,
+    COLORS.travertine,
+    COLORS.ink,
+    "#B9A98C",
+  ];
+
+  let allocationCursor = 0;
+  const allocationGradient =
+    visibleAllocation
+      .map((item, index) => {
+        const share = expectedEndValue > 0 ? (item.value / expectedEndValue) * 100 : 0;
+        const start = allocationCursor;
+        allocationCursor += share;
+
+        return `${allocationColors[index % allocationColors.length]} ${start}% ${allocationCursor}%`;
+      })
+      .join(", ") || `${COLORS.travertine} 0% 100%`;
+
+  const currentPages = current;
+  const pipelinePages = chunkArray(pipeline, 2);
+  const soldPages = chunkArray(sold, 2);
 
   return (
-    <main className="min-h-screen bg-[#f7f7f3] text-[#111] px-4 sm:px-8 lg:px-10 py-8 lg:py-12">
-      <section className="max-w-6xl mx-auto">
-        <div className="overview-print">
-          <div className="border-b-4 border-black pb-6 mb-10">
-            <p className="text-xs uppercase tracking-[0.35em] text-gray-500 font-bold">
-              Confidential Portfolio Report
-            </p>
-            <h1 className="text-4xl lg:text-5xl font-bold mt-3">
-              Spanish Real Estate Portfolio
-            </h1>
-            <p className="text-gray-500 mt-2">
-              L3 Capital · Live Google Sheets data
-            </p>
+    <main className="min-h-screen bg-[#FAF7EE] text-[#0E0E12] overflow-x-auto">
+      <style>{`
+        @page {
+          size: A4 landscape;
+          margin: 0;
+        }
+
+        @media print {
+          html,
+          body {
+            width: 297mm !important;
+            min-height: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: ${COLORS.ivory} !important;
+          }
+
+          main {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: ${COLORS.ivory} !important;
+          }
+
+          .a4-page {
+            width: 297mm !important;
+            height: 210mm !important;
+            margin: 0 !important;
+            break-after: page;
+            page-break-after: always;
+            overflow: hidden !important;
+          }
+
+          .a4-page:last-child {
+            break-after: auto;
+            page-break-after: auto;
+          }
+
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            box-shadow: none !important;
+          }
+        }
+
+        @media screen {
+          .a4-page {
+            margin: 24px auto;
+            box-shadow: 0 20px 80px rgba(14,14,18,0.12);
+          }
+        }
+      `}</style>
+
+      <A4Page>
+        <Header />
+
+        <div className="grid grid-cols-[1fr_0.82fr] gap-[5mm] mt-[6mm]">
+          <div>
+            <SectionHeader number="01" label="Overview" title="Portfolio Metrics" />
+
+            <div className="grid grid-cols-4 gap-[2mm]">
+              <MetricCard label="Portfolio Value" value={money(portfolioValue)} />
+              <MetricCard label="Expected Profit" value={money(expectedProfit)} accent />
+              <MetricCard label="Sold Projects" value={String(sold.length)} />
+              <MetricCard label="Current Projects" value={String(current.length)} />
+            </div>
+
+            <div className="grid grid-cols-3 gap-[2mm] mt-[2mm]">
+              <MetricCard label="Track Record Revenue" value={money(totalSalesRevenue)} />
+              <MetricCard label="Realized Gross Profit" value={money(realizedGrossProfit)} accent />
+              <MetricCard label="Total Mortgages" value={money(totalMortgages)} />
+            </div>
+
+            <div className="mt-[6mm]">
+              <SectionHeader
+                number="03"
+                label="Portfolio Value Creation"
+                title="Value Creation Overview"
+              />
+
+              <div className="grid grid-cols-2 gap-[3mm]">
+                <ChartCard title="Purchase Value vs End Value">
+                  {current.slice(0, 6).map((project) => {
+                    const name = clean(project.project);
+                    const purchase = parseNumber(project.purchaseprice);
+                    const end = parseNumber(project.expectedendvalue);
+                    const max =
+                      Math.max(...current.map((p) => parseNumber(p.expectedendvalue))) || 1;
+
+                    return (
+                      <MiniBarGroup
+                        key={name}
+                        name={name}
+                        rows={[
+                          { label: "Purchase", value: purchase, max, color: COLORS.ink },
+                          { label: "End Value", value: end, max, color: COLORS.cypress },
+                        ]}
+                      />
+                    );
+                  })}
+                </ChartCard>
+
+                <ChartCard title="Expected Profit by Project">
+                  {current.slice(0, 6).map((project) => {
+                    const name = clean(project.project);
+                    const profit = parseNumber(project.expectedgrossprofit);
+                    const max =
+                      Math.max(...current.map((p) => parseNumber(p.expectedgrossprofit))) || 1;
+
+                    return (
+                      <MiniBarGroup
+                        key={name}
+                        name={name}
+                        rows={[
+                          { label: "Profit", value: profit, max, color: COLORS.pool },
+                        ]}
+                      />
+                    );
+                  })}
+                </ChartCard>
+              </div>
+            </div>
           </div>
 
-          <SectionHeader number="01" label="Overview" title="Portfolio Metrics" />
+          <div>
+            <SectionHeader
+              number="02"
+              label="Portfolio Allocation"
+              title="Allocation by Expected Exit Value"
+            />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-gray-300 bg-white mb-8">
-            <Kpi label="Portfolio Value" value={money(portfolioValue)} />
-            <Kpi label="Expected Profit" value={money(expectedProfit)} green />
-            <Kpi label="Sold Projects" value={String(activeSold.length)} />
-            <Kpi label="Current Projects" value={String(activeCurrent.length)} />
-          </div>
+            <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm] h-[118mm]">
+              <div
+                className="w-[58mm] h-[58mm] rounded-full relative mx-auto mt-[4mm]"
+                style={{ background: `conic-gradient(${allocationGradient})` }}
+              >
+                <div className="absolute inset-[16mm] rounded-full bg-white" />
+              </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-            <InfoCard label="Track Record Revenue" value={money(totalSalesRevenue)} />
-            <InfoCard label="Realized Gross Profit" value={money(realizedGrossProfit)} green />
-            <InfoCard label="Total Mortgages" value={money(totalMortgages)} />
-          </div>
+              <div className="mt-[8mm] space-y-[3mm]">
+                {visibleAllocation.map((item, index) => {
+                  const share =
+                    expectedEndValue > 0 ? (item.value / expectedEndValue) * 100 : 0;
 
-          <SectionHeader
-            number="02"
-            label="Portfolio Allocation"
-            title="Allocation by Expected Exit Value"
-          />
-
-          <div className="bg-white border border-gray-200 rounded-xl p-6 mb-12">
-            <div className="space-y-5">
-              {activeCurrent.map((project) => {
-                const name = clean(project.project);
-                const end = parseNumber(project.expectedendvalue);
-                const share = expectedEndValue > 0 ? (end / expectedEndValue) * 100 : 0;
-
-                return (
-                  <div key={name}>
-                    <div className="flex justify-between text-sm font-bold mb-2">
-                    <span>{name}</span>
-<span>{money(end)} · {share.toFixed(1)}%</span>
-</div>
-
-<div className="h-4 bg-gray-100 rounded-full overflow-hidden">
-  <div
-    className="h-full bg-[#147a4d]"
-    style={{ width: `${Math.max((end / allocationMax) * 100, 3)}%` }}
-  />
-</div>
-</div>
-);
-})}
-</div>
-</div>
-
-<SectionHeader
-  number="03"
-  label="Portfolio Value Creation"
-  title="Value Creation Overview"
-/>
-
-<div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-14">
-  <ChartCard title="Purchase Value vs End Value">
-    {activeCurrent.map((project) => {
-      const name = clean(project.project);
-      const purchase = parseNumber(project.purchaseprice);
-      const end = parseNumber(project.expectedendvalue);
-      const max =
-        Math.max(...activeCurrent.map((p) => parseNumber(p.expectedendvalue))) || 1;
-
-      return (
-        <div key={name} className="mb-5">
-          <div className="flex justify-between text-sm font-bold mb-2">
-            <span>{name}</span>
-            <span>{money(end)}</span>
-          </div>
-
-          <div className="space-y-2">
-            <Bar label="Purchase" value={purchase} max={max} color="bg-black" />
-            <Bar label="End Value" value={end} max={max} color="bg-[#147a4d]" />
+                  return (
+                    <div
+                      key={item.name}
+                      className="grid grid-cols-[10px_1fr_auto] gap-3 text-[11px]"
+                    >
+                      <span
+                        className="w-[9px] h-[9px] rounded-full mt-[3px]"
+                        style={{
+                          background: allocationColors[index % allocationColors.length],
+                        }}
+                      />
+                      <div>
+                        <p className="font-bold leading-tight">{item.name}</p>
+                        <p className="text-gray-500 mt-1">{money(item.value)}</p>
+                      </div>
+                      <p className="font-bold">{share.toFixed(1)}%</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
-      );
-    })}
-  </ChartCard>
 
-  <ChartCard title="Expected Profit by Project">
-    {activeCurrent.map((project) => {
-      const name = clean(project.project);
-      const profit = parseNumber(project.expectedgrossprofit);
-      const max =
-        Math.max(...activeCurrent.map((p) => parseNumber(p.expectedgrossprofit))) || 1;
+        <Footer />
+      </A4Page>
 
-      return (
-        <div key={name} className="mb-5">
-          <div className="flex justify-between text-sm font-bold mb-2">
-            <span>{name}</span>
-            <span className="text-[#147a4d]">{money(profit)}</span>
+      {currentPages.map((project, index) => (
+        <A4Page key={clean(project.project)}>
+          <ProjectDetailPage project={project} pageIndex={index + 1} totalPages={current.length} />
+          <Footer />
+        </A4Page>
+      ))}
+
+      {pipelinePages.map((projects, index) => (
+        <A4Page key={`pipeline-${index}`}>
+          <SectionHeader number="05" label="Pipeline" title="Future Opportunities" />
+
+          <div className="grid grid-cols-2 gap-[5mm] mt-[5mm]">
+            {projects.map((project) => (
+              <PipelineCard key={clean(project.project)} project={project} />
+            ))}
           </div>
 
-          <Bar label="Profit" value={profit} max={max} color="bg-[#147a4d]" />
+          <Footer />
+        </A4Page>
+      ))}
+
+      {soldPages.map((projects, index) => (
+        <A4Page key={`sold-${index}`}>
+          <SectionHeader number="06" label="Sold Track Record" title="Realized Projects" />
+
+          <div className="grid grid-cols-2 gap-[5mm] mt-[5mm]">
+            {projects.map((project) => (
+              <SoldProjectCard key={clean(project.project)} project={project} />
+            ))}
+          </div>
+
+          <Footer />
+        </A4Page>
+      ))}
+    </main>
+  );
+}
+
+function A4Page({ children }: { children: ReactNode }) {
+  return (
+    <section className="a4-page w-[297mm] h-[210mm] bg-[#FAF7EE] p-[9mm] overflow-hidden relative">
+      {children}
+    </section>
+  );
+}
+
+function Header() {
+  return (
+    <header className="flex justify-between items-start border-b border-[#E4D8C2] pb-[5mm]">
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.45em] text-[#2B3A33] font-bold">
+          Confidential Portfolio Report
+        </p>
+        <h1 className="text-[34px] leading-none font-bold text-[#2B3A33] mt-3">
+          Spanish Real Estate Portfolio
+        </h1>
+        <p className="text-[12px] mt-3">
+          Leovari <span className="mx-2">·</span> Live Google Sheets data
+        </p>
+      </div>
+
+      <div className="w-[34mm] h-[20mm] flex items-start justify-end">
+        <img
+          src="/leovari-logo.png"
+          alt="Leovari"
+          className="max-w-[34mm] max-h-[20mm] object-contain"
+        />
+      </div>
+    </header>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="absolute bottom-[6mm] left-[9mm] right-[9mm] flex justify-between text-[9px] text-gray-500 border-t border-[#E4D8C2] pt-[2mm]">
+      <span>Confidential · Not for distribution</span>
+      <span>All values in EUR</span>
+    </footer>
+  );
+}
+
+function SectionHeader({
+  number,
+  label,
+  title,
+}: {
+  number: string;
+  label: string;
+  title: string;
+}) {
+  return (
+    <>
+      <p className="text-[10px] uppercase tracking-[0.42em] text-[#2B3A33] font-bold">
+        {number} · {label}
+      </p>
+      <h2 className="text-[22px] font-bold mt-1">{title}</h2>
+    </>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="bg-white border border-[#E4D8C2] rounded-lg p-[4mm] h-[27mm]">
+      <p className="text-[7.5px] uppercase tracking-[0.25em] text-gray-500 font-bold leading-tight">
+        {label}
+      </p>
+      <p className={`text-[17px] font-bold mt-2 leading-none ${accent ? "text-[#2B3A33]" : ""}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ChartCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="bg-white border border-[#E4D8C2] rounded-xl p-[4mm] h-[61mm]">
+      <p className="text-[8px] uppercase tracking-[0.25em] text-gray-500 font-bold mb-3">
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function MiniBarGroup({
+  name,
+  rows,
+}: {
+  name: string;
+  rows: { label: string; value: number; max: number; color: string }[];
+}) {
+  return (
+    <div className="mb-[4mm]">
+      <p className="text-[10px] font-bold mb-2">{name}</p>
+
+      <div className="space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.label}>
+            <div className="flex justify-between text-[8px] text-gray-500 mb-1">
+              <span>{row.label}</span>
+              <span>{money(row.value)}</span>
+            </div>
+
+            <div className="h-[2.5mm] bg-[#FAF7EE] rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  background: row.color,
+                  width: `${Math.max((row.value / row.max) * 100, 3)}%`,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProjectDetailPage({
+  project,
+  pageIndex,
+  totalPages,
+}: {
+  project: CsvRow;
+  pageIndex: number;
+  totalPages: number;
+}) {
+  const name = clean(project.project);
+  const photos = getPhotos(name);
+
+  const purchase = parseNumber(project.purchaseprice);
+  const renovation = parseNumber(project.expectedrenovationcosts);
+  const end = parseNumber(project.expectedendvalue);
+  const profit = parseNumber(project.expectedgrossprofit);
+  const roi = parseNumber(project.expectedroi);
+
+  const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
+  const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
+  const bedrooms = clean(project.bedrooms);
+  const bathrooms = clean(project.bathrooms);
+  const targetCompletion = clean(project.targetcompletion);
+
+  return (
+    <>
+      <div className="flex justify-between items-end border-b border-[#E4D8C2] pb-[4mm]">
+        <div>
+          <SectionHeader number="04" label="Current Portfolio" title={name} />
+          <p className="text-[11px] text-gray-600 mt-2">{project.address}</p>
         </div>
-      );
-    })}
-  </ChartCard>
-</div>
-</div>
 
-<SectionHeader number="04" label="Current Portfolio" title="Active Projects" />
+        <p className="text-[10px] text-gray-500">
+          Project {pageIndex} of {totalPages}
+        </p>
+      </div>
 
-<div className="space-y-10">
-  {activeCurrent.map((project) => {
-    const name = clean(project.project);
-    const photos = getPhotos(name);
+      <div className="grid grid-cols-[1.05fr_0.95fr] gap-[6mm] mt-[5mm]">
+        <div>
+          {photos[0] ? (
+            <img
+              src={photos[0]}
+              alt={name}
+              className="w-full h-[98mm] object-cover rounded-xl border border-[#E4D8C2]"
+            />
+          ) : (
+            <div className="w-full h-[98mm] rounded-xl bg-[#E4D8C2] border border-[#E4D8C2]" />
+          )}
+        </div>
 
-    const purchase = parseNumber(project.purchaseprice);
-    const renovation = parseNumber(project.expectedrenovationcosts);
-    const end = parseNumber(project.expectedendvalue);
-    const profit = parseNumber(project.expectedgrossprofit);
-    const roi = parseNumber(project.expectedroi);
-
-    const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
-    const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
-    const bedrooms = clean(project.bedrooms);
-    const bathrooms = clean(project.bathrooms);
-    const targetCompletion = clean(project.targetcompletion);
-
-    return (
-      <section
-        key={name}
-        className="project-print-page bg-white border border-gray-200 rounded-xl overflow-hidden"
-      >
-        {photos[0] && (
-          <img src={photos[0]} alt={name} className="w-full h-[320px] object-cover" />
-        )}
-
-        <div className="p-8">
-          <p className="text-xs uppercase tracking-[0.35em] text-gray-400 font-bold">
-            Current Project
-          </p>
-          <h3 className="text-3xl font-bold mt-2">{name}</h3>
-          <p className="text-gray-500 mt-2">{project.address}</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+        <div>
+          <div className="grid grid-cols-3 gap-[3mm]">
             <BigMetric label="Expected Exit Value" value={money(end)} dark />
-            <BigMetric label="Expected Profit" value={money(profit)} green />
+            <BigMetric label="Expected Profit" value={money(profit)} pool />
             {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} />}
           </div>
 
-          <div className="mt-8 border border-gray-200 rounded-xl p-6">
-            <div className="text-xs uppercase tracking-[0.25em] text-gray-400 mb-5">
+          <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm] mt-[5mm]">
+            <p className="text-[9px] uppercase tracking-[0.25em] text-[#2B3A33] font-bold mb-[4mm]">
               Project Memorandum
-            </div>
+            </p>
 
-            <div className="grid md:grid-cols-2 gap-x-10 gap-y-3 text-sm">
+            <div className="grid grid-cols-2 gap-x-[8mm] gap-y-[2.5mm] text-[11px]">
               {hasValue(plotSize) && <Fact label="Plot Size" value={`${plotSize} m²`} />}
               <Fact label="Purchase" value={money(purchase)} />
 
@@ -301,354 +602,215 @@ export default async function PortfolioPage() {
               {hasValue(bathrooms) && <Fact label="Bathrooms" value={bathrooms} />}
               <Fact label="Expected Sales Value" value={money(end)} />
 
-              {hasValue(targetCompletion) && (
-                <Fact label="Completion" value={targetCompletion} />
-              )}
+              {hasValue(targetCompletion) && <Fact label="Completion" value={targetCompletion} />}
               <Fact label="Profit" value={money(profit)} green />
             </div>
           </div>
 
-          
-
-          <div className="mt-8 border-t pt-5">
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-400 font-bold">
-              Exit Strategy
-            </p>
-            <p className="mt-2">{project.exitstrategy}</p>
-          </div>
-        </div>
-      </section>
-    );
-  })}
-</div>
-
-<SectionHeader number="05" label="Pipeline" title="Future Opportunities" />
-
-<div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-14">
-  {activePipeline.map((project) => {
-    const name = clean(project.project);
-    const location = clean(project.location);
-    const status = clean(project.status);
-
-    const purchase = parseNumber(project.expectedpurchaseprice);
-    const renovation = parseNumber(project.expectedrenovationcosts);
-    const end = parseNumber(project.expectedendvalue);
-
-    const strategy = clean(project.expectedexitstrategy);
-    const notes = clean(project.notes);
-
-    const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
-    const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
-
-    const mapImage = clean(project.mapimage);
-    const badgeLabel = clean(project.badgelabel) || "Villa";
-
-    return (
-      <div
-        key={name}
-        className="grid lg:grid-cols-[420px_1fr] gap-8 p-6 border-b last:border-b-0"
-      >
-        <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-          {hasValue(mapImage) ? (
-            <img
-              src={mapImage}
-              alt={`${name} location map`}
-              className="w-full h-[230px] object-cover"
-            />
-          ) : (
-            <div className="w-full h-[230px] bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
-              Map image missing
-            </div>
-          )}
-
-          <div className="p-5">
-
-            <div className="grid grid-cols-[1fr_auto_auto] gap-5 items-start mt-3">
-              <div>
-                <h3 className="text-xl font-bold">{name}</h3>
-                {hasValue(location) && (
-                  <p className="text-gray-500 text-sm mt-1">{location}</p>
-                )}
-                
-              </div>
-
-              
-            </div>
-
-            {hasValue(badgeLabel) && (
-              <div className="mt-5">
-                <span className="inline-flex rounded-full bg-[#6b5845] px-4 py-2 text-xs font-bold uppercase text-white">
-                  {badgeLabel}
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid md:grid-cols-4 gap-6 content-start">
-          <div className="md:col-span-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-gray-400 font-bold">
-              Pipeline Project
-            </p>
-            <h3 className="text-2xl font-bold mt-3">{name}</h3>
-            {hasValue(location) && (
-              <p className="text-gray-600 mt-3 text-lg leading-relaxed">
-                {location}
+          {hasValue(project.exitstrategy) && (
+            <div className="border-t border-[#0E0E12] mt-[6mm] pt-[4mm]">
+              <p className="text-[9px] uppercase tracking-[0.25em] text-gray-500 font-bold">
+                Exit Strategy
               </p>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-gray-400">
-              Expected Cost
-            </p>
-            <p className="font-bold mt-2">{money(purchase + renovation)}</p>
-          </div>
-
-          <div>
-  <p className="text-xs uppercase tracking-[0.2em] text-gray-400">
-    Expected Exit
-  </p>
-  <p className="font-bold mt-2">
-    {end > 0 ? money(end) : "TBD"}
-  </p>
-</div>
-
-<div>
-  <p className="text-xs uppercase tracking-[0.2em] text-gray-400">
-    Plot Size
-  </p>
-  <p className="font-bold mt-2">
-    {plotSize ? `${plotSize} m²` : "-"}
-  </p>
-</div>
-
-{hasValue(builtArea) && (
-  <div>
-    <p className="text-xs uppercase tracking-[0.2em] text-gray-400">
-      Build area
-    </p>
-    <p className="font-bold mt-2">
-      {builtArea} m²
-    </p>
-  </div>
-)}
-
-          {(hasValue(strategy) || hasValue(notes)) && (
-            <div className="md:col-span-4 text-sm text-gray-600 pt-4 space-y-2">
-              {hasValue(strategy) && (
-                <p>
-                  <strong>Strategy:</strong> {strategy}
-                </p>
-              )}
-
-              {hasValue(notes) && (
-                <p>
-                  <strong>Status:</strong> {notes}
-                </p>
-              )}
+              <p className="text-[12px] mt-2">{project.exitstrategy}</p>
             </div>
           )}
         </div>
       </div>
-    );
-  })}
-</div>
+    </>
+  );
+}
 
-<SectionHeader number="06" label="Sold Track Record" title="Realized Projects" />
+function PipelineCard({ project }: { project: CsvRow }) {
+  const name = clean(project.project);
+  const location = clean(project.location);
+  const purchase = parseNumber(project.expectedpurchaseprice);
+  const renovation = parseNumber(project.expectedrenovationcosts);
+  const end = parseNumber(project.expectedendvalue);
+  const strategy = clean(project.expectedexitstrategy);
+  const status = clean(project.status || project.notes);
+  const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
+  const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
+  const mapImage = clean(project.mapimage);
+  const badgeLabel = clean(project.badgelabel) || "Project";
 
-<div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-  {activeSold.map((project) => {
-    const name = clean(project.project);
-    const photos = getPhotos(name);
+  return (
+    <div className="bg-white border border-[#E4D8C2] rounded-xl overflow-hidden h-[147mm]">
+      {hasValue(mapImage) ? (
+        <img
+          src={mapImage}
+          alt={`${name} location`}
+          className="w-full h-[55mm] object-cover"
+        />
+      ) : (
+        <div className="w-full h-[55mm] bg-[#E4D8C2] flex items-center justify-center text-[10px] text-gray-500">
+          Map / Location
+        </div>
+      )}
 
-    const purchase = parseNumber(project.purchaseprice);
-    const renovation = parseNumber(project.renovationcosts);
-    const sale = parseNumber(project.saleprice);
-    const profit = parseNumber(project.realizedgrossprofit);
-    const roi = parseNumber(project.roi);
-
-    const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
-    const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
-    const holdingPeriod = clean(project.holdingperiodmonths || project.holdingperiod);
-
-    return (
-      <section
-        key={name}
-        className="project-print-page bg-white border border-gray-200 rounded-xl overflow-hidden"
-      >
-        {photos[0] && (
-          <img src={photos[0]} alt={name} className="w-full h-[260px] object-cover" />
-        )}
-
-        <div className="p-7">
-          <p className="text-xs uppercase tracking-[0.3em] text-gray-400 font-bold">
-            Realized Project
-          </p>
-          <h3 className="text-3xl font-bold mt-2">{name}</h3>
-          <p className="text-gray-500 mt-2">{project.address}</p>
-
-          <div className="grid grid-cols-3 gap-4 mt-7">
-            <BigMetric label="Sale Price" value={money(sale)} dark small />
-            <BigMetric label="Profit" value={money(profit)} green small />
-            {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} small />}
+      <div className="p-[5mm]">
+        <div className="flex justify-between gap-[5mm]">
+          <div>
+            <p className="text-[9px] uppercase tracking-[0.28em] text-gray-400 font-bold">
+              Pipeline Project
+            </p>
+            <h3 className="text-[19px] font-bold mt-2">{name}</h3>
+            {hasValue(location) && (
+              <p className="text-[11px] text-gray-600 mt-2 leading-snug">{location}</p>
+            )}
           </div>
 
-          <div className="mt-7 border border-gray-200 rounded-xl p-6">
-            <div className="text-xs uppercase tracking-[0.25em] text-gray-400 mb-5">
-              Deal Summary
-            </div>
+          <span className="h-fit bg-[#8C6F47] text-white rounded-full px-4 py-2 text-[9px] uppercase font-bold">
+            {badgeLabel}
+          </span>
+        </div>
 
-            <div className="space-y-3 text-sm">
-              <Fact label="Purchase" value={money(purchase)} />
-              <Fact label="Renovation" value={money(renovation)} />
-              <Fact label="Total Investment" value={money(purchase + renovation)} />
-              <Fact label="Realized Profit" value={money(profit)} green />
-              {hasValue(plotSize) && <Fact label="Plot Size" value={`${plotSize} m²`} />}
-              {hasValue(builtArea) && <Fact label="Built Area" value={`${builtArea} m²`} />}
-              {hasValue(holdingPeriod) && (
-                <Fact label="Holding Period" value={`${holdingPeriod} months`} />
-              )}
-            </div>
+        <div className="grid grid-cols-4 gap-[3mm] mt-[6mm]">
+          <TinyMetric label="Expected Cost" value={money(purchase + renovation)} />
+          <TinyMetric label="Expected Exit" value={end > 0 ? money(end) : "TBD"} />
+          {hasValue(plotSize) && <TinyMetric label="Plot Size" value={`${plotSize} m²`} />}
+          {hasValue(builtArea) && <TinyMetric label="Built Area" value={`${builtArea} m²`} />}
+        </div>
+
+        <div className="text-[11px] mt-[6mm] space-y-2 leading-snug">
+          {hasValue(strategy) && (
+            <p>
+              <strong>Strategy:</strong> {strategy}
+            </p>
+          )}
+
+          {hasValue(status) && (
+            <p>
+              <strong>Status:</strong> {status}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SoldProjectCard({ project }: { project: CsvRow }) {
+  const name = clean(project.project);
+  const photos = getPhotos(name);
+
+  const purchase = parseNumber(project.purchaseprice);
+  const renovation = parseNumber(project.renovationcosts);
+  const sale = parseNumber(project.saleprice);
+  const profit = parseNumber(project.realizedgrossprofit);
+  const roi = parseNumber(project.roi);
+
+  const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
+  const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
+  const holdingPeriod = clean(project.holdingperiodmonths || project.holdingperiod);
+
+  return (
+    <div className="bg-white border border-[#E4D8C2] rounded-xl overflow-hidden h-[147mm]">
+      {photos[0] ? (
+        <img src={photos[0]} alt={name} className="w-full h-[53mm] object-cover" />
+      ) : (
+        <div className="w-full h-[53mm] bg-[#E4D8C2]" />
+      )}
+
+      <div className="p-[5mm]">
+        <p className="text-[9px] uppercase tracking-[0.28em] text-gray-400 font-bold">
+          Realized Project
+        </p>
+        <h3 className="text-[20px] font-bold mt-2">{name}</h3>
+        <p className="text-[11px] text-gray-600 mt-2 leading-snug h-[12mm] overflow-hidden">
+          {project.address}
+        </p>
+
+        <div className="grid grid-cols-3 gap-[3mm] mt-[5mm]">
+          <BigMetric label="Sale Price" value={money(sale)} dark small />
+          <BigMetric label="Profit" value={money(profit)} pool small />
+          {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} small />}
+        </div>
+
+        <div className="bg-white border border-[#E4D8C2] rounded-xl p-[4mm] mt-[5mm]">
+          <p className="text-[8px] uppercase tracking-[0.22em] text-[#2B3A33] font-bold mb-[3mm]">
+            Deal Summary
+          </p>
+
+          <div className="grid grid-cols-2 gap-x-[6mm] gap-y-[1.8mm] text-[10px]">
+            <Fact label="Purchase" value={money(purchase)} />
+            {hasValue(plotSize) && <Fact label="Plot Size" value={`${plotSize} m²`} />}
+
+            <Fact label="Renovation" value={money(renovation)} />
+            {hasValue(builtArea) && <Fact label="Built Area" value={`${builtArea} m²`} />}
+
+            <Fact label="Total Investment" value={money(purchase + renovation)} />
+            {hasValue(holdingPeriod) && <Fact label="Holding Period" value={holdingPeriod} />}
+
+            <Fact label="Realized Profit" value={money(profit)} green />
           </div>
         </div>
-      </section>
-    );
-  })}
-</div>
-</section>
-</main>
-);
-}
-
-function SectionHeader({
-number,
-label,
-title,
-}: {
-number: string;
-label: string;
-title: string;
-}) {
-return (
-<>
-<p className="text-xs uppercase tracking-[0.35em] text-gray-400 font-bold mt-16 first:mt-0">
-  {number} · {label}
-</p>
-<h2 className="text-3xl font-bold mt-2 mb-6">{title}</h2>
-</>
-);
-}
-
-function Kpi({ label, value, green = false }: { label: string; value: string; green?: boolean }) {
-return (
-<div className="p-6 border-r border-gray-200 last:border-r-0">
-<p className="text-xs uppercase tracking-[0.25em] text-gray-400 font-bold">{label}</p>
-<p className={`text-2xl font-bold mt-2 ${green ? "text-[#147a4d]" : ""}`}>{value}</p>
-</div>
-);
-}
-
-function InfoCard({ label, value, green = false }: { label: string; value: string; green?: boolean }) {
-return (
-<div className="bg-white border border-gray-200 rounded-xl p-6">
-<p className="text-xs uppercase tracking-[0.25em] text-gray-400 font-bold">{label}</p>
-<p className={`text-3xl font-bold mt-2 ${green ? "text-[#147a4d]" : ""}`}>{value}</p>
-</div>
-);
+      </div>
+    </div>
+  );
 }
 
 function BigMetric({
-label,
-value,
-dark = false,
-green = false,
-small = false,
+  label,
+  value,
+  dark = false,
+  pool = false,
+  small = false,
 }: {
-label: string;
-value: string;
-dark?: boolean;
-green?: boolean;
-small?: boolean;
+  label: string;
+  value: string;
+  dark?: boolean;
+  pool?: boolean;
+  small?: boolean;
 }) {
-return (
-<div
-className={`rounded-xl p-6 ${
-dark ? "bg-black text-white" : green ? "bg-[#7FA8A4] text-white" : "bg-gray-100"
-}`}
->
-<div className="text-xs uppercase tracking-[0.25em] opacity-70">{label}</div>
-<div className={`${small ? "text-xl" : "text-4xl"} font-bold mt-2 whitespace-nowrap`}>
-{value}
-</div>
-</div>
-);
+  return (
+    <div
+      className={`rounded-lg p-[4mm] ${
+        dark
+          ? "bg-[#0E0E12] text-white"
+          : pool
+          ? "bg-[#7FA8A4] text-white"
+          : "bg-[#FAF7EE]"
+      }`}
+    >
+      <p className="text-[7px] uppercase tracking-[0.2em] opacity-75 font-bold leading-tight">
+        {label}
+      </p>
+      <p className={`${small ? "text-[16px]" : "text-[24px]"} font-bold mt-2 leading-none`}>
+        {value}
+      </p>
+    </div>
+  );
 }
 
-function Fact({ label, value, green = false }: { label: string; value: string; green?: boolean }) {
-return (
-<div className={`grid grid-cols-[1fr_auto] gap-4 ${green ? "text-[#147a4d]" : ""}`}>
-<span>{label}</span>
-<strong>{value}</strong>
-</div>
-);
+function TinyMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[7px] uppercase tracking-[0.18em] text-gray-500 font-bold leading-tight">
+        {label}
+      </p>
+      <p className="text-[11px] font-bold mt-1">{value}</p>
+    </div>
+  );
 }
 
-function StackBar({
-purchase,
-renovation,
-profit,
+function Fact({
+  label,
+  value,
+  green = false,
 }: {
-purchase: number;
-renovation: number;
-profit: number;
+  label: string;
+  value: string;
+  green?: boolean;
 }) {
-const total = purchase + renovation + profit || 1;
-
-return (
-<div className="flex h-8 rounded-md overflow-hidden text-white text-xs font-bold">
-<div className="bg-black flex items-center justify-center" style={{ width: `${(purchase / total) * 100}%` }}>
-Purchase
-</div>
-<div className="bg-[#6a675e] flex items-center justify-center" style={{ width: `${(renovation / total) * 100}%` }}>
-Renovation
-</div>
-<div className="bg-[#147a4d] flex items-center justify-center" style={{ width: `${(profit / total) * 100}%` }}>
-Profit
-</div>
-</div>
-);
-}
-
-function ChartCard({ title, children }: { title: string; children: ReactNode }) {
-return (
-<div className="bg-white border border-gray-200 rounded-xl p-6">
-<p className="text-xs uppercase tracking-[0.25em] text-gray-400 font-bold mb-6">{title}</p>
-{children}
-</div>
-);
-}
-
-function Bar({
-label,
-value,
-max,
-color,
-}: {
-label: string;
-value: number;
-max: number;
-color: string;
-}) {
-return (
-<div>
-<div className="flex justify-between text-xs text-gray-500 mb-1">
-<span>{label}</span>
-<span>{money(value)}</span>
-</div>
-<div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-<div className={`h-full ${color}`} style={{ width: `${Math.max((value / max) * 100, 3)}%` }} />
-</div>
-</div>
-);
+  return (
+    <div
+      className={`grid grid-cols-[1fr_auto] gap-3 leading-tight ${
+        green ? "text-[#2B3A33]" : ""
+      }`}
+    >
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
