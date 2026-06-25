@@ -9,7 +9,7 @@ export default function LoginPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (code === "sleuthanger@2026") {
+    if (code === "sleutelhanger@2026") {
       document.cookie = "portfolio_access=true; path=/; max-age=2592000";
       window.location.href = "/portfolio";
     } else {
