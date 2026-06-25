@@ -11,7 +11,7 @@ export default function LoginPage() {
 
     if (code === "sleutelhanger@2026") {
       document.cookie = "portfolio_access=true; path=/; max-age=2592000";
-      window.location.href = "/portfolio";
+      window.location.href = "/";
     } else {
       setError("Incorrecte code");
     }
