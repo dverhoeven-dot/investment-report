@@ -45,7 +45,7 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          className="w-full mt-6 bg-[#27FA8A4] text-white rounded-xl py-3 font-bold"
+          className="w-full mt-6 bg-[#7FA8A4] text-white rounded-xl py-3 font-bold"
         >
           Open
         </button>
