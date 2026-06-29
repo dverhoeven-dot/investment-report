@@ -548,48 +548,125 @@ const hasProjectCostRows = projectCostRows.length > 0;
 
         <div className="mt-6">
         <div className="mt-6 rounded border border-gray-200 px-5 py-4">
-  <div className="mb-4 flex justify-between">
+  <div className="mb-3 flex justify-between">
     <SectionLabel>Capital Deployment</SectionLabel>
     <div className="text-[12px] text-gray-400">
       Peak <strong className="text-black">{money(peakDeployed)}</strong>
     </div>
   </div>
 
-  <div className="relative h-[180px]">
-    <svg viewBox="0 0 600 180" className="h-full w-full">
+  <div className="relative h-[190px]">
+    <svg viewBox="0 0 640 190" className="h-full w-full">
+      {[0, 12, 24, 36, 48].map((month) => {
+        const x = 30 + (month / 48) * 580;
+        return (
+          <line
+            key={month}
+            x1={x}
+            y1="18"
+            x2={x}
+            y2="150"
+            stroke="#e5e7eb"
+            strokeWidth="1"
+          />
+        );
+      })}
+
+      <defs>
+        <linearGradient id="deploymentFade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#111111" stopOpacity="0.16" />
+          <stop offset="100%" stopColor="#111111" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      <polygon
+        fill="url(#deploymentFade)"
+        points={`
+          ${cashFlowRows
+            .map((row) => {
+              const month = parseNumber(row.month) || 0;
+              const capital = Math.max(parseNumber(row.runningcapital) || 0, 0);
+              const x = 30 + (month / 48) * 580;
+              const y = 145 - (capital / peakDeployed) * 115;
+              return `${x},${y}`;
+            })
+            .join(" ")}
+          610,145 30,145
+        `}
+      />
+
       <polyline
         fill="none"
         stroke="#1b1b1b"
         strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         points={cashFlowRows
+          .filter((row) => (parseNumber(row.runningcapital) || 0) >= 0)
           .map((row) => {
             const month = parseNumber(row.month) || 0;
             const capital = parseNumber(row.runningcapital) || 0;
-            const x = (month / 48) * 560 + 20;
-            const y = 150 - (capital / peakDeployed) * 120;
+            const x = 30 + (month / 48) * 580;
+            const y = 145 - (capital / peakDeployed) * 115;
             return `${x},${y}`;
           })
           .join(" ")}
       />
 
-      {cashFlowRows.map((row, index) => {
-        const month = parseNumber(row.month) || 0;
-        const capital = parseNumber(row.runningcapital) || 0;
-        const x = (month / 48) * 560 + 20;
-        const y = 150 - (capital / peakDeployed) * 120;
+      {cashFlowRows
+        .filter((row) => (parseNumber(row.runningcapital) || 0) >= 0)
+        .map((row, index) => {
+          const month = parseNumber(row.month) || 0;
+          const capital = parseNumber(row.runningcapital) || 0;
+          const x = 30 + (month / 48) * 580;
+          const y = 145 - (capital / peakDeployed) * 115;
 
+          return (
+            <circle
+              key={index}
+              cx={x}
+              cy={y}
+              r="4"
+              fill="white"
+              stroke="#1b1b1b"
+              strokeWidth="2"
+            />
+          );
+        })}
+
+      {[0, 12, 24, 36, 48].map((month) => {
+        const x = 30 + (month / 48) * 580;
         return (
-          <circle
-            key={index}
-            cx={x}
-            cy={y}
-            r="4"
-            fill="white"
-            stroke="#1b1b1b"
-            strokeWidth="2"
-          />
+          <text
+            key={month}
+            x={x}
+            y="170"
+            textAnchor="middle"
+            className="fill-gray-400 text-[10px]"
+          >
+            m{month}
+          </text>
         );
       })}
+
+      <line
+        x1="610"
+        y1="18"
+        x2="610"
+        y2="150"
+        stroke="#1f7a4d"
+        strokeWidth="1.5"
+        strokeDasharray="4 4"
+      />
+
+      <text
+        x="610"
+        y="15"
+        textAnchor="end"
+        className="fill-[#1f7a4d] text-[10px] font-bold"
+      >
+        Exit
+      </text>
     </svg>
   </div>
 </div>
