@@ -394,7 +394,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
         <div className="mt-5 grid grid-cols-4">
           <Kpi label="Net Profit" value={netProfit} green />
           <Kpi label="ROI" value={roi} green />
-          <Kpi label="IRR (48M Exit)" value={irr} green />
+          <Kpi label={`IRR (${exitMonth}M Exit)`} value={irr} green />
           <Kpi label="Capital Deployed" value={money(data.capitalDeployed)} />
         </div>
 
@@ -518,7 +518,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
         </div>
         <h2 className="mt-1 text-[22px] font-bold leading-none">Capital Deployment Schedule</h2>
         <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
-          Custom schedule · 8 tranches · 48 months to exit
+        {`Custom schedule · ${cashFlowRows.length} tranches · ${exitMonth} months to exit`}
         </p>
 
         <div className="mt-5 grid grid-cols-4">
