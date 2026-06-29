@@ -604,16 +604,23 @@ const hasProjectCostRows = projectCostRows.length > 0;
         strokeWidth="3"
         strokeLinecap="round"
         strokeLinejoin="round"
-        points={cashFlowRows
-          .filter((row) => (parseNumber(row.runningcapital) || 0) >= 0)
-          .map((row) => {
-            const month = parseNumber(row.month) || 0;
-            const capital = parseNumber(row.runningcapital) || 0;
-            const x = 30 + (month / exitMonth) * 580;
+        points={[
+          ...cashFlowRows
+            .filter((row) => (parseNumber(row.runningcapital) || 0) >= 0)
+            .map((row) => {
+              const month = parseNumber(row.month) || 0;
+              const capital = parseNumber(row.runningcapital) || 0;
+              const x = 30 + (month / exitMonth) * 580;
+              const y = 145 - (capital / peakDeployed) * 115;
+              return `${x},${y}`;
+            }),
+          (() => {
+            const last = cashFlowRows[cashFlowRows.length - 1];
+            const capital = parseNumber(last.runningcapital) || 0;
             const y = 145 - (capital / peakDeployed) * 115;
-            return `${x},${y}`;
-          })
-          .join(" ")}
+            return `610,${y}`;
+          })(),
+        ].join(" ")}
       />
 
       {cashFlowRows
