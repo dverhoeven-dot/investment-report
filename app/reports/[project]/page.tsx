@@ -280,6 +280,9 @@ export default async function Home({
   const purchaseRows = await getRows(projectConfig.purchaseSensitivity);
   const saleRows = await getRows(projectConfig.saleSensitivity);
   const projectCostRows = await getRows(projectConfig.projectCostSensitivity);
+  const exitMonth =
+  parseNumber(data.duration) ||
+  Math.max(...cashFlowRows.map((row) => parseNumber(row.month) || 0));
   const hasPurchaseRows = purchaseRows.length > 0;
 const hasSaleRows = saleRows.length > 0;
 const hasProjectCostRows = projectCostRows.length > 0;
@@ -557,8 +560,8 @@ const hasProjectCostRows = projectCostRows.length > 0;
 
   <div className="relative h-[190px]">
     <svg viewBox="0 0 640 190" className="h-full w-full">
-      {[0, 12, 24, 36, 48].map((month) => {
-        const x = 30 + (month / 48) * 580;
+    {[0, exitMonth * 0.25, exitMonth * 0.5, exitMonth * 0.75, exitMonth].map((month) => {
+        const x = 30 + (month / exitMonth) * 580;
         return (
           <line
             key={month}
@@ -586,7 +589,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
             .map((row) => {
               const month = parseNumber(row.month) || 0;
               const capital = Math.max(parseNumber(row.runningcapital) || 0, 0);
-              const x = 30 + (month / 48) * 580;
+              const x = 30 + (month / exitMonth) * 580;
               const y = 145 - (capital / peakDeployed) * 115;
               return `${x},${y}`;
             })
@@ -606,7 +609,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
           .map((row) => {
             const month = parseNumber(row.month) || 0;
             const capital = parseNumber(row.runningcapital) || 0;
-            const x = 30 + (month / 48) * 580;
+            const x = 30 + (month / exitMonth) * 580;
             const y = 145 - (capital / peakDeployed) * 115;
             return `${x},${y}`;
           })
@@ -618,7 +621,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
         .map((row, index) => {
           const month = parseNumber(row.month) || 0;
           const capital = parseNumber(row.runningcapital) || 0;
-          const x = 30 + (month / 48) * 580;
+          const x = 30 + (month / exitMonth) * 580;
           const y = 145 - (capital / peakDeployed) * 115;
 
           return (
@@ -634,8 +637,8 @@ const hasProjectCostRows = projectCostRows.length > 0;
           );
         })}
 
-      {[0, 12, 24, 36, 48].map((month) => {
-        const x = 30 + (month / 48) * 580;
+{[0, exitMonth * 0.25, exitMonth * 0.5, exitMonth * 0.75, exitMonth].map((month) => {
+        const x = 30 + (month / exitMonth) * 580;
         return (
           <text
             key={month}
@@ -644,7 +647,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
             textAnchor="middle"
             className="fill-gray-400 text-[10px]"
           >
-            m{month}
+            m{Math.round(month)}
           </text>
         );
       })}
