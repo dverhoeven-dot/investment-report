@@ -432,9 +432,9 @@ const hasProjectCostRows = projectCostRows.length > 0;
 />
 
 <Row
-  label="Total Project Cost"bold
+  label="Total Project Cost"
   value={money(data.totalProjectCost)}
-  strong
+  bold
 />
           </div>
         </div>
