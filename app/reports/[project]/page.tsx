@@ -463,30 +463,55 @@ const hasProjectCostRows = projectCostRows.length > 0;
           </div>
         </div>
 
-        <div className="mt-6">
-          <SectionLabel>Returns by exit timeline</SectionLabel>
-
-          <div className="grid grid-cols-4 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500">
-            <div className="pl-2">Exit</div>
-            <div className="text-right pr-2">Net Profit</div>
-            <div className="text-right pr-2">ROI</div>
-            <div className="text-right pr-2">IRR (Ann.)</div>
-          </div>
-
-          {exitRows.map((row, i) => (
-            <div key={i} className="grid grid-cols-4 border-b border-gray-200 py-1.5 text-[12px]">
-              <div className="pl-2 font-semibold">{row.exit || row.month}</div>
-              <div className="text-right pr-2 text-[#1f7a4d]">{money(row.netprofit)}</div>
-              <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.roi)}</div>
-              <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.irr)}</div>
-            </div>
-          ))}
-        </div>
       </Page>
-
       <Page>
+  <div>
+    <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
+      02 · Exit Analysis
+    </div>
+
+    <h2 className="mt-1 text-[22px] font-bold leading-none">
+      Returns by Exit Timeline
+    </h2>
+
+    <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
+      Returns under different exit scenarios.
+    </p>
+  </div>
+
+  <div className="mt-6">
+    <SectionLabel>Returns by exit timeline</SectionLabel>
+
+    <div className="grid grid-cols-4 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500">
+      <div className="pl-2">Exit</div>
+      <div className="text-right pr-2">Net Profit</div>
+      <div className="text-right pr-2">ROI</div>
+      <div className="text-right pr-2">IRR (Ann.)</div>
+    </div>
+
+    {exitRows.map((row, i) => (
+      <div key={i} className="grid grid-cols-4 border-b border-gray-200 py-1.5 text-[12px]">
+        <div className="pl-2 font-semibold">{row.exit || row.month}</div>
+        <div className="text-right pr-2 text-[#1f7a4d]">{money(row.netprofit)}</div>
+        <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.roi)}</div>
+        <div className="text-right pr-2 text-[#1f7a4d]">{percent(row.irr)}</div>
+      </div>
+    ))}
+
+<p className="mt-4 text-[11px] text-gray-500 italic">
+    <strong>Note:</strong> The base case assumes a{" "}
+    <strong>{data.duration}</strong> development and exit period. Earlier exit
+    scenarios assume the completed asset is sold at the respective exit date.
+    Net Profit and ROI represent the full-deal returns, while IRR annualises
+    these returns over the shorter holding period.
+  </p>
+  
+  </div>
+</Page>
+      <Page>
+        
         <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
-          02 · Cash Plan
+          03 · Cash Plan
         </div>
         <h2 className="mt-1 text-[22px] font-bold leading-none">Capital Deployment Schedule</h2>
         <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
@@ -555,7 +580,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
 
       <Page>
         <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-gray-400">
-          03 · Sensitivity
+          04 · Sensitivity
         </div>
         <h2 className="mt-1 text-[22px] font-bold leading-none">Sensitivity Analysis</h2>
         <p className="mt-2 border-b border-gray-200 pb-4 text-[12px] text-gray-400">
