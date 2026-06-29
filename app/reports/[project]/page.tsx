@@ -142,6 +142,12 @@ lawyerFeePct: raw.lawyerfeepct,
 notaryFeePct: raw.notaryfeepct,
 agentCommissionPct: raw.agentcommissionpct,
 contingencyPct: raw.contingencypct,
+otherAcquisitionCosts: raw.otheracquisitioncosts,
+plot: raw.plot,
+furniture: raw.furniture,
+subtotal: raw.subtotal,
+projectManagement: raw.projectmanagement,
+projectManagementPct: raw.projectmanagementpct,
   } as Record<string, string>;
 }
 
@@ -274,6 +280,9 @@ export default async function Home({
   const purchaseRows = await getRows(projectConfig.purchaseSensitivity);
   const saleRows = await getRows(projectConfig.saleSensitivity);
   const projectCostRows = await getRows(projectConfig.projectCostSensitivity);
+  const hasPurchaseRows = purchaseRows.length > 0;
+const hasSaleRows = saleRows.length > 0;
+const hasProjectCostRows = projectCostRows.length > 0;
 
   const netProfit = money(data.netProfit);
   const roi = percent(data.roi);
@@ -351,6 +360,10 @@ export default async function Home({
       page-break-after: always;
       overflow: hidden;
     }
+      .break-inside-avoid-page {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
   }
 `}</style>
 
@@ -389,6 +402,7 @@ export default async function Home({
             <Row label={`Transfer Tax (${percent(data.transferTaxPct).replace("+", "")})`} value={money(data.transferTax)} />
 <Row label={`Lawyer Fee (${percent(data.lawyerFeePct).replace("+", "")})`} value={money(data.lawyerFee)} />
 <Row label={`Notary Fee (${percent(data.notaryFeePct).replace("+", "")})`} value={money(data.notaryFee)} />
+<Row label="Other Acquisition Costs" value={money(data.otherAcquisitionCosts)} />
             <Row label="Total Acquisition" value={money(data.totalAcquisition)} bold />
           </div>
 
@@ -396,10 +410,17 @@ export default async function Home({
             <SectionLabel>Project</SectionLabel>
             <Row label="Type" value={data.projectType || ""} bold />
             <Row label="Surface" value={data.surface || ""} bold />
+            <Row label="Plot" value={data.plot || ""} bold />
             <Row label="Duration" value={data.duration || ""} bold />
-            <Row label="Base Build Cost" value={money(data.baseBuildCost)} bold />
-            <Row label={`Contingency (${percent(data.contingencyPct).replace("+", "")})`} value={money(data.contingency)} />
-            <Row label="Total Project Cost" value={money(data.totalProjectCost)} bold />
+            <Row label="Base Build Cost" value={money(data.baseBuildCost)} />
+<Row label="Furniture" value={money(data.furniture)} />
+<Row label="Subtotal" value={money(data.subtotal)} bold />
+<Row
+  label={`Project Management (${percent(data.projectManagementPct).replace("+", "")})`}
+  value={money(data.projectManagement)}
+/>
+<Row label={`Contingency (${percent(data.contingencyPct).replace("+", "")})`} value={money(data.contingency)} />
+<Row label="Total Project Cost" value={money(data.totalProjectCost)} bold />
           </div>
         </div>
 
@@ -541,38 +562,55 @@ export default async function Home({
           Impact of key assumption variations, holding everything else constant.
         </p>
 
-        <SensitivityTable title="Purchase Price Sensitivity" assumption="Purchase Price" rows={purchaseRows} />
-        <SensitivityTable title="Sale Price Sensitivity" assumption="Sale Price" rows={saleRows} />
+        {hasPurchaseRows && (
+  <SensitivityTable
+    title="Purchase Price Sensitivity"
+    assumption="Purchase Price"
+    rows={purchaseRows}
+  />
+)}
+
+{hasSaleRows && (
+  <SensitivityTable
+    title="Sale Price Sensitivity"
+    assumption="Sale Price"
+    rows={saleRows}
+  />
+)}
       </Page>
 
       <Page>
-        <SensitivityTable title="Project Cost Sensitivity" assumption="Project Cost" rows={projectCostRows} />
+      {hasProjectCostRows && (
+  <SensitivityTable
+    title="Project Cost Sensitivity"
+    assumption="Project Cost"
+    rows={projectCostRows}
+  />
+)}
       </Page>
 
       <Page>
-        <SectionLabel>Property Photos</SectionLabel>
+  <SectionLabel>Property Photos</SectionLabel>
 
-        <div className="mt-4 space-y-3">
-  {projectConfig.photos?.[0] && (
-    <img
-      src={projectConfig.photos[0]}
-      alt=""
-      className="h-[220px] w-full rounded object-cover"
-    />
-  )}
-
-  <div className="grid grid-cols-3 gap-3">
-    {projectConfig.photos?.slice(1).map((photo, index) => (
-      <img
+  <div className="mt-4 space-y-4">
+    {projectConfig.photos?.map((photo, index) => (
+      <div
         key={index}
-        src={photo}
-        alt=""
-        className="h-[160px] w-full rounded object-cover"
-      />
+        className="break-inside-avoid-page"
+      >
+        <img
+          src={photo}
+          alt={`Property photo ${index + 1}`}
+          className="h-[265px] w-full rounded object-cover"
+        />
+      </div>
     ))}
   </div>
-</div>
-      </Page>
+
+  <div className="mt-5 border-t border-gray-200 pt-2 text-[11px] text-gray-300">
+    26 June 2026 · Confidential — for internal use only
+  </div>
+</Page>
     </main>
   );
 }

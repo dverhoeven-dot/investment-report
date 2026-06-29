@@ -263,55 +263,18 @@ export default async function PortfolioPage() {
             </div>
 
             <div className="mt-[6mm]">
-              <SectionHeader
-                number="03"
-                label="Portfolio Value Creation"
-                title="Value Creation Overview"
-              />
+  <SectionHeader
+    number="03"
+    label="Capital Stack"
+    title="Mortgage vs Equity"
+  />
 
-              <div className="grid grid-cols-2 gap-[3mm]">
-                <ChartCard title="Purchase Value vs End Value">
-                  {current.slice(0, 6).map((project) => {
-                    const name = clean(project.project);
-                    const purchase = parseNumber(project.purchaseprice);
-                    const end = parseNumber(project.expectedendvalue);
-                    const max =
-                      Math.max(...current.map((p) => parseNumber(p.expectedendvalue))) || 1;
-
-                    return (
-                      <MiniBarGroup
-                        key={name}
-                        name={name}
-                        rows={[
-                          { label: "Purchase", value: purchase, max, color: COLORS.ink },
-                          { label: "End Value", value: end, max, color: COLORS.cypress },
-                        ]}
-                      />
-                    );
-                  })}
-                </ChartCard>
-
-                <ChartCard title="Expected Profit by Project">
-                  {current.slice(0, 6).map((project) => {
-                    const name = clean(project.project);
-                    const profit = parseNumber(project.expectedgrossprofit);
-                    const max =
-                      Math.max(...current.map((p) => parseNumber(p.expectedgrossprofit))) || 1;
-
-                    return (
-                      <MiniBarGroup
-                        key={name}
-                        name={name}
-                        rows={[
-                          { label: "Profit", value: profit, max, color: COLORS.pool },
-                        ]}
-                      />
-                    );
-                  })}
-                </ChartCard>
-              </div>
-            </div>
-          </div>
+  <CapitalStackCard
+    expectedEndValue={expectedEndValue}
+    totalMortgages={totalMortgages}
+  />
+</div>
+</div>
 
           <div>
             <SectionHeader
@@ -369,7 +332,7 @@ export default async function PortfolioPage() {
 
       {pipelinePages.map((projects, index) => (
         <A4Page key={`pipeline-${index}`}>
-          <SectionHeader number="05" label="Pipeline" title="Future Opportunities" />
+          <SectionHeader number="05" label="Pipeline" title="Upcoming Projects" />
 
           <div className="grid grid-cols-2 gap-[5mm] mt-[5mm]">
             {projects.map((project) => (
@@ -480,6 +443,120 @@ function MetricCard({
     </div>
   );
 }
+function CapitalStackCard({
+  expectedEndValue,
+  totalMortgages,
+}: {
+  expectedEndValue: number;
+  totalMortgages: number;
+}) {
+  const netEquityValue = expectedEndValue - totalMortgages;
+
+  const mortgagePct =
+    expectedEndValue > 0 ? (totalMortgages / expectedEndValue) * 100 : 0;
+
+  const equityPct =
+    expectedEndValue > 0 ? (netEquityValue / expectedEndValue) * 100 : 0;
+
+  const mortgageBarPct = Math.min(Math.max(mortgagePct, 0), 100);
+  const equityBarPct = Math.min(Math.max(equityPct, 0), 100);
+
+  return (
+    <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm]">
+      <div className="flex items-start justify-between gap-[5mm]">
+      <div>
+  <p className="text-[10px] uppercase tracking-[0.25em] text-[#8C6F47] font-bold">
+    Net Equity in Portfolio
+  </p>
+  <p className="text-[22px] leading-none font-bold text-[#2B3A33] mt-[2mm]">
+    {money(netEquityValue)}
+  </p>
+  <p className="text-[10px] text-gray-500 mt-[1mm]">
+    Expected End Value - Mortgages
+  </p>
+</div>
+
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-[0.25em] text-gray-400 font-bold">
+            Portfolio LTV
+          </p>
+          <p className="text-[22px] leading-none font-bold text-[#8C6F47] mt-[2mm]">
+            {mortgagePct.toFixed(1)}%
+          </p>
+          <p className="text-[10px] text-gray-500 mt-[1mm]">
+            Mortgage / End Value
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-[6mm]">
+        <div className="flex justify-between text-[10px] font-bold mb-[2mm]">
+          <span className="text-[#8C6F47]">
+            Mortgage {mortgagePct.toFixed(1)}%
+          </span>
+          <span className="text-[#2B3A33]">
+            Equity {equityPct.toFixed(1)}%
+          </span>
+        </div>
+
+        <div className="h-[13mm] rounded-full overflow-hidden flex bg-[#E4D8C2]">
+          <div
+            className="h-full flex items-center justify-center text-[10px] font-bold text-white"
+            style={{
+              width: `${mortgageBarPct}%`,
+              backgroundColor: COLORS.brass,
+            }}
+          >
+            {mortgageBarPct >= 16 ? "Mortgage" : ""}
+          </div>
+
+          <div
+            className="h-full flex items-center justify-center text-[10px] font-bold text-white"
+            style={{
+              width: `${equityBarPct}%`,
+              backgroundColor: COLORS.cypress,
+            }}
+          >
+            {equityBarPct >= 16 ? "Equity" : ""}
+          </div>
+        </div>
+      </div>
+
+      
+    </div>
+  );
+}
+
+function CapitalMetric({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: "brass" | "cypress";
+}) {
+  const color =
+    accent === "brass"
+      ? COLORS.brass
+      : accent === "cypress"
+        ? COLORS.cypress
+        : COLORS.ink;
+
+  return (
+    <div className="bg-[#FAF7EE] border border-[#E4D8C2] rounded-lg p-[3mm]">
+      <p className="text-[8px] uppercase tracking-[0.16em] text-gray-400 font-bold leading-tight">
+        {label}
+      </p>
+      <p
+        className="text-[12px] leading-tight font-bold mt-[2mm]"
+        style={{ color }}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
 
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -583,6 +660,17 @@ function ProjectDetailPage({
             <BigMetric label="Expected Profit" value={money(profit)} pool />
             {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} />}
           </div>
+          <div className="mt-[5mm]">
+  <p className="text-[10px] uppercase tracking-[0.28em] text-[#8C6F47] font-bold mb-[2mm]">
+    Value Creation
+  </p>
+
+  <StackBar
+    purchase={purchase}
+    renovation={renovation}
+    profit={profit}
+  />
+</div>
 
           <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm] mt-[5mm]">
             <p className="text-[9px] uppercase tracking-[0.25em] text-[#2B3A33] font-bold mb-[4mm]">
@@ -749,7 +837,74 @@ function SoldProjectCard({ project }: { project: CsvRow }) {
     </div>
   );
 }
+function StackBar({
+  purchase,
+  renovation,
+  profit,
+}: {
+  purchase: number;
+  renovation: number;
+  profit: number;
+}) {
+  const total = purchase + renovation + profit;
 
+  const segments = [
+    {
+      label: "Purchase",
+      value: purchase,
+      color: COLORS.cypress,
+    },
+    {
+      label: "Renovation",
+      value: renovation,
+      color: COLORS.brass,
+    },
+    {
+      label: "Profit",
+      value: profit,
+      color: COLORS.pool,
+    },
+  ].filter((segment) => segment.value > 0);
+
+  if (total <= 0) return null;
+
+  return (
+    <div className="bg-white border border-[#E4D8C2] rounded-xl p-[4mm]">
+      <div className="h-[10mm] rounded-full overflow-hidden flex bg-[#E4D8C2]">
+        {segments.map((segment) => (
+          <div
+            key={segment.label}
+            className="h-full"
+            style={{
+              width: `${(segment.value / total) * 100}%`,
+              backgroundColor: segment.color,
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 gap-[2mm] mt-[4mm]">
+        {segments.map((segment) => (
+          <div key={segment.label} className="flex items-start gap-2">
+            <span
+              className="w-[8px] h-[8px] rounded-full mt-[3px] shrink-0"
+              style={{ backgroundColor: segment.color }}
+            />
+
+            <div>
+              <p className="text-[9px] uppercase tracking-[0.18em] text-gray-400 font-bold">
+                {segment.label}
+              </p>
+              <p className="text-[12px] font-bold text-[#0E0E12] mt-1">
+                {money(segment.value)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function BigMetric({
   label,
   value,
