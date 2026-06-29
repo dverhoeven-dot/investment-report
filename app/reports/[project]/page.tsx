@@ -416,14 +416,26 @@ const hasProjectCostRows = projectCostRows.length > 0;
             <Row label="Plot" value={data.plot || ""} bold />
             <Row label="Duration" value={data.duration || ""} bold />
             <Row label="Base Build Cost" value={money(data.baseBuildCost)} />
-<Row label="Furniture" value={money(data.furniture)} />
-<Row label="Subtotal" value={money(data.subtotal)} bold />
+
 <Row
-  label={`Project Management (${percent(data.projectManagementPct).replace("+", "")})`}
+  label={`Contingency (${((parseNumber(data.contingencyPct) || 0) * 100).toFixed(1)}%)`}
+  value={money(data.contingency)}
+/>
+
+<Row label="Furniture" value={money(data.furniture)} />
+
+<Row label="Subtotal" value={money(data.subtotal)} bold/>
+
+<Row
+  label={`Project Management (${((parseNumber(data.projectManagementPct) || 0) * 100).toFixed(1)}%)`}
   value={money(data.projectManagement)}
 />
-<Row label={`Contingency (${percent(data.contingencyPct).replace("+", "")})`} value={money(data.contingency)} />
-<Row label="Total Project Cost" value={money(data.totalProjectCost)} bold />
+
+<Row
+  label="Total Project Cost"bold
+  value={money(data.totalProjectCost)}
+  strong
+/>
           </div>
         </div>
 
