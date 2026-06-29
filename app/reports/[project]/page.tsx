@@ -505,7 +505,7 @@ const hasProjectCostRows = projectCostRows.length > 0;
     Net Profit and ROI represent the full-deal returns, while IRR annualises
     these returns over the shorter holding period.
   </p>
-  
+
   </div>
 </Page>
       <Page>
@@ -547,6 +547,52 @@ const hasProjectCostRows = projectCostRows.length > 0;
         </div>
 
         <div className="mt-6">
+        <div className="mt-6 rounded border border-gray-200 px-5 py-4">
+  <div className="mb-4 flex justify-between">
+    <SectionLabel>Capital Deployment</SectionLabel>
+    <div className="text-[12px] text-gray-400">
+      Peak <strong className="text-black">{money(peakDeployed)}</strong>
+    </div>
+  </div>
+
+  <div className="relative h-[180px]">
+    <svg viewBox="0 0 600 180" className="h-full w-full">
+      <polyline
+        fill="none"
+        stroke="#1b1b1b"
+        strokeWidth="3"
+        points={cashFlowRows
+          .map((row) => {
+            const month = parseNumber(row.month) || 0;
+            const capital = parseNumber(row.runningcapital) || 0;
+            const x = (month / 48) * 560 + 20;
+            const y = 150 - (capital / peakDeployed) * 120;
+            return `${x},${y}`;
+          })
+          .join(" ")}
+      />
+
+      {cashFlowRows.map((row, index) => {
+        const month = parseNumber(row.month) || 0;
+        const capital = parseNumber(row.runningcapital) || 0;
+        const x = (month / 48) * 560 + 20;
+        const y = 150 - (capital / peakDeployed) * 120;
+
+        return (
+          <circle
+            key={index}
+            cx={x}
+            cy={y}
+            r="4"
+            fill="white"
+            stroke="#1b1b1b"
+            strokeWidth="2"
+          />
+        );
+      })}
+    </svg>
+  </div>
+</div>
           <SectionLabel>Cash Flow Detail</SectionLabel>
 
           <div className="grid grid-cols-5 border-y border-gray-200 bg-gray-100 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
