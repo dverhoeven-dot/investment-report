@@ -40,5 +40,8 @@ export const PORTFOLIO = {
         "/portfolio-photos/calderon/photo2.jpg",
         "/portfolio-photos/calderon/photo3.jpg",
       ],
+      "Lomas Rio Verde": [
+  "/portfolio-photos/lomas-rio-verde/photo1.jpg",
+],
     },
   };

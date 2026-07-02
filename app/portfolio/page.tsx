@@ -143,7 +143,7 @@ export default async function PortfolioPage() {
     0
   );
 
-  const portfolioValue = totalSalesRevenue + expectedEndValue;
+  const portfolioValue = expectedEndValue;
 
   const allocationItems = current.map((project) => ({
     name: clean(project.project),
@@ -364,6 +364,12 @@ export default async function PortfolioPage() {
 function A4Page({ children }: { children: ReactNode }) {
   return (
     <section className="a4-page w-[297mm] h-[210mm] bg-[#FAF7EE] p-[9mm] overflow-hidden relative">
+      <img
+        src="/leovari-logo.png"
+        alt="Leovari"
+        className="absolute top-[7mm] right-[9mm] w-[26mm] h-auto object-contain z-20"
+      />
+
       {children}
     </section>
   );
@@ -382,14 +388,6 @@ function Header() {
         <p className="text-[12px] mt-3">
           Leovari <span className="mx-2">·</span> Live Google Sheets data
         </p>
-      </div>
-
-      <div className="w-[34mm] h-[20mm] flex items-start justify-end">
-        <img
-          src="/leovari-logo.png"
-          alt="Leovari"
-          className="max-w-[34mm] max-h-[20mm] object-contain"
-        />
       </div>
     </header>
   );
@@ -504,7 +502,7 @@ function CapitalStackCard({
             className="h-full flex items-center justify-center text-[10px] font-bold text-white"
             style={{
               width: `${mortgageBarPct}%`,
-              backgroundColor: COLORS.brass,
+              backgroundColor: COLORS.cypress,
             }}
           >
             {mortgageBarPct >= 16 ? "Mortgage" : ""}
@@ -514,7 +512,7 @@ function CapitalStackCard({
             className="h-full flex items-center justify-center text-[10px] font-bold text-white"
             style={{
               width: `${equityBarPct}%`,
-              backgroundColor: COLORS.cypress,
+              backgroundColor: COLORS.pool,
             }}
           >
             {equityBarPct >= 16 ? "Equity" : ""}
@@ -658,7 +656,7 @@ function ProjectDetailPage({
           <div className="grid grid-cols-3 gap-[3mm]">
             <BigMetric label="Expected Exit Value" value={money(end)} dark />
             <BigMetric label="Expected Profit" value={money(profit)} pool />
-            {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} />}
+            {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} travertine />}
           </div>
           <div className="mt-[5mm]">
   <p className="text-[10px] uppercase tracking-[0.28em] text-[#8C6F47] font-bold mb-[2mm]">
@@ -910,12 +908,14 @@ function BigMetric({
   value,
   dark = false,
   pool = false,
+  travertine = false,
   small = false,
 }: {
   label: string;
   value: string;
   dark?: boolean;
   pool?: boolean;
+  travertine?: boolean;
   small?: boolean;
 }) {
   return (
