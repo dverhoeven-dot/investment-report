@@ -29,11 +29,11 @@ export default function Home() {
   </a>
 
   <a
-    href="/reports/new-project"
-    className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
-  >
-    New Project
-  </a>
+  href="/investor-leaflet"
+  className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
+>
+  Investor Leaflet
+</a>
 
 </div>
     </main>
