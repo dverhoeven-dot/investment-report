@@ -11,8 +11,14 @@ export default function Home() {
     href="/portfolio"
     className="block rounded-lg border bg-black text-white p-4 shadow-sm hover:opacity-90"
   >
-    Portfolio
+    Spanish Portfolio
   </a>
+  <a
+  href="/nederlandse-portfolio"
+  className="block rounded-lg border bg-black text-white p-4 shadow-sm hover:opacity-90"
+>
+  Nederlandse Portfeuille
+</a>
 
   <a
     href="/reports/los-naranjos"
@@ -29,12 +35,18 @@ export default function Home() {
   </a>
 
   <a
-  href="/investor-leaflet"
+  href="/investor-residentieel"
   className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
 >
-  Investor Leaflet
+  Investeerder Residentieel Vastgoed
 </a>
 
+<a
+  href="/investor-bedrijfsmatig"
+  className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
+>
+  Investeerder Bedrijfsmatig Vastgoed
+</a>
 </div>
     </main>
   );
