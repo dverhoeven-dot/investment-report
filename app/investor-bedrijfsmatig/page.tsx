@@ -33,6 +33,15 @@ type ReportData = {
   vermogensbelastingbasis: string;
   vermogensbelastingPerJaar: MaybeNumber;
 
+  box3WozPercentage: MaybeNumber;
+  box3WozBedrag: MaybeNumber;
+
+  box3FinancieringPercentage: MaybeNumber;
+  box3FinancieringBedrag: MaybeNumber;
+
+  box3Grondslag: MaybeNumber;
+  box3BelastingPercentage: MaybeNumber;
+
   exploitatiekostenTotaal: MaybeNumber;
   exploitatiekostenPercentage: MaybeNumber;
 
@@ -79,6 +88,7 @@ const euroValue = (value: MaybeNumber) => {
 
 const costEuroValue = (value: MaybeNumber) => {
   if (value === null || Number.isNaN(value)) return "—";
+  if (Math.abs(value) < 0.005) return euro(0);
   return `- ${euro(Math.abs(value))}`;
 };
 
@@ -106,8 +116,8 @@ function toNumber(value: MaybeNumber) {
   return value ?? 0;
 }
 
-function normalizeLabel(value: string) {
-  return value
+function normalizeLabel(value: unknown) {
+  return String(value ?? "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -170,12 +180,11 @@ function parseNumber(value: unknown): MaybeNumber {
     (original.includes("(") && original.includes(")"));
 
   let cleaned = original
-    .replace("€", "")
-    .replace("%", "")
-    .replace(/\s/g, "")
-    .replace(/\u00A0/g, "")
-    .replace(/[()]/g, "")
-    .replace(/[-−–—]/g, "");
+    .replace(/[^\d,.\-−–—]/g, "")
+    .replace(/[−–—]/g, "-")
+    .replace(/-/g, "");
+
+  if (!cleaned) return null;
 
   if (cleaned.includes(".") && cleaned.includes(",")) {
     cleaned = cleaned.replace(/\./g, "").replace(",", ".");
@@ -195,68 +204,124 @@ function parsePercent(value: unknown): MaybeNumber {
   const raw = parseNumber(value);
 
   if (raw === null) return null;
-
   if (Math.abs(raw) > 1) return raw / 100;
 
   return raw;
+}
+
+function getCellAfterLabel(row: string[]) {
+  const first = row[1] ?? "";
+  const second = row[2] ?? "";
+
+  const firstValue = String(first).trim();
+  const secondValue = String(second).trim();
+
+  if (
+    firstValue &&
+    /^\d+$/.test(firstValue) &&
+    /^\d+%?$/.test(secondValue)
+  ) {
+    return `${firstValue},${secondValue.replace("%", "")}%`;
+  }
+
+  return firstValue;
 }
 
 function findValue(rows: string[][], labels: string[]) {
   const normalizedLabels = labels.map(normalizeLabel);
 
   for (const row of rows) {
-    for (let columnIndex = 0; columnIndex < row.length; columnIndex++) {
-      const cellLabel = normalizeLabel(row[columnIndex] ?? "");
+    const label = normalizeLabel(row[0] ?? "");
 
-      if (normalizedLabels.includes(cellLabel)) {
-        const cellsAfterLabel = row.slice(columnIndex + 1);
-
-        const firstFilledValue = cellsAfterLabel.find((cell) => {
-          const value = String(cell ?? "").trim();
-
-          if (!value) return false;
-          if (value === "€") return false;
-          if (value === "%") return false;
-          if (value.toLowerCase() === "keuze") return false;
-
-          return true;
-        });
-
-        return firstFilledValue ?? "";
-      }
+    if (normalizedLabels.includes(label)) {
+      return getCellAfterLabel(row);
     }
   }
 
   return "";
 }
 
+function findLastValue(rows: string[][], labels: string[]) {
+  const normalizedLabels = labels.map(normalizeLabel);
+
+  for (const row of [...rows].reverse()) {
+    const label = normalizeLabel(row[0] ?? "");
+
+    if (normalizedLabels.includes(label)) {
+      return getCellAfterLabel(row);
+    }
+  }
+
+  return "";
+}
+
+function findRow(rows: string[][], labels: string[]) {
+  const normalizedLabels = labels.map(normalizeLabel);
+
+  return (
+    rows.find((row) => {
+      const label = normalizeLabel(row[0] ?? "");
+      return normalizedLabels.includes(label);
+    }) ?? null
+  );
+}
+
+function findLastRow(rows: string[][], labels: string[]) {
+  const normalizedLabels = labels.map(normalizeLabel);
+
+  return (
+    [...rows].reverse().find((row) => {
+      const label = normalizeLabel(row[0] ?? "");
+      return normalizedLabels.includes(label);
+    }) ?? null
+  );
+}
+
 function readNumber(rows: string[][], labels: string[]) {
   return parseNumber(findValue(rows, labels));
+}
+
+function readLastNumber(rows: string[][], labels: string[]) {
+  return parseNumber(findLastValue(rows, labels));
 }
 
 function readPercent(rows: string[][], labels: string[]) {
   return parsePercent(findValue(rows, labels));
 }
 
+function readLastPercent(rows: string[][], labels: string[]) {
+  return parsePercent(findLastValue(rows, labels));
+}
+
 function readText(rows: string[][], labels: string[], fallback = "") {
   const value = findValue(rows, labels);
-  return value || fallback;
+
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+
+  return String(value);
 }
 
 function normalizeImagePath(value: string) {
-  const cleaned = value.trim().replace(/\\/g, "/");
+  let cleaned = value.trim().replace(/\\/g, "/");
 
   if (!cleaned) return DEFAULT_PHOTO;
+
+  cleaned = cleaned
+    .replace(/^public\//i, "")
+    .replace(/^photos:\s*/i, "")
+    .replace(/^foto:\s*/i, "");
 
   if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
     return cleaned;
   }
 
-  if (cleaned.startsWith("/")) {
-    return encodeURI(cleaned);
+  if (!cleaned.startsWith("/")) {
+    cleaned = `/${cleaned}`;
   }
 
-  return encodeURI(`/${cleaned}`);
+  return encodeURI(cleaned);
 }
 
 function addCacheBust(url: string) {
@@ -406,12 +471,9 @@ async function readReportData(): Promise<ReportData> {
     "Rente",
   ]);
 
-  const vermogensbelastingPercentage = readPercent(inputRows, [
-    "Vermogensbelastingpercentage",
-  ]);
-
-  const vermogensbelastingbasis = readText(inputRows, [
+  const vermogensbelastingbasisTekst = readText(inputRows, [
     "Vermogensbelastingbasis",
+    "Vermogensbelasting basis",
   ]);
 
   const gemiddeldeWaardestijging = readPercent(inputRows, [
@@ -419,8 +481,7 @@ async function readReportData(): Promise<ReportData> {
     "Gemiddelde waardestijging",
   ]);
 
-  const huurPerJaar =
-    huurPerMaand !== null ? huurPerMaand * 12 : null;
+  const huurPerJaar = huurPerMaand !== null ? huurPerMaand * 12 : null;
 
   const brutoRendementMarktwaarde =
     huurPerJaar !== null &&
@@ -459,27 +520,89 @@ async function readReportData(): Promise<ReportData> {
       ? exploitatiekostenTotaal / huurPerJaar
       : parsedCosts.totalPercent;
 
-  const normalizedBasis = normalizeLabel(vermogensbelastingbasis);
+  const oldBox3WozRow = findLastRow(inputRows, [
+    "Woz waarde",
+    "WOZ waarde",
+    "WOZ-waarde",
+  ]);
 
-  let vermogensbelastingGrondslag: MaybeNumber = null;
+  const oldBox3FinancieringRow = findLastRow(inputRows, ["financiering"]);
 
-  if (normalizedBasis.includes("markt")) {
-    vermogensbelastingGrondslag = marktwaardeVastgoed;
-  } else if (normalizedBasis.includes("woz")) {
-    vermogensbelastingGrondslag = wozWaardeVastgoed;
-  } else if (normalizedBasis.includes("netto")) {
-    vermogensbelastingGrondslag = naRenteResteert;
-  } else if (normalizedBasis.includes("huur")) {
-    vermogensbelastingGrondslag = huurPerJaar;
-  } else {
-    vermogensbelastingGrondslag = wozWaardeVastgoed;
-  }
+  const oldBox3BelastingRow = findLastRow(inputRows, [
+    "box 3 belasting",
+    "box3 belasting",
+  ]);
+
+  const box3WozPercentage =
+    readLastPercent(inputRows, [
+      "Vermogensbelasting percentage over WOZ",
+      "Vermogenbelasting percentage over WOZ",
+      "Vermogensbelastingpercentage over WOZ",
+      "Vermogenbelastingpercentage over WOZ",
+    ]) ?? parsePercent(oldBox3WozRow?.[2] ?? "");
+
+  const box3WozBedrag =
+    readLastNumber(inputRows, [
+      "Vermogensbelasting over WOZ",
+      "Vermogenbelasting over WOZ",
+    ]) ??
+    parseNumber(oldBox3WozRow?.[3] ?? "") ??
+    (wozWaardeVastgoed !== null && box3WozPercentage !== null
+      ? wozWaardeVastgoed * box3WozPercentage
+      : null);
+
+  const box3FinancieringPercentage =
+    readLastPercent(inputRows, [
+      "Vermogensbelasting percentage over financiering",
+      "Vermogenbelasting percentage over financiering",
+      "Vermogensbelastingpercentage over financiering",
+      "Vermogenbelastingpercentage over financiering",
+    ]) ?? parsePercent(oldBox3FinancieringRow?.[2] ?? "");
+
+  const box3FinancieringBedrag =
+    readLastNumber(inputRows, [
+      "Vermogensbelasting over financiering",
+      "Vermogenbelasting over financiering",
+    ]) ??
+    parseNumber(oldBox3FinancieringRow?.[3] ?? "") ??
+    (financiering !== null && box3FinancieringPercentage !== null
+      ? financiering * box3FinancieringPercentage
+      : null);
+
+  const box3Grondslag =
+    readLastNumber(inputRows, [
+      "Vermogensbelastingbasis",
+      "Vermogensbelasting basis",
+      "Grondslag",
+      "Grondslag box 3",
+    ]) ??
+    (box3WozBedrag !== null && box3FinancieringBedrag !== null
+      ? box3WozBedrag - box3FinancieringBedrag
+      : null);
+
+  const box3BelastingPercentage =
+    readLastPercent(inputRows, [
+      "Box 3 belasting percentage",
+      "Box-3 belasting percentage",
+      "Box 3 tarief",
+      "Box-3 tarief",
+    ]) ?? parsePercent(oldBox3BelastingRow?.[2] ?? "");
+
+  const box3BelastingBedrag = parseNumber(oldBox3BelastingRow?.[3] ?? "");
+
+  const vermogensbelastingPerJaarUitExcel = readNumber(inputRows, [
+    "Vermogensbelasting per jaar",
+  ]);
+
+  const vermogensbelastingPercentage = box3BelastingPercentage;
 
   const vermogensbelastingPerJaar =
-    vermogensbelastingGrondslag !== null &&
-    vermogensbelastingPercentage !== null
-      ? -Math.abs(vermogensbelastingGrondslag) *
-        vermogensbelastingPercentage
+    vermogensbelastingPerJaarUitExcel !== null
+      ? -Math.abs(vermogensbelastingPerJaarUitExcel)
+      : box3BelastingBedrag !== null
+      ? -Math.abs(box3BelastingBedrag)
+      : box3Grondslag !== null && box3BelastingPercentage !== null
+      ? -Math.abs(box3Grondslag) * box3BelastingPercentage
       : null;
 
   const nettoHuurinkomsten =
@@ -532,8 +655,17 @@ async function readReportData(): Promise<ReportData> {
     naRenteResteert,
 
     vermogensbelastingPercentage,
-    vermogensbelastingbasis,
+    vermogensbelastingbasis: vermogensbelastingbasisTekst,
     vermogensbelastingPerJaar,
+
+    box3WozPercentage,
+    box3WozBedrag,
+
+    box3FinancieringPercentage,
+    box3FinancieringBedrag,
+
+    box3Grondslag,
+    box3BelastingPercentage,
 
     exploitatiekostenTotaal,
     exploitatiekostenPercentage,
@@ -550,332 +682,331 @@ async function readReportData(): Promise<ReportData> {
   };
 }
 
-function getTaxBase(data: ReportData) {
-  const basis = normalizeLabel(data.vermogensbelastingbasis);
-
-  if (basis.includes("markt")) return data.marktwaardeVastgoed;
-  if (basis.includes("woz")) return data.wozWaardeVastgoed;
-  if (basis.includes("netto")) return data.naRenteResteert;
-  if (basis.includes("huur")) return data.huurPerJaar;
-
-  return data.wozWaardeVastgoed;
-}
-
 export default async function BedrijfsmatigStartpuntPage() {
-  const data = await readReportData();
-
-  const box3Grondslag = getTaxBase(data);
-
-  const calculationRows = [
-    ["Marktwaarde vastgoed", euroValue(data.marktwaardeVastgoed), "normal"],
-    ["WOZ-waarde vastgoed", euroValue(data.wozWaardeVastgoed), "normal"],
-    ["Huur per maand", euroValue(data.huurPerMaand), "normal"],
-    ["Huur per jaar", euroValue(data.huurPerJaar), "normal"],
-    [
-      "Bruto rendement marktwaarde",
-      pctValue(data.brutoRendementMarktwaarde),
-      "normal",
-    ],
-    ["Financiering", euroValue(data.financiering), "normal"],
-    ["Rente", pctValue(data.rentePercentage), "normal"],
-    ["Rentelasten per jaar", costEuroValue(data.rentelastenPerJaar), "normal"],
-    ["Na rente resteert", euroValue(data.naRenteResteert), "soft"],
-    [
-      "Exploitatiekosten per jaar",
-      costEuroValue(data.exploitatiekostenTotaal),
-      "normal",
-    ],
-    [
-      "Vermogensbelasting",
-      costEuroValue(data.vermogensbelastingPerJaar),
-      "normal",
-    ],
-    ["Netto huurinkomsten", euroValue(data.nettoHuurinkomsten), "main"],
-    [
-      "Netto rendement marktwaarde",
-      pctValue(data.nettoRendementMarktwaarde),
-      "normal",
-    ],
-    [
-      "Rendement op eigen inleg",
-      pctValue(data.rendementOpEigenInleg),
-      "normal",
-    ],
-    [
-      "Gemiddelde waardestijging",
-      pctValue(data.gemiddeldeWaardestijging),
-      "normal",
-    ],
-    [
-      "Totaal rendement incl. waardestijging",
-      pctValue(data.totaalRendementInclWaardestijging),
-      "main",
-    ],
-  ];
-
-  return (
-    <main className="screen">
-      <style>{styles}</style>
-
-      <article className="sheet">
-        <header className="hero">
-          <div>
-            <div className="kicker">L3 Capital</div>
-            <h1>{STARTPUNT_CONFIG.title}</h1>
-            <p>{STARTPUNT_CONFIG.subtitle}</p>
-          </div>
-
-          <div className="object-box">
-            <span>Object</span>
-            <strong>{data.objectNaam}</strong>
-            <small>{data.adres}</small>
-          </div>
-        </header>
-
-        {data.waarschuwingen.length > 0 && (
-          <section className="warning-box">
-            {data.waarschuwingen.map((warning) => (
-              <p key={warning}>{warning}</p>
-            ))}
-          </section>
-        )}
-
-        <section className="kpi-grid">
-          <KpiCard
-            label="Bruto rendement"
-            value={pctValue(data.brutoRendementMarktwaarde)}
-            text="Huur per jaar gedeeld door marktwaarde."
-          />
-          <KpiCard
-            label="Na rente resteert"
-            value={euroValue(data.naRenteResteert)}
-            text="Huurinkomsten na jaarlijkse rentelasten."
-          />
-          <KpiCard
-            label="Netto huurinkomsten"
-            value={euroValue(data.nettoHuurinkomsten)}
-            text="Na rente, exploitatiekosten en vermogensbelasting."
-          />
-          <KpiCard
-            label="Totaal incl. waardestijging"
-            value={pctValue(data.totaalRendementInclWaardestijging)}
-            text="Rendement op eigen inleg plus waardestijging."
-          />
-        </section>
-
-        <section className="intro-grid">
-          <div className="photo-card">
-            <div
-              className="photo-wrap"
-              style={{ backgroundImage: `url("${data.afbeeldingUrl}")` }}
-            >
-              <div className="photo-fallback">Foto vastgoed</div>
+    const data = await readReportData();
+  
+    const calculationRows: Array<[string, string, "normal" | "soft" | "main"]> = [
+      ["Marktwaarde vastgoed", euroValue(data.marktwaardeVastgoed), "normal"],
+      ["WOZ-waarde vastgoed", euroValue(data.wozWaardeVastgoed), "normal"],
+      ["Huur per maand", euroValue(data.huurPerMaand), "normal"],
+      ["Huur per jaar", euroValue(data.huurPerJaar), "normal"],
+      [
+        "Bruto rendement marktwaarde",
+        pctValue(data.brutoRendementMarktwaarde),
+        "normal",
+      ],
+      ["Financiering", euroValue(data.financiering), "normal"],
+      ["Rente", pctValue(data.rentePercentage), "normal"],
+      ["Rentelasten per jaar", costEuroValue(data.rentelastenPerJaar), "normal"],
+      ["Na rente resteert", euroValue(data.naRenteResteert), "soft"],
+      [
+        "Exploitatiekosten per jaar",
+        costEuroValue(data.exploitatiekostenTotaal),
+        "normal",
+      ],
+      [
+        "Vermogensbelasting",
+        costEuroValue(data.vermogensbelastingPerJaar),
+        "normal",
+      ],
+      ["Netto huurinkomsten", euroValue(data.nettoHuurinkomsten), "main"],
+      [
+        "Netto rendement marktwaarde",
+        pctValue(data.nettoRendementMarktwaarde),
+        "normal",
+      ],
+      [
+        "Rendement op eigen inleg",
+        pctValue(data.rendementOpEigenInleg),
+        "normal",
+      ],
+      [
+        "Gemiddelde waardestijging",
+        pctValue(data.gemiddeldeWaardestijging),
+        "normal",
+      ],
+      [
+        "Totaal rendement incl. waardestijging",
+        pctValue(data.totaalRendementInclWaardestijging),
+        "main",
+      ],
+    ];
+  
+    return (
+      <main className="screen">
+        <style>{styles}</style>
+  
+        <article className="sheet">
+          <header className="hero">
+            <div>
+              <div className="kicker">L3 Capital</div>
+              <h1>{STARTPUNT_CONFIG.title}</h1>
+              <p>{STARTPUNT_CONFIG.subtitle}</p>
             </div>
-
-            <div className="value-list">
-              <InfoLine
-                label="Marktwaarde"
-                value={euroValue(data.marktwaardeVastgoed)}
-              />
-              <InfoLine
-                label="WOZ-waarde"
-                value={euroValue(data.wozWaardeVastgoed)}
-              />
-              <InfoLine label="Eigen inleg" value={euroValue(data.eigenInleg)} />
+  
+            <div className="object-box">
+              <span>Object</span>
+              <strong>{data.objectNaam}</strong>
+              <small>{data.adres}</small>
             </div>
-          </div>
-
-          <div className="card calc-card">
-            <SectionTitle number="01" title="Korte rendementscheck" />
-
-            <div className="calc-table">
-              {calculationRows.map(([label, value, variant]) => (
-                <div
-                  key={label}
-                  className={[
-                    "calc-row",
-                    variant === "soft" ? "soft-row" : "",
-                    variant === "main" ? "main-row" : "",
-                  ].join(" ")}
-                >
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                </div>
+          </header>
+  
+          {data.waarschuwingen.length > 0 && (
+            <section className="warning-box">
+              {data.waarschuwingen.map((warning) => (
+                <p key={warning}>{warning}</p>
               ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="card text-card kernbeeld">
-          <SectionTitle number="02" title="Kernbeeld" />
-
-          <p>
-            Het bruto rendement geeft alleen de verhouding weer tussen de
-            jaarlijkse huur en de marktwaarde. Na rentelasten resteert{" "}
-            <strong>{euroValue(data.naRenteResteert)}</strong>. Na
-            exploitatiekosten en vermogensbelasting blijft in dit rekenvoorbeeld{" "}
-            <strong>{euroValue(data.nettoHuurinkomsten)}</strong> aan netto
-            huurinkomsten over.
-          </p>
-
-          <p>
-            De gemiddelde waardestijging van{" "}
-            <strong>{pctValue(data.gemiddeldeWaardestijging)}</strong> is geen
-            directe huurkasstroom en wordt daarom apart weergegeven. Het totale rendement
-            exclusief waardestijging komt uit op{" "}
-            <strong>{pctValue(data.rendementOpEigenInleg)}</strong>, wat een directe huurkasstroom van {" "}
-            <strong>{euroValue(data.nettoHuurinkomsten)}</strong> oplevert per jaar.
-          </p>
-        </section>
-
-        <footer className="footer">
-          <span>{STARTPUNT_CONFIG.footerLabel}</span>
-          <span>Pagina 1 / 2</span>
-        </footer>
-      </article>
-
-      <article className="sheet">
-        <header className="small-header">
-          <div>
-            <div className="kicker dark">L3 Capital</div>
-            <h2>Verdieping rendement en uitgangspunten</h2>
-          </div>
-
-          <div className="small-meta">
-            <span>{data.objectNaam}</span>
-            <strong>{euroValue(data.marktwaardeVastgoed)}</strong>
-          </div>
-        </header>
-
-        <section className="page-two-grid">
-          <div className="card">
-            <SectionTitle number="03" title="Exploitatiekosten" />
-
-            <p className="intro">
-              In dit rekenvoorbeeld bedragen de exploitatiekosten samen{" "}
-              <strong>{costEuroValue(data.exploitatiekostenTotaal)}</strong>. Dat
-              is{" "}
-              <strong>{pctAbsValue(data.exploitatiekostenPercentage)}</strong>{" "}
-              van de jaarlijkse huurinkomsten.
-            </p>
-
-            <div className="expense-table">
-              <div className="expense-head">
-                <span>Kostenpost</span>
-                <span>Jaarbedrag</span>
-                <span>% huur</span>
-              </div>
-
-              {data.exploitatiekosten.map((item) => (
-                <div className="expense-row" key={item.name}>
-                  <span>{item.name}</span>
-                  <strong>{costEuroValue(item.amount)}</strong>
-                  <strong>{pctAbsValue(item.percentOfRent)}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card tinted">
-            <SectionTitle number="04" title="Box 3-uitgangspunt" />
-
-            <div className="tax-list">
-              <InfoLine
-                label="Basis"
-                value={data.vermogensbelastingbasis || "—"}
-              />
-              <InfoLine
-                label="Grondslag rekenvoorbeeld"
-                value={euroValue(box3Grondslag)}
-                strong
-              />
-              <InfoLine
-                label="Percentage"
-                value={pctValue(data.vermogensbelastingPercentage)}
-              />
-              <InfoLine
-                label="Vermogensbelasting"
-                value={costEuroValue(data.vermogensbelastingPerJaar)}
-                strong
-              />
-            </div>
-
-            <p className="box3-note">
-              Voor iedere belegger is de box 3-situatie persoonsgebonden. In dit
-              rekenvoorbeeld is ervan uitgegaan dat de belegger meer vermogen
-              heeft, waardoor op deze casus geen heffingsvrij vermogen en geen
-              schuldendrempel worden toegepast.
-            </p>
-          </div>
-        </section>
-
-        <section className="page-two-grid lower">
-          <div className="card">
-            <SectionTitle number="05" title="Kasstroomopbouw" />
-
-            <Bar
-              label="Huur per jaar"
-              value={data.huurPerJaar}
-              max={data.huurPerJaar}
-              positive
+            </section>
+          )}
+  
+          <section className="kpi-grid">
+            <KpiCard
+              label="Bruto rendement"
+              value={pctValue(data.brutoRendementMarktwaarde)}
+              text="Huur per jaar gedeeld door marktwaarde."
             />
-            <Bar
-              label="Rentelasten"
-              value={data.rentelastenPerJaar}
-              max={data.huurPerJaar}
+            <KpiCard
+              label="Na rente resteert"
+              value={euroValue(data.naRenteResteert)}
+              text="Huurinkomsten na jaarlijkse rentelasten."
             />
-            <Bar
-              label="Exploitatiekosten"
-              value={data.exploitatiekostenTotaal}
-              max={data.huurPerJaar}
-            />
-            <Bar
-              label="Vermogensbelasting"
-              value={data.vermogensbelastingPerJaar}
-              max={data.huurPerJaar}
-            />
-            <Bar
+            <KpiCard
               label="Netto huurinkomsten"
-              value={data.nettoHuurinkomsten}
-              max={data.huurPerJaar}
-              positive
+              value={euroValue(data.nettoHuurinkomsten)}
+              text="Na rente, exploitatiekosten en vermogensbelasting."
             />
-          </div>
-
-          <div className="card text-card">
-            <SectionTitle number="06" title="Belangrijk om mee te nemen" />
-
-            <p>
-              Een bruto percentage toont niet het volledige beeld. De jaarlijkse
-              huur moet worden afgezet tegen financiering, vaste lasten,
-              onderhoud, leegstand, belastingdruk en risico.
-            </p>
-
-            <p>
-              Waardestijging kan het totale rendement verbeteren, maar is geen
-              gegarandeerde kasstroom. Daarom wordt deze apart zichtbaar gemaakt.
-            </p>
-
-            <div className="closing-box">
-              <span>Netto huurinkomsten</span>
-              <strong>{euroValue(data.nettoHuurinkomsten)}</strong>
+            <KpiCard
+              label="Totaal incl. waardestijging"
+              value={pctValue(data.totaalRendementInclWaardestijging)}
+              text="Rendement op eigen inleg plus waardestijging."
+            />
+          </section>
+  
+          <section className="intro-grid">
+            <div className="photo-card">
+              <div
+                className="photo-wrap"
+                style={{ backgroundImage: `url("${data.afbeeldingUrl}")` }}
+              >
+                <div className="photo-fallback">Foto vastgoed</div>
+              </div>
+  
+              <div className="value-list">
+                <InfoLine
+                  label="Marktwaarde"
+                  value={euroValue(data.marktwaardeVastgoed)}
+                />
+                <InfoLine
+                  label="WOZ-waarde"
+                  value={euroValue(data.wozWaardeVastgoed)}
+                />
+                <InfoLine label="Eigen inleg" value={euroValue(data.eigenInleg)} />
+              </div>
             </div>
-
-            <div className="closing-box soft">
-              <span>Totaal incl. waardestijging</span>
-              <strong>{pctValue(data.totaalRendementInclWaardestijging)}</strong>
+  
+            <div className="card calc-card">
+              <SectionTitle number="01" title="Korte rendementscheck" />
+  
+              <div className="calc-table">
+                {calculationRows.map(([label, value, variant]) => (
+                  <div
+                    key={label}
+                    className={[
+                      "calc-row",
+                      variant === "soft" ? "soft-row" : "",
+                      variant === "main" ? "main-row" : "",
+                    ].join(" ")}
+                  >
+                    <span>{label}</span>
+                    <strong>{value}</strong>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        </section>
-
-        <footer className="footer">
-          <span>{STARTPUNT_CONFIG.footerLabel}</span>
-          <span>Pagina 2 / 2</span>
-        </footer>
-      </article>
-    </main>
-  );
-}
+          </section>
+  
+          <section className="card text-card kernbeeld">
+            <SectionTitle number="02" title="Kernbeeld" />
+  
+            <p>
+              Het bruto rendement geeft alleen de verhouding weer tussen de
+              jaarlijkse huur en de marktwaarde. Na rentelasten resteert{" "}
+              <strong>{euroValue(data.naRenteResteert)}</strong>. Na
+              exploitatiekosten en vermogensbelasting blijft in dit rekenvoorbeeld{" "}
+              <strong>{euroValue(data.nettoHuurinkomsten)}</strong> aan netto
+              huurinkomsten over.
+            </p>
+  
+            <p>
+              De gemiddelde waardestijging van{" "}
+              <strong>{pctValue(data.gemiddeldeWaardestijging)}</strong> is geen
+              directe huurkasstroom en wordt daarom apart weergegeven. Het totale
+              rendement exclusief waardestijging komt uit op{" "}
+              <strong>{pctValue(data.rendementOpEigenInleg)}</strong>, wat een
+              directe huurkasstroom van{" "}
+              <strong>{euroValue(data.nettoHuurinkomsten)}</strong> oplevert per
+              jaar.
+            </p>
+          </section>
+  
+          <footer className="footer">
+            <span>{STARTPUNT_CONFIG.footerLabel}</span>
+            <span>Pagina 1 / 2</span>
+          </footer>
+        </article>
+  
+        <article className="sheet">
+          <header className="small-header">
+            <div>
+              <div className="kicker dark">L3 Capital</div>
+              <h2>Verdieping rendement en uitgangspunten</h2>
+            </div>
+  
+            <div className="small-meta">
+              <span>{data.objectNaam}</span>
+              <strong>{euroValue(data.marktwaardeVastgoed)}</strong>
+            </div>
+          </header>
+  
+          <section className="page-two-grid">
+            <div className="card">
+              <SectionTitle number="03" title="Exploitatiekosten" />
+  
+              <p className="intro">
+                In dit rekenvoorbeeld bedragen de exploitatiekosten samen{" "}
+                <strong>{costEuroValue(data.exploitatiekostenTotaal)}</strong>.
+                Dat is{" "}
+                <strong>{pctAbsValue(data.exploitatiekostenPercentage)}</strong>{" "}
+                van de jaarlijkse huurinkomsten.
+              </p>
+  
+              <div className="expense-table">
+                <div className="expense-head">
+                  <span>Kostenpost</span>
+                  <span>Jaarbedrag</span>
+                  <span>% huur</span>
+                </div>
+  
+                {data.exploitatiekosten.map((item) => (
+                  <div className="expense-row" key={item.name}>
+                    <span>{item.name}</span>
+                    <strong>{costEuroValue(item.amount)}</strong>
+                    <strong>{pctAbsValue(item.percentOfRent)}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+  
+            <div className="card tinted">
+              <SectionTitle number="04" title="Box 3-uitgangspunt" />
+  
+              <div className="tax-list tax-list-compact">
+                <InfoLine
+                  label={`WOZ-waarde x ${pctValue(data.box3WozPercentage)}`}
+                  value={euroValue(data.box3WozBedrag)}
+                />
+  
+                <InfoLine
+                  label={`Financiering x ${pctValue(
+                    data.box3FinancieringPercentage
+                  )}`}
+                  value={costEuroValue(data.box3FinancieringBedrag)}
+                />
+  
+                <InfoLine
+                  label="Grondslag"
+                  value={euroValue(data.box3Grondslag)}
+                  strong
+                />
+  
+                <InfoLine
+                  label="Box-3 tarief"
+                  value={pctValue(data.box3BelastingPercentage)}
+                />
+  
+                <InfoLine
+                  label="Vermogensbelasting"
+                  value={costEuroValue(data.vermogensbelastingPerJaar)}
+                  strong
+                />
+              </div>
+  
+              <p className="box3-note">
+                Voor iedere belegger is de box 3-situatie persoonsgebonden. In dit
+                rekenvoorbeeld is ervan uitgegaan dat de belegger meer vermogen
+                heeft, waardoor op deze casus geen heffingsvrij vermogen en geen
+                schuldendrempel worden toegepast.
+              </p>
+            </div>
+          </section>
+  
+          <section className="page-two-grid lower">
+            <div className="card">
+              <SectionTitle number="05" title="Kasstroomopbouw" />
+  
+              <Bar
+                label="Huur per jaar"
+                value={data.huurPerJaar}
+                max={data.huurPerJaar}
+                positive
+              />
+              <Bar
+                label="Rentelasten"
+                value={data.rentelastenPerJaar}
+                max={data.huurPerJaar}
+              />
+              <Bar
+                label="Exploitatiekosten"
+                value={data.exploitatiekostenTotaal}
+                max={data.huurPerJaar}
+              />
+              <Bar
+                label="Vermogensbelasting"
+                value={data.vermogensbelastingPerJaar}
+                max={data.huurPerJaar}
+              />
+              <Bar
+                label="Netto huurinkomsten"
+                value={data.nettoHuurinkomsten}
+                max={data.huurPerJaar}
+                positive
+              />
+            </div>
+  
+            <div className="card text-card">
+              <SectionTitle number="06" title="Belangrijk om mee te nemen" />
+  
+              <p>
+                Een bruto percentage toont niet het volledige beeld. De jaarlijkse
+                huur moet worden afgezet tegen financiering, vaste lasten,
+                onderhoud, leegstand, belastingdruk en risico.
+              </p>
+  
+              <p>
+                Waardestijging kan het totale rendement verbeteren, maar is geen
+                gegarandeerde kasstroom. Daarom wordt deze apart zichtbaar gemaakt.
+              </p>
+  
+              <div className="closing-box">
+                <span>Netto huurinkomsten</span>
+                <strong>{euroValue(data.nettoHuurinkomsten)}</strong>
+              </div>
+  
+              <div className="closing-box soft">
+                <span>Totaal incl. waardestijging</span>
+                <strong>{pctValue(data.totaalRendementInclWaardestijging)}</strong>
+              </div>
+            </div>
+          </section>
+  
+          <footer className="footer">
+            <span>{STARTPUNT_CONFIG.footerLabel}</span>
+            <span>Pagina 2 / 2</span>
+          </footer>
+        </article>
+      </main>
+    );
+  }
 
 function SectionTitle({ number, title }: { number: string; title: string }) {
   return (
@@ -1374,6 +1505,15 @@ const styles = `
   .tax-list {
     display: grid;
     gap: 2.4mm;
+  }
+
+  .tax-list-compact {
+    gap: 1.7mm;
+  }
+
+  .tax-list-compact .info-line {
+    font-size: 7.8pt;
+    padding-bottom: 1.6mm;
   }
 
   .box3-note {
