@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type MaybeNumber = number | null;
+type YesNo = "ja" | "nee";
 
 type ExpenseItem = {
   name: string;
@@ -53,6 +54,9 @@ type ReportData = {
   gemiddeldeWaardestijging: MaybeNumber;
   totaalRendementInclWaardestijging: MaybeNumber;
 
+  fiscaalPartner: YesNo;
+  heffingsvrijBenut: YesNo;
+
   exploitatiekosten: ExpenseItem[];
   waarschuwingen: string[];
 };
@@ -71,6 +75,13 @@ function normalizeLabel(value: unknown) {
     .replace(/[()]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeYesNo(value: unknown, fallback: YesNo): YesNo {
+  const normalized = normalizeLabel(value);
+  if (normalized === "ja" || normalized === "yes") return "ja";
+  if (normalized === "nee" || normalized === "no") return "nee";
+  return fallback;
 }
 
 function parseCsvLine(line: string) {
@@ -386,6 +397,20 @@ async function readReportData(): Promise<ReportData> {
 
   const adres = readText(inputRows, ["Adres"], "Nederland");
 
+  const fiscaalPartner = normalizeYesNo(
+    readText(inputRows, ["Fiscaal partner"], "nee"),
+    "nee"
+  );
+
+  const heffingsvrijBenut = normalizeYesNo(
+    readText(
+      inputRows,
+      ["Heffingsvrij vermogen benut", "Heffingsvrije vermogen benut"],
+      "ja"
+    ),
+    "ja"
+  );
+
   const afbeeldingUrl = normalizeImagePath(
     readText(inputRows, ["Foto URL of bestandsnaam", "Foto"], DEFAULT_PHOTO)
   );
@@ -612,6 +637,9 @@ async function readReportData(): Promise<ReportData> {
 
     gemiddeldeWaardestijging,
     totaalRendementInclWaardestijging,
+
+    fiscaalPartner,
+    heffingsvrijBenut,
 
     exploitatiekosten: parsedCosts.expenses,
     waarschuwingen,
