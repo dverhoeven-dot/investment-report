@@ -2,8 +2,12 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+<<<<<<< HEAD
 type MaybeNumber = number | null;
 type YesNo = "ja" | "nee";
+=======
+type MaybeNumber = number | null | undefined;
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
 
 type ExpenseItem = {
   name: string;
@@ -39,7 +43,20 @@ type ReportData = {
   box3FinancieringPercentage: MaybeNumber;
   box3FinancieringBedrag: MaybeNumber;
 
+  fiscaalPartner?: boolean;
+  heffingsvrijVermogenToepassen?: boolean;
+  schuldendrempelPerPersoon: MaybeNumber;
+  toegepasteSchuldendrempel: MaybeNumber;
+  aftrekbareBox3Schuld: MaybeNumber;
+  heffingsvrijVermogenZonderPartner: MaybeNumber;
+  heffingsvrijVermogenMetPartner: MaybeNumber;
+  toegepastHeffingsvrijVermogen: MaybeNumber;
+
   box3Grondslag: MaybeNumber;
+  grondslagSparenBeleggen: MaybeNumber;
+  aandeelBelastbareGrondslag: MaybeNumber;
+  belastbaarRendement: MaybeNumber;
+  voordeelSparenBeleggen: MaybeNumber;
   box3BelastingPercentage: MaybeNumber;
 
   exploitatiekostenTotaal: MaybeNumber;
@@ -71,6 +88,7 @@ type FormState = {
   wozWaardeVastgoed: string;
   financiering: string;
   rentePercentage: string;
+<<<<<<< HEAD
   huurPerMaand: string;
   fiscaalPartner: YesNo;
   heffingsvrijBenut: YesNo;
@@ -86,6 +104,68 @@ type EditableExpense = {
 type StoredState = {
   form: FormState;
   expenses: EditableExpense[];
+=======
+  box3WozPercentage: string;
+  box3FinancieringPercentage: string;
+  box3BelastingPercentage: string;
+  gemiddeldeWaardestijging: string;
+  fiscaalPartner: "ja" | "nee";
+  heffingsvrijVermogenToepassen: "ja" | "nee";
+  exploitatiekosten: string[];
+};
+
+
+const DEFAULT_EXPENSES: ExpenseItem[] = [
+  { name: "Gemeentelijke lasten eigenaar", amount: -750, percentOfRent: null },
+  { name: "Opstalverzekering", amount: -450, percentOfRent: null },
+  { name: "Klein onderhoud", amount: -750, percentOfRent: null },
+  { name: "Reservering groot onderhoud", amount: -1500, percentOfRent: null },
+  { name: "Beheer en administratie", amount: -400, percentOfRent: null },
+  { name: "Verhuur- en mutatiekosten", amount: -400, percentOfRent: null },
+  { name: "Leegstand / wanbetaling", amount: -530, percentOfRent: null },
+];
+
+function getExpenseSource(initialData: ReportData): ExpenseItem[] {
+  return Array.isArray(initialData.exploitatiekosten) &&
+    initialData.exploitatiekosten.length > 0
+    ? initialData.exploitatiekosten
+    : DEFAULT_EXPENSES;
+}
+
+const colors = {
+  onyx: "#1C1C1B",
+  walnut: "#6A5D52",
+  ash: "#979086",
+  greige: "#B7AC9B",
+  stucco: "#E2E2DE",
+  paper: "#F4F1EA",
+  card: "#FAF8F3",
+  soft: "#E8E3DA",
+  white: "#FFFFFF",
+};
+
+const euro = (value: number) =>
+  new Intl.NumberFormat("nl-NL", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(value);
+
+  const euroDecimalValue = (value: MaybeNumber) => {
+    if (value === null || Number.isNaN(value)) return "—";
+  
+    return new Intl.NumberFormat("nl-NL", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  };
+
+const euroValue = (value: MaybeNumber) => {
+  if (value === null || Number.isNaN(value)) return "—";
+  return euro(value);
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
 };
 
 const DEFAULT_RENTE = 0.04;
@@ -208,8 +288,32 @@ function createInitialForm(initialData: ReportData): FormState {
       DEFAULT_RENTE
     ),
     huurPerMaand: numberToInput(initialData.huurPerMaand),
+<<<<<<< HEAD
     fiscaalPartner: initialData.fiscaalPartner ?? "nee",
     heffingsvrijBenut: initialData.heffingsvrijBenut ?? "ja",
+=======
+    rentePercentage: percentToInput(initialData.rentePercentage),
+    box3WozPercentage: percentToInput(
+      initialData.box3WozPercentage ?? 0.06
+    ),
+    
+    box3FinancieringPercentage: percentToInput(
+      initialData.box3FinancieringPercentage ?? 0.027
+    ),
+    
+    box3BelastingPercentage: percentToInput(
+      initialData.box3BelastingPercentage ?? 0.36
+    ),
+    gemiddeldeWaardestijging: percentToInput(
+      initialData.gemiddeldeWaardestijging
+    ),
+    fiscaalPartner: initialData.fiscaalPartner ? "ja" : "nee",
+    heffingsvrijVermogenToepassen:
+      initialData.heffingsvrijVermogenToepassen ? "ja" : "nee",
+    exploitatiekosten: getExpenseSource(initialData).map((item) =>
+      numberToInput(item.amount == null ? null : Math.abs(item.amount))
+    ),
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
   };
 }
 
@@ -302,14 +406,20 @@ export default function StartpuntClient({
   initialData: ReportData;
   config: StartpuntConfig;
 }) {
+  const expenseSource = useMemo(() => getExpenseSource(initialData), [initialData]);
+
   const [form, setForm] = useState<FormState>(() =>
     createInitialForm(initialData)
   );
+<<<<<<< HEAD
   const [expenses, setExpenses] = useState<EditableExpense[]>(() =>
     createInitialExpenses(initialData)
   );
   const [storageReady, setStorageReady] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+=======
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
 
   useEffect(() => {
     try {
@@ -371,7 +481,46 @@ export default function StartpuntClient({
     }
   }
 
+  function updateExpense(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      exploitatiekosten: (
+        current.exploitatiekosten ??
+        expenseSource.map((item) =>
+          numberToInput(item.amount == null ? null : Math.abs(item.amount))
+        )
+      ).map((item, itemIndex) => (itemIndex === index ? value : item)),
+    }));
+  }
+  function handleImageUpload(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+  
+    if (!file) return;
+  
+    if (!file.type.startsWith("image/")) {
+      alert("Selecteer een geldig afbeeldingsbestand.");
+      return;
+    }
+  
+    const reader = new FileReader();
+  
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setUploadedImage(reader.result);
+      }
+    };
+  
+    reader.onerror = () => {
+      alert("De afbeelding kon niet worden ingelezen.");
+    };
+  
+    reader.readAsDataURL(file);
+  }
+
   function resetForm() {
+<<<<<<< HEAD
     localStorage.removeItem(STORAGE_KEY);
     setForm(createEmptyForm());
     setExpenses(createEmptyExpenses());
@@ -383,6 +532,24 @@ export default function StartpuntClient({
     );
     const wozwaarde = Math.abs(
       parseInputNumber(form.wozWaardeVastgoed) ?? 0
+=======
+    setForm(createInitialForm(initialData));
+    setUploadedImage(null);
+  }
+
+  const data = useMemo<ReportData>(() => {
+    const objectNaam = form.objectNaam || initialData.objectNaam;
+    const adres = form.adres || initialData.adres;
+
+    const marktwaardeVastgoed = parseInputNumber(form.marktwaardeVastgoed);
+    const wozWaardeVastgoed = parseInputNumber(form.wozWaardeVastgoed);
+    const financiering = parseInputNumber(form.financiering);
+    const huurPerMaand = parseInputNumber(form.huurPerMaand);
+    const rentePercentage = parseInputPercent(form.rentePercentage);
+    const box3WozPercentage = parseInputPercent(form.box3WozPercentage);
+    const box3FinancieringPercentage = parseInputPercent(
+      form.box3FinancieringPercentage
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
     );
     const financiering = Math.abs(parseInputNumber(form.financiering) ?? 0);
     const huurPerMaand = Math.abs(parseInputNumber(form.huurPerMaand) ?? 0);
@@ -412,6 +579,7 @@ export default function StartpuntClient({
       (sum, item) => sum + item.amount,
       0
     );
+<<<<<<< HEAD
     const exploitatiePct = huurPerJaar
       ? exploitatiekosten / huurPerJaar
       : 0;
@@ -429,6 +597,10 @@ export default function StartpuntClient({
     const aftrekbareFinanciering = Math.max(
       0,
       financiering - schuldenDrempel
+=======
+    const gemiddeldeWaardestijging = parseInputPercent(
+      form.gemiddeldeWaardestijging
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
     );
     const boxWozComponent = wozwaarde * DEFAULT_WOZ_BOX3;
     const boxFinancieringComponent =
@@ -453,6 +625,7 @@ export default function StartpuntClient({
     const vermogensbelasting =
       vermogensbelastingbasis * DEFAULT_BOX3_BELASTING;
 
+<<<<<<< HEAD
     const nettoHuur =
       huurPerJaar + rentelasten - exploitatiekosten - vermogensbelasting;
     const nettoRendementMarktwaarde = marktwaarde
@@ -475,10 +648,175 @@ export default function StartpuntClient({
       afbeeldingUrl: initialData.afbeeldingUrl,
       marktwaarde,
       wozwaarde,
+=======
+    const fiscaalPartner = form.fiscaalPartner === "ja";
+    const heffingsvrijVermogenToepassen =
+      form.heffingsvrijVermogenToepassen === "ja";
+
+    const schuldendrempelPerPersoon = 3800;
+    const heffingsvrijVermogenZonderPartner = 59357;
+    const heffingsvrijVermogenMetPartner = 118714;
+
+    const huurPerJaar = huurPerMaand !== null ? huurPerMaand * 12 : null;
+
+    const brutoRendementMarktwaarde =
+      huurPerJaar !== null &&
+      marktwaardeVastgoed !== null &&
+      marktwaardeVastgoed !== 0
+        ? huurPerJaar / marktwaardeVastgoed
+        : null;
+
+    const eigenInleg =
+      marktwaardeVastgoed !== null && financiering !== null
+        ? marktwaardeVastgoed - financiering
+        : null;
+
+    const rentelastenPerJaar =
+      financiering !== null && rentePercentage !== null
+        ? -Math.abs(financiering) * rentePercentage
+        : null;
+
+    const naRenteResteert =
+      huurPerJaar !== null && rentelastenPerJaar !== null
+        ? huurPerJaar + rentelastenPerJaar
+        : null;
+
+    const expenseInputs = form.exploitatiekosten ?? [];
+
+    const exploitatiekosten = expenseSource.map(
+      (item, index): ExpenseItem => {
+        const enteredAmount = parseInputNumber(expenseInputs[index] ?? "");
+        const amount =
+          enteredAmount === null ? null : -Math.abs(enteredAmount);
+
+        return {
+          name: item.name,
+          amount,
+          percentOfRent:
+            amount !== null && huurPerJaar !== null && huurPerJaar !== 0
+              ? amount / huurPerJaar
+              : null,
+        };
+      }
+    );
+
+    const exploitatiekostenTotaal =
+      exploitatiekosten.every((item) => item.amount !== null)
+        ? exploitatiekosten.reduce(
+            (total, item) => total + toNumber(item.amount),
+            0
+          )
+        : null;
+
+    const exploitatiekostenPercentage =
+      exploitatiekostenTotaal !== null &&
+      huurPerJaar !== null &&
+      huurPerJaar !== 0
+        ? exploitatiekostenTotaal / huurPerJaar
+        : null;
+
+    const toegepasteSchuldendrempel = fiscaalPartner
+      ? schuldendrempelPerPersoon * 2
+      : schuldendrempelPerPersoon;
+
+    const aftrekbareBox3Schuld =
+      financiering !== null
+        ? Math.max(0, Math.abs(financiering) - toegepasteSchuldendrempel)
+        : null;
+
+    const box3WozBedrag =
+      wozWaardeVastgoed !== null && box3WozPercentage !== null
+        ? Math.abs(wozWaardeVastgoed) * box3WozPercentage
+        : null;
+
+    const box3FinancieringBedrag =
+      aftrekbareBox3Schuld !== null &&
+      box3FinancieringPercentage !== null
+        ? aftrekbareBox3Schuld * box3FinancieringPercentage
+        : null;
+
+    const toegepastHeffingsvrijVermogen = heffingsvrijVermogenToepassen
+      ? fiscaalPartner
+        ? heffingsvrijVermogenMetPartner
+        : heffingsvrijVermogenZonderPartner
+      : 0;
+
+    const box3Grondslag =
+      wozWaardeVastgoed !== null && aftrekbareBox3Schuld !== null
+        ? Math.max(0, Math.abs(wozWaardeVastgoed) - aftrekbareBox3Schuld)
+        : null;
+
+    const grondslagSparenBeleggen =
+      box3Grondslag !== null
+        ? Math.max(0, box3Grondslag - toegepastHeffingsvrijVermogen)
+        : null;
+
+    const aandeelBelastbareGrondslag =
+      box3Grondslag !== null && grondslagSparenBeleggen !== null
+        ? box3Grondslag === 0
+          ? 0
+          : grondslagSparenBeleggen / box3Grondslag
+        : null;
+
+    const belastbaarRendement =
+      box3WozBedrag !== null && box3FinancieringBedrag !== null
+        ? box3WozBedrag - box3FinancieringBedrag
+        : null;
+
+    const voordeelSparenBeleggen =
+      belastbaarRendement !== null &&
+      aandeelBelastbareGrondslag !== null
+        ? belastbaarRendement * aandeelBelastbareGrondslag
+        : null;
+
+    const vermogensbelastingPerJaar =
+      voordeelSparenBeleggen !== null &&
+      box3BelastingPercentage !== null
+        ? -Math.abs(voordeelSparenBeleggen * box3BelastingPercentage)
+        : null;
+
+    const nettoHuurinkomsten =
+      huurPerJaar !== null &&
+      rentelastenPerJaar !== null &&
+      exploitatiekostenTotaal !== null &&
+      vermogensbelastingPerJaar !== null
+        ? huurPerJaar +
+          rentelastenPerJaar +
+          exploitatiekostenTotaal +
+          vermogensbelastingPerJaar
+        : null;
+
+    const nettoRendementMarktwaarde =
+      nettoHuurinkomsten !== null &&
+      marktwaardeVastgoed !== null &&
+      marktwaardeVastgoed !== 0
+        ? nettoHuurinkomsten / marktwaardeVastgoed
+        : null;
+
+    const rendementOpEigenInleg =
+      nettoHuurinkomsten !== null &&
+      eigenInleg !== null &&
+      eigenInleg !== 0
+        ? nettoHuurinkomsten / eigenInleg
+        : null;
+
+    const totaalRendementInclWaardestijging =
+      rendementOpEigenInleg !== null && gemiddeldeWaardestijging !== null
+        ? rendementOpEigenInleg + gemiddeldeWaardestijging
+        : null;
+
+    return {
+      ...initialData,
+      objectNaam,
+      adres,
+      marktwaardeVastgoed,
+      wozWaardeVastgoed,
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
       financiering,
       eigenInleg,
       huurPerMaand,
       huurPerJaar,
+<<<<<<< HEAD
       brutoRendement,
       rente,
       rentelasten,
@@ -512,6 +850,43 @@ export default function StartpuntClient({
     initialData.afbeeldingUrl,
     initialData.objectNaam,
   ]);
+=======
+      brutoRendementMarktwaarde,
+      rentePercentage,
+      rentelastenPerJaar,
+      naRenteResteert,
+      fiscaalPartner,
+      heffingsvrijVermogenToepassen,
+      schuldendrempelPerPersoon,
+      toegepasteSchuldendrempel,
+      aftrekbareBox3Schuld,
+      heffingsvrijVermogenZonderPartner,
+      heffingsvrijVermogenMetPartner,
+      toegepastHeffingsvrijVermogen,
+      exploitatiekosten,
+      exploitatiekostenTotaal,
+      exploitatiekostenPercentage,
+      box3WozPercentage,
+      box3WozBedrag,
+      box3FinancieringPercentage,
+      box3FinancieringBedrag,
+      box3Grondslag,
+      grondslagSparenBeleggen,
+      aandeelBelastbareGrondslag,
+      belastbaarRendement,
+      voordeelSparenBeleggen,
+      box3BelastingPercentage,
+      vermogensbelastingPercentage: box3BelastingPercentage,
+      vermogensbelastingbasis: "Voordeel uit sparen en beleggen",
+      vermogensbelastingPerJaar,
+      nettoHuurinkomsten,
+      nettoRendementMarktwaarde,
+      rendementOpEigenInleg,
+      gemiddeldeWaardestijging,
+      totaalRendementInclWaardestijging,
+    };
+  }, [form, initialData, expenseSource]);
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
 
   const calculationRows: Array<{
     label: string;
@@ -578,10 +953,23 @@ export default function StartpuntClient({
     <>
       <style>{styles}</style>
 
+<<<<<<< HEAD
       <section className="case-editor no-print">
         <div>
           <p className="brand">Snelle invoer</p>
           <h2>Nieuwe casus</h2>
+=======
+      <section className="input-panel no-print">
+        <div className="input-panel-head">
+          <div>
+            <span>Live invoer</span>
+            <strong>Startpunt analyse</strong>
+          </div>
+
+          <button type="button" onClick={resetForm}>
+            Reset naar voorbeeldwaardes
+          </button>
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -592,6 +980,18 @@ export default function StartpuntClient({
             value={form.adres}
             onChange={(value) => updateField("adres", value)}
           />
+<<<<<<< HEAD
+=======
+<label className="input-field image-input-field">
+  <span>Afbeelding vastgoed</span>
+
+  <input
+    type="file"
+    accept="image/png, image/jpeg, image/webp"
+    onChange={handleImageUpload}
+  />
+</label>
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
           <InputField
             label="Marktwaarde"
             name="marktwaarde"
@@ -620,6 +1020,7 @@ export default function StartpuntClient({
             value={form.rentePercentage}
             onChange={(value) => updateField("rentePercentage", value)}
           />
+<<<<<<< HEAD
           <InputField
             label="Huur per maand"
             name="huur"
@@ -645,6 +1046,70 @@ export default function StartpuntClient({
             Maak leeg
           </button>
         </form>
+=======
+
+          <SelectField
+            label="Fiscaal partner?"
+            value={form.fiscaalPartner}
+            onChange={(value) => updateField("fiscaalPartner", value)}
+          />
+
+          <SelectField
+            label="Heffingsvrij vermogen toepassen?"
+            value={form.heffingsvrijVermogenToepassen}
+            onChange={(value) =>
+              updateField("heffingsvrijVermogenToepassen", value)
+            }
+          />
+
+          <InputField
+            label="Box 3 WOZ %"
+            value={form.box3WozPercentage}
+            onChange={(value) => updateField("box3WozPercentage", value)}
+          />
+
+          <InputField
+            label="Box 3 financiering %"
+            value={form.box3FinancieringPercentage}
+            onChange={(value) =>
+              updateField("box3FinancieringPercentage", value)
+            }
+          />
+
+          <InputField
+            label="Box-3 tarief %"
+            value={form.box3BelastingPercentage}
+            onChange={(value) => updateField("box3BelastingPercentage", value)}
+          />
+
+          <InputField
+            label="Waardestijging %"
+            value={form.gemiddeldeWaardestijging}
+            onChange={(value) => updateField("gemiddeldeWaardestijging", value)}
+          />
+        </div>
+
+        <div className="expense-input-section">
+          <div className="expense-input-head">
+            <strong>Exploitatiekosten per jaar</strong>
+            <span>
+              Totaal: {costEuroValue(data.exploitatiekostenTotaal)} ·{" "}
+              {pctAbsValue(data.exploitatiekostenPercentage)} van de huur
+            </span>
+          </div>
+
+          <div className="expense-input-grid">
+            {initialData.exploitatiekosten.map((item, index) => (
+              <InputField
+                key={item.name}
+                label={item.name}
+                value={form.exploitatiekosten[index] ?? ""}
+                onChange={(value) => updateExpense(index, value)}
+              />
+            ))}
+          </div>
+        </div>
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
       </section>
 
       <main className="report" aria-live="polite">
@@ -694,12 +1159,53 @@ export default function StartpuntClient({
             />
           </section>
 
+<<<<<<< HEAD
           <section className="main-grid">
             <aside className="property-panel">
               <img
                 src={imageSource}
                 alt={`Vastgoedobject ${data.objectNaam}`}
                 onError={() => setImageFailed(true)}
+=======
+        <section className="kpi-grid">
+          <KpiCard
+            label="Bruto rendement"
+            value={pctValue(data.brutoRendementMarktwaarde)}
+            text="Huur per jaar gedeeld door marktwaarde."
+          />
+          <KpiCard
+            label="Na rente resteert"
+            value={euroValue(data.naRenteResteert)}
+            text="Huurinkomsten na jaarlijkse rentelasten."
+          />
+          <KpiCard
+            label="Netto huurinkomsten"
+            value={euroValue(data.nettoHuurinkomsten)}
+            text="Na rente, exploitatiekosten en vermogensbelasting."
+          />
+          <KpiCard
+            label="Totaal incl. waardestijging"
+            value={pctValue(data.totaalRendementInclWaardestijging)}
+            text="Rendement op eigen inleg plus waardestijging."
+          />
+        </section>
+
+        <section className="intro-grid">
+          <div className="photo-card">
+            <div
+              className="photo-wrap"
+              style={{
+                backgroundImage: `url("${uploadedImage ?? data.afbeeldingUrl}")`,
+              }}
+            >
+              <div className="photo-fallback">Foto vastgoed</div>
+            </div>
+
+            <div className="value-list">
+              <InfoLine
+                label="Marktwaarde"
+                value={euroValue(data.marktwaardeVastgoed)}
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
               />
               <dl>
                 <InfoLine
@@ -732,6 +1238,7 @@ export default function StartpuntClient({
             </section>
           </section>
 
+<<<<<<< HEAD
           <section className="text-panel">
             <SectionTitle number="02" title="Kernbeeld" />
             <p>
@@ -742,6 +1249,91 @@ export default function StartpuntClient({
               rekenvoorbeeld{" "}
               <strong>{signedEuroValue(data.nettoHuur)}</strong> aan netto
               huurinkomsten over.
+=======
+            <div className="calc-table">
+              {calculationRows.map(([label, value, variant]) => (
+                <div
+                  key={label}
+                  className={[
+                    "calc-row",
+                    variant === "soft" ? "soft-row" : "",
+                    variant === "main" ? "main-row" : "",
+                  ].join(" ")}
+                >
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="card text-card kernbeeld">
+  <SectionTitle number="02" title="Kernbeeld" />
+
+  <p>
+    Het bruto rendement van{" "}
+    <strong>{pctValue(data.brutoRendementMarktwaarde)}</strong> lijkt
+    aantrekkelijk, maar geeft een onvolledig beeld. Van de jaarlijkse
+    huurinkomsten van <strong>{euroValue(data.huurPerJaar)}</strong> gaan nog{" "}
+    <strong>{costEuroValue(data.rentelastenPerJaar)}</strong> aan rente,{" "}
+    <strong>{costEuroValue(data.exploitatiekostenTotaal)}</strong> aan
+    exploitatiekosten en{" "}
+    <strong>{costEuroValue(data.vermogensbelastingPerJaar)}</strong> aan
+    vermogensbelasting af. In totaal verdwijnt daarmee{" "}
+    <strong>
+      {costEuroValue(
+        Math.abs(toNumber(data.rentelastenPerJaar)) +
+          Math.abs(toNumber(data.exploitatiekostenTotaal)) +
+          Math.abs(toNumber(data.vermogensbelastingPerJaar))
+      )}
+    </strong>
+    ,{" "}
+    <strong>
+      {pctAbsValue(
+        data.huurPerJaar && data.huurPerJaar !== 0
+          ? (
+              Math.abs(toNumber(data.rentelastenPerJaar)) +
+              Math.abs(toNumber(data.exploitatiekostenTotaal)) +
+              Math.abs(toNumber(data.vermogensbelastingPerJaar))
+            ) / data.huurPerJaar
+          : null
+      )}
+    </strong>{" "}
+    van de bruto huurinkomsten. Uiteindelijk resteert{" "}
+    <strong>{euroValue(data.nettoHuurinkomsten)}</strong> aan netto
+    huurinkomsten.
+  </p>
+
+  <p>
+    Het totale nettorendement inclusief waardestijging bedraagt{" "}
+    <strong>{pctValue(data.totaalRendementInclWaardestijging)}</strong>.
+    Hiervan bestaat{" "}
+    <strong>{pctValue(data.gemiddeldeWaardestijging)}</strong> uit de verwachte
+    waardestijging van het vastgoed. Waardestijging kan het totale rendement verbeteren, maar is geen gegarandeerde kasstroom en komt pas
+    beschikbaar bij verkoop of herfinanciering. De directe kasstroom uit verhuur
+    bedraagt daarom{" "}
+    <strong>{pctValue(data.rendementOpEigenInleg)}</strong>.
+  </p>
+</section>
+
+        <footer className="footer">
+          <span>{config.footerLabel}</span>
+          <span>Pagina 1 / 2</span>
+        </footer>
+      </article>
+      <article className="sheet">
+        <section className="page-two-grid">
+          <div className="card">
+            <SectionTitle number="03" title="Exploitatiekosten" />
+
+            <p className="intro">
+              De exploitatiekosten bedragen samen{" "}
+              <strong>{costEuroValue(data.exploitatiekostenTotaal)}</strong>.
+              Dat is{" "}
+              <strong>{pctAbsValue(data.exploitatiekostenPercentage)}</strong>{" "}
+              van de jaarlijkse huurinkomsten.
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
             </p>
             <p>
               De gemiddelde waardestijging van{" "}
@@ -937,6 +1529,7 @@ export default function StartpuntClient({
             </article>
           </section>
 
+<<<<<<< HEAD
           <footer>
             <span>{config.footerLabel}</span>
             <span>Pagina 2 / 2</span>
@@ -944,6 +1537,182 @@ export default function StartpuntClient({
         </section>
       </main>
     </>
+=======
+          <div className="card tinted">
+            <SectionTitle number="04" title="Box 3-uitgangspunt" />
+
+            <div className="tax-list tax-list-compact">
+              <InfoLine
+                label="Fiscaal partner"
+                value={data.fiscaalPartner ? "Ja" : "Nee"}
+              />
+
+              <InfoLine
+                label="Heffingsvrij vermogen benut"
+                value={data.heffingsvrijVermogenToepassen ? "Ja" : "Nee"}
+              />
+
+              <InfoLine
+                label="Schuldendrempel"
+                value={euroValue(data.toegepasteSchuldendrempel)}
+              />
+
+              <InfoLine
+                label="Toegepaste vrijstelling"
+                value={euroValue(data.toegepastHeffingsvrijVermogen)}
+              />
+
+              <InfoLine
+                label={`WOZ-waarde x ${pctValue(data.box3WozPercentage)}`}
+                value={euroValue(data.box3WozBedrag)}
+              />
+
+              <InfoLine
+                label={`Aftrekbare schuld x ${pctValue(
+                  data.box3FinancieringPercentage
+                )}`}
+                value={costEuroValue(data.box3FinancieringBedrag)}
+              />
+
+              <InfoLine
+                label="Rendementsgrondslag"
+                value={euroValue(data.box3Grondslag)}
+              />
+
+              <InfoLine
+                label="Grondslag na vrijstelling"
+                value={euroValue(data.grondslagSparenBeleggen)}
+                strong
+              />
+
+              <InfoLine
+                label="Belastbaar forfaitair rendement"
+                value={euroValue(data.voordeelSparenBeleggen)}
+              />
+
+              <InfoLine
+                label="Box-3 tarief"
+                value={pctValue(data.box3BelastingPercentage)}
+              />
+
+              <InfoLine
+                label="Vermogensbelasting"
+                value={costEuroValue(data.vermogensbelastingPerJaar)}
+                strong
+              />
+            </div>
+
+            <p className="box3-note">
+            Deze Box 3-berekening is gebaseerd op de huidige wet- en regelgeving. De toekomstige fiscale behandeling van vastgoed is onzeker: tarieven, vrijstellingen en de berekeningsmethode kunnen in de toekomst veranderen. 
+            </p>
+          </div>
+        </section>
+
+        <section className="page-two-grid lower">
+          <div className="card">
+            <SectionTitle number="05" title="Kasstroomopbouw" />
+
+            <Bar
+              label="Huur per jaar"
+              value={data.huurPerJaar}
+              max={data.huurPerJaar}
+              positive
+            />
+            <Bar
+              label="Rentelasten"
+              value={data.rentelastenPerJaar}
+              max={data.huurPerJaar}
+            />
+            <Bar
+              label="Exploitatiekosten"
+              value={data.exploitatiekostenTotaal}
+              max={data.huurPerJaar}
+            />
+            <Bar
+              label="Vermogensbelasting"
+              value={data.vermogensbelastingPerJaar}
+              max={data.huurPerJaar}
+            />
+            <Bar
+              label="Netto huurinkomsten"
+              value={data.nettoHuurinkomsten}
+              max={data.huurPerJaar}
+              positive
+            />
+          </div>
+
+          <div className="card text-card">
+  <SectionTitle number="06" title="Risico en weerbaarheid" />
+
+  <p>
+    Van de <strong>{euroValue(data.huurPerJaar)}</strong> bruto jaarhuur gaat
+    in dit rekenvoorbeeld{" "}
+    <strong>
+      {euroValue(
+        Math.abs(toNumber(data.rentelastenPerJaar)) +
+          Math.abs(toNumber(data.exploitatiekostenTotaal)) +
+          Math.abs(toNumber(data.vermogensbelastingPerJaar))
+      )}
+    </strong>{" "}
+    op aan rente, exploitatiekosten en vermogensbelasting. Daardoor blijft
+    ongeveer{" "}
+    <strong>
+      {pctValue(
+        data.huurPerJaar !== null && data.huurPerJaar !== 0
+          ? toNumber(data.nettoHuurinkomsten) / data.huurPerJaar
+          : null
+      )}
+    </strong>{" "}
+    van de huur als directe netto kasstroom over. Anders gezegd: van iedere
+    euro aan huurinkomsten resteert circa{" "}
+    <strong>
+    {euroDecimalValue(
+        data.huurPerJaar !== null && data.huurPerJaar !== 0
+          ? toNumber(data.nettoHuurinkomsten) / data.huurPerJaar
+          : null
+      )}
+    </strong>{" "}
+    netto.
+  </p>
+
+  <p>
+    Deze uitkomst is een momentopname. Langere leegstand, onverwacht onderhoud,
+    hogere financieringslasten of wijzigingen in de fiscale regelgeving kunnen
+    de kasstroom verder verlagen. Het aanhouden van een voldoende
+    liquiditeitsbuffer blijft daarom belangrijk.
+  </p>
+
+  <div className="closing-box">
+    <span>Netto per € 1 huur</span>
+    <strong>
+    {euroDecimalValue(
+        data.huurPerJaar !== null && data.huurPerJaar !== 0
+          ? toNumber(data.nettoHuurinkomsten) / data.huurPerJaar
+          : null
+      )}
+    </strong>
+  </div>
+
+  <div className="closing-box soft">
+    <span>Kosten en belasting</span>
+    <strong>
+      {euroValue(
+        Math.abs(toNumber(data.rentelastenPerJaar)) +
+          Math.abs(toNumber(data.exploitatiekostenTotaal)) +
+          Math.abs(toNumber(data.vermogensbelastingPerJaar))
+      )}
+    </strong>
+  </div>
+</div>
+        </section>
+
+        <footer className="footer">
+          <span>{config.footerLabel}</span>
+          <span>Pagina 2 / 2</span>
+        </footer>
+      </article>
+    </main>
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
   );
 }
 
@@ -977,6 +1746,41 @@ function InputField({
 }
 
 function SelectField({
+<<<<<<< HEAD
+=======
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: "ja" | "nee";
+  onChange: (value: "ja" | "nee") => void;
+}) {
+  return (
+    <label className="input-field">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as "ja" | "nee")}
+      >
+        <option value="ja">Ja</option>
+        <option value="nee">Nee</option>
+      </select>
+    </label>
+  );
+}
+
+function SectionTitle({ number, title }: { number: string; title: string }) {
+  return (
+    <div className="section-title">
+      <span>{number}</span>
+      <h3>{title}</h3>
+    </div>
+  );
+}
+
+function InfoLine({
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
   label,
   name,
   value,
@@ -1132,8 +1936,13 @@ const styles = `
     font-weight: 800;
   }
 
+<<<<<<< HEAD
   .case-editor input,
   .case-editor select {
+=======
+  .input-field input,
+  .input-field select {
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
     width: 100%;
     min-height: 38px;
     padding: 9px 10px;
@@ -1144,6 +1953,7 @@ const styles = `
     font: inherit;
   }
 
+<<<<<<< HEAD
   .case-editor input:focus,
   .case-editor select:focus {
     outline: 2px solid rgba(139, 127, 115, 0.3);
@@ -1180,6 +1990,53 @@ const styles = `
     min-height: 1320px;
     margin: 0 auto;
     padding: 54px 56px 36px;
+=======
+  .input-field select {
+    cursor: pointer;
+  }
+
+  .input-field input:focus,
+  .input-field select:focus {
+    border-color: rgba(106, 93, 82, 0.62);
+    box-shadow: 0 0 0 3px rgba(183, 172, 155, 0.22);
+  }
+
+  .expense-input-section {
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(106, 93, 82, 0.18);
+  }
+
+  .expense-input-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: baseline;
+    margin-bottom: 12px;
+  }
+
+  .expense-input-head strong {
+    font-size: 15px;
+  }
+
+  .expense-input-head span {
+    color: var(--walnut);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .expense-input-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  .sheet {
+    width: 210mm;
+    height: 297mm;
+    margin: 0 auto 28px auto;
+    padding: 12mm;
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
     background: var(--paper);
     box-shadow: 0 24px 70px rgba(32, 31, 28, 0.18);
   }
@@ -1420,12 +2277,69 @@ const styles = `
   footer {
     display: flex;
     justify-content: space-between;
+<<<<<<< HEAD
     margin-top: 34px;
     padding-top: 22px;
     border-top: 1px solid var(--line);
     color: #8e8479;
     font-size: 12px;
     letter-spacing: 1px;
+=======
+    gap: 5mm;
+    padding: 1.42mm 0;
+    border-bottom: 1px solid rgba(151, 144, 134, 0.28);
+    font-size: 7.85pt;
+    line-height: 1.08;
+  }
+
+  .calc-row strong {
+    white-space: nowrap;
+  }
+
+  .soft-row {
+    background: rgba(226, 226, 222, 0.88);
+    margin: 1mm -2mm;
+    padding: 1.7mm 2mm;
+    border-radius: 2.5mm;
+    border-bottom: none;
+  }
+
+  .main-row {
+    background: rgba(106, 93, 82, 0.88);
+    color: var(--white);
+    margin: 1mm -2mm;
+    padding: 1.8mm 2mm;
+    border-radius: 2.5mm;
+    border-bottom: none;
+  }
+
+  .main-row span,
+  .main-row strong {
+    color: var(--white);
+  }
+
+  .kernbeeld {
+    flex: 1;
+  }
+
+  .text-card {
+  font-size: 8.1pt;
+  line-height: 1.32;
+}
+
+.text-card p {
+  margin: 0 0 2.2mm 0;
+}
+
+  .footer {
+    margin-top: auto;
+    padding-top: 3mm;
+    border-top: 1px solid rgba(151, 144, 134, 0.28);
+    display: flex;
+    justify-content: space-between;
+    color: var(--ash);
+    font-size: 7pt;
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
     text-transform: uppercase;
   }
 
@@ -1661,6 +2575,7 @@ const styles = `
   @media print {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     * {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
@@ -1757,7 +2672,48 @@ const styles = `
       print-color-adjust: exact !important;
     }
 >>>>>>> 36e4478 (Mooie printlayout herstellen)
+=======
+  .no-print {
+    display: none !important;
+>>>>>>> 92d1873 (Residentieel en bedrijfsmatig start analyse klaar voor feedabck)
   }
+
+  html,
+  body {
+    width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--paper) !important;
+  }
+
+  .screen {
+    width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--paper) !important;
+  }
+
+  .sheet {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
 
   @media screen and (max-width: 900px) {
     .screen {
@@ -1766,13 +2722,14 @@ const styles = `
 >>>>>>> f698cf6 (Huidige wijzigingen bewaren)
     }
 
-    .input-panel {
-      width: 100%;
-      min-width: 720px;
+    .input-grid,
+    .expense-input-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .input-grid {
-      grid-template-columns: repeat(2, 1fr);
+    .expense-input-head {
+      align-items: flex-start;
+      flex-direction: column;
     }
   }
 `;
