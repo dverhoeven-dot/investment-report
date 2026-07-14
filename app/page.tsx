@@ -32,7 +32,7 @@ export default function Home() {
     className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
   >
     La Carolina Project
-  </a>
+    </a>
 
   <a
   href="/investor-residentieel"

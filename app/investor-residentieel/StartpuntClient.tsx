@@ -1659,6 +1659,7 @@ const styles = `
   }
 
   @media print {
+<<<<<<< HEAD
     * {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
@@ -1707,6 +1708,90 @@ const styles = `
     .muted-card {
       break-inside: avoid;
       page-break-inside: avoid;
+=======
+  html,
+  body {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--paper) !important;
+  }
+
+  body {
+    overflow: visible !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .screen {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: var(--paper) !important;
+    display: block !important;
+  }
+
+  .sheet {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    max-width: 210mm !important;
+
+    height: 297mm !important;
+    min-height: 297mm !important;
+    max-height: 297mm !important;
+
+    margin: 0 !important;
+    padding: 12mm !important;
+    box-sizing: border-box !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+
+    overflow: hidden !important;
+    box-shadow: none !important;
+    border: none !important;
+
+    page-break-inside: avoid !important;
+    break-inside: avoid-page !important;
+
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  .hero,
+  .kpi-grid,
+  .intro-grid,
+  .kernbeeld,
+  .small-header,
+  .page-two-grid,
+  .photo-card,
+  .card,
+  .footer {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+
+  @media screen and (max-width: 900px) {
+    .screen {
+      padding: 16px;
+      overflow-x: auto;
+>>>>>>> f698cf6 (Huidige wijzigingen bewaren)
     }
   }
 `;

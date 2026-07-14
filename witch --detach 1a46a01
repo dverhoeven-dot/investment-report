@@ -1,0 +1,50 @@
+[33m1a46a01[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Live invuls sheet
+[33m9fefe64[m Update startpunt analyse residentieel en bedrijfsmatig
+[33mb8d6ebd[m Add temporary investor leaflet page
+[33m068cb69[m nieuwe button
+[33m9b9e874[m new renders Los Naranjos
+[33mf9e2183[m  final round before feedback
+[33mcf22a00[m Bold total project cost row
+[33ma81c734[m  2e ronde feedback
+[33md2ce45c[m laastte 48's eruit
+[33me27b3d4[m lijn niet doortrekken naar exit
+[33m6c27a85[m lijn doortrekken naar exit
+[33ma55a5b5[m exit month dynamisch maken
+[33m3ca6113[m capital deployment grafiek2
+[33m6071be0[m capital deployment grafiek
+[33mf8daa66[m wijzigingen doorvoeren 2.0
+[33me17fb5b[m wijzigingen doorvoeren
+[33m8999d70[m redirect login to home
+[33m4c23640[m change collor agai
+[33mf0fcd73[m change colo of button
+[33ma22ba1a[m change code
+[33m4bbfe1e[m disable indexing
+[33m1d13c9f[m add access protection
+[33m13e738e[m update portfolio report layout
+[33m8da4d78[m portfolio updates
+[33m91b3201[m responsive improvements
+[33mea3c27b[m add portfolio page and homepage link
+[33m9157d8c[m add new project
+[33m3e4c3ea[m Move Los Naranjos photos
+[33m8a59553[m Fix photo folder casing
+[33mb0e332f[m Add multi project support and project photos
+[33m0d8eb57[m Add multi-project reports
+[33ma51a49d[m Make cash plan subtitles dynamic
+[33m9207e82[m Make cash plan subtitles dynamic
+[33m2486ab6[m Remove invalid print button
+[33m7d8c7d0[m Fix PDF print layout
+[33m3bc05b0[m Make fee percentages dynamic
+[33m1269e17[m Fix cashflow metrics
+[33m502a0a9[m Restore dynamic report tables
+[33m2aee404[m Use csv for report data
+[33mf3a7731[m Fix report data parsing
+[33m0ed11a2[m Fix report data parsing
+[33mbaa7f9d[m Fix cash by notary const
+[33m8c87d8c[m Debug report data
+[33mb4894e7[m Fix ReportData key mapping
+[33mb82feb7[m Connect all report tables to Google Sheets
+[33m0c2c398[m Restore working report with live sheet
+[33mb23b56e[m Fix sheet url variable
+[33m88b0890[m Disable sheet cache
+[33ma7cec8d[m Trigger Vercel rebuild
+[33ma10df17[m Initial investment report
