@@ -19,7 +19,12 @@ export default function Home() {
 >
   Nederlandse Portfeuille
 </a>
-
+<a
+  href="/complete-portfolio"
+  className="block rounded-lg border bg-black text-white p-4 shadow-sm hover:opacity-90"
+>
+  Complete Portfolio
+</a>
   <a
     href="/reports/los-naranjos"
     className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
