@@ -230,12 +230,44 @@ function countryShort(country: string) {
   return clean(country);
 }
 
+function countryLabel(country: string) {
+  const normalized = clean(country).toLowerCase();
+
+  if (normalized.includes("netherland") || normalized === "nl") {
+    return "The Netherlands";
+  }
+
+  if (normalized.includes("spain") || normalized === "es") {
+    return "Spain";
+  }
+
+  return clean(country) || "Other";
+}
+
 function getPhotos(name: string) {
   return (
     Object.entries(PORTFOLIO.photos).find(
       ([projectName]) =>
         projectName.toLowerCase().trim() === name.toLowerCase().trim()
     )?.[1] || []
+  );
+}
+
+/**
+ * Uses the Photo URL column from Google Sheets first.
+ * Headers such as "Photo URL", "Image URL" and "Photo" are normalized by
+ * keyName() to photourl, imageurl and photo.
+ *
+ * Example value:
+ * /portfolio-photos-nl-es/la-carolina.jpg
+ */
+function projectPhoto(project: CsvRow) {
+  return (
+    clean(project.photourl) ||
+    clean(project.imageurl) ||
+    clean(project.photo) ||
+    getPhotos(clean(project.project))[0] ||
+    ""
   );
 }
 
@@ -371,13 +403,22 @@ export default async function PortfolioPage() {
     metricOr(metrics, "totalmortgages", calculatedMortgages)
   );
 
-  const allocationItems = current
-    .map((project) => ({
-      name: `${clean(project.project)} · ${countryShort(project.country)}`,
-      value: projectPortfolioValue(project),
-    }))
-    .filter((item) => item.value > 0)
-    .sort((a, b) => b.value - a.value);
+  const allocationItems = Object.values(
+    current.reduce<Record<string, { name: string; value: number }>>(
+      (countries, project) => {
+        const name = countryLabel(project.country);
+        const value = projectPortfolioValue(project);
+
+        if (value <= 0) return countries;
+
+        countries[name] ??= { name, value: 0 };
+        countries[name].value += value;
+
+        return countries;
+      },
+      {}
+    )
+  ).sort((a, b) => b.value - a.value);
 
   const allocationTotal = allocationItems.reduce((sum, item) => sum + item.value, 0);
 
@@ -511,8 +552,8 @@ export default async function PortfolioPage() {
           <div>
             <SectionHeader
               number="02"
-              label="Portfolio Allocation"
-              title="Allocation by Portfolio Value"
+              label="Country Allocation"
+              title="Portfolio Value by Country"
             />
 
             <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm] h-[118mm]">
@@ -844,7 +885,7 @@ function ProjectDetailPage({
   totalPages: number;
 }) {
   const name = clean(project.project);
-  const photos = getPhotos(name);
+  const photo = projectPhoto(project);
 
   const purchase = projectPurchase(project);
   const renovation = projectRenovation(project);
@@ -890,9 +931,9 @@ function ProjectDetailPage({
 
       <div className="grid grid-cols-[1.05fr_0.95fr] gap-[6mm] mt-[5mm]">
         <div>
-          {photos[0] ? (
+          {photo ? (
             <img
-              src={photos[0]}
+              src={photo}
               alt={name}
               className="w-full h-[98mm] object-cover rounded-xl border border-[#E4D8C2]"
             />
@@ -983,7 +1024,6 @@ function ProjectDetailPage({
 function PipelineCard({ project }: { project: CsvRow }) {
   const name = clean(project.project);
   const location = clean(project.location);
-  const photos = getPhotos(name);
   const purchase = parseNumber(project.expectedpurchaseprice);
   const renovation = projectRenovation(project);
   const expectedCost = projectTotalCost(project) || purchase + renovation;
@@ -993,7 +1033,7 @@ function PipelineCard({ project }: { project: CsvRow }) {
   const plotSize = clean(project.plotsizem || project.plotsizem2 || project.plotsize);
   const builtArea = clean(project.builtaream || project.builtaream2 || project.builtarea);
   const mapImage = clean(project.mapimage || project.mapimageurl);
-  const coverImage = mapImage || photos[0];
+  const coverImage = mapImage || projectPhoto(project);
   const badgeLabel = clean(project.badgelabel || project.type) || "Project";
 
   return (
@@ -1054,7 +1094,7 @@ function PipelineCard({ project }: { project: CsvRow }) {
 
 function SoldProjectCard({ project }: { project: CsvRow }) {
   const name = clean(project.project);
-  const photos = getPhotos(name);
+  const photo = projectPhoto(project);
 
   const purchase = projectPurchase(project);
   const renovation = parseNumber(project.renovationcosts) || projectRenovation(project);
@@ -1071,11 +1111,11 @@ function SoldProjectCard({ project }: { project: CsvRow }) {
 
   return (
     <div className="bg-white border border-[#E4D8C2] rounded-xl overflow-hidden h-[147mm]">
-      {photos[0] ? (
-        <img src={photos[0]} alt={name} className="w-full h-[53mm] object-cover" />
+      {photo ? (
+        <img src={photo} alt={name} className="w-full h-[53mm] object-cover" />
       ) : (
         <div className="w-full h-[53mm] bg-[#E4D8C2] flex items-center justify-center text-[10px] text-gray-500">
-          Add project photo in PORTFOLIO.photos
+          Add a Photo URL in Google Sheets
         </div>
       )}
 
