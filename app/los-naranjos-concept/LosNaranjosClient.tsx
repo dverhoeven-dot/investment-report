@@ -1,7 +1,6 @@
-/// <reference lib="dom" />
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export type LosNaranjosConfig = {
   title: string;
@@ -9,10 +8,19 @@ export type LosNaranjosConfig = {
   footerLabel: string;
 };
 
+type ProjectOwnership = "own" | "shared";
+type ProjectType = "New Build" | "Renovation";
+
+type Downpayment = {
+  month: string;
+  amount: string;
+};
+
 export type LosNaranjosInitialData = {
   projectName: string;
   analysisDate: string;
   projectType: string;
+  projectOwnership?: ProjectOwnership;
   surfaceM2: number;
   plotM2: number;
   durationMonths: number;
@@ -26,6 +34,7 @@ export type LosNaranjosInitialData = {
   buildCostPerM2: number;
   contingencyPercentage: number;
   furniture: number;
+  furniturePaymentMonths?: number;
   projectManagementPercentage: number;
 
   salePrice: number;
@@ -47,7 +56,8 @@ export type LosNaranjosInitialData = {
 type FormState = {
   projectName: string;
   analysisDate: string;
-  projectType: string;
+  projectType: ProjectType;
+  projectOwnership: ProjectOwnership;
   surfaceM2: string;
   plotM2: string;
   durationMonths: string;
@@ -61,17 +71,14 @@ type FormState = {
   buildCostPerM2: string;
   contingencyPercentage: string;
   furniture: string;
+  furniturePaymentMonths: string;
   projectManagementPercentage: string;
 
   salePrice: string;
   agentCommissionPercentage: string;
 
-  firstPaymentMonth: string;
-  firstPaymentAmount: string;
-  secondPaymentMonth: string;
-  secondPaymentAmount: string;
-  thirdPaymentMonth: string;
-  thirdPaymentAmount: string;
+  downpaymentCount: string;
+  downpayments: Downpayment[];
   closingMonth: string;
   constructionStartMonth: string;
   constructionDraws: string;
@@ -86,6 +93,12 @@ type CashflowItem = {
 };
 
 const STORAGE_KEY = "l3capital.los-naranjos.first-setup.v1";
+
+const DEFAULT_PROJECT_PHOTOS = [
+  "/los-naranjos-concept/photo1.jpg",
+  "/los-naranjos-concept/photo2.jpg",
+  "/los-naranjos-concept/photo3.jpg",
+];
 
 const euroFormatter = new Intl.NumberFormat("nl-NL", {
   style: "currency",
@@ -136,15 +149,45 @@ function parseNumber(value: string) {
 }
 
 function parsePercent(value: string) {
-  const parsed = parseNumber(value);
-  return Math.abs(parsed) > 1 ? parsed / 100 : parsed;
+  // In de live invoer betekent 1 altijd 1% en 0,9 altijd 0,9%.
+  return parseNumber(value) / 100;
+}
+
+function clampInteger(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function normalizeProjectType(value: unknown): ProjectType {
+  return String(value).toLowerCase().includes("reno")
+    ? "Renovation"
+    : "New Build";
+}
+
+function normalizeProjectOwnership(value: unknown): ProjectOwnership {
+  return value === "own" ? "own" : "shared";
 }
 
 function createInitialForm(data: LosNaranjosInitialData): FormState {
+  const downpayments: Downpayment[] = [
+    {
+      month: inputNumber(data.firstPaymentMonth),
+      amount: inputNumber(data.firstPaymentAmount),
+    },
+    {
+      month: inputNumber(data.secondPaymentMonth),
+      amount: inputNumber(data.secondPaymentAmount),
+    },
+    {
+      month: inputNumber(data.thirdPaymentMonth),
+      amount: inputNumber(data.thirdPaymentAmount),
+    },
+  ];
+
   return {
     projectName: data.projectName,
     analysisDate: data.analysisDate,
-    projectType: data.projectType,
+    projectType: "Renovation",
+    projectOwnership: "own",
     surfaceM2: inputNumber(data.surfaceM2),
     plotM2: inputNumber(data.plotM2),
     durationMonths: inputNumber(data.durationMonths),
@@ -158,6 +201,7 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     buildCostPerM2: inputNumber(data.buildCostPerM2),
     contingencyPercentage: inputPercent(data.contingencyPercentage),
     furniture: inputNumber(data.furniture),
+    furniturePaymentMonths: inputNumber(data.furniturePaymentMonths ?? 1),
     projectManagementPercentage: inputPercent(
       data.projectManagementPercentage
     ),
@@ -165,15 +209,77 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     salePrice: inputNumber(data.salePrice),
     agentCommissionPercentage: inputPercent(data.agentCommissionPercentage),
 
-    firstPaymentMonth: inputNumber(data.firstPaymentMonth),
-    firstPaymentAmount: inputNumber(data.firstPaymentAmount),
-    secondPaymentMonth: inputNumber(data.secondPaymentMonth),
-    secondPaymentAmount: inputNumber(data.secondPaymentAmount),
-    thirdPaymentMonth: inputNumber(data.thirdPaymentMonth),
-    thirdPaymentAmount: inputNumber(data.thirdPaymentAmount),
+    downpaymentCount: String(downpayments.length),
+    downpayments,
     closingMonth: inputNumber(data.closingMonth),
     constructionStartMonth: inputNumber(data.constructionStartMonth),
     constructionDraws: inputNumber(data.constructionDraws),
+  };
+}
+
+function normalizeStoredForm(
+  value: unknown,
+  initialData: LosNaranjosInitialData
+): FormState {
+  const base = createInitialForm(initialData);
+  if (!value || typeof value !== "object") return base;
+
+  const stored = value as Partial<FormState> & {
+    firstPaymentMonth?: string;
+    firstPaymentAmount?: string;
+    secondPaymentMonth?: string;
+    secondPaymentAmount?: string;
+    thirdPaymentMonth?: string;
+    thirdPaymentAmount?: string;
+  };
+
+  const legacyDownpayments: Downpayment[] = [
+    {
+      month: stored.firstPaymentMonth ?? base.downpayments[0]?.month ?? "",
+      amount: stored.firstPaymentAmount ?? base.downpayments[0]?.amount ?? "",
+    },
+    {
+      month: stored.secondPaymentMonth ?? base.downpayments[1]?.month ?? "",
+      amount: stored.secondPaymentAmount ?? base.downpayments[1]?.amount ?? "",
+    },
+    {
+      month: stored.thirdPaymentMonth ?? base.downpayments[2]?.month ?? "",
+      amount: stored.thirdPaymentAmount ?? base.downpayments[2]?.amount ?? "",
+    },
+  ];
+
+  const sourceDownpayments = Array.isArray(stored.downpayments)
+    ? stored.downpayments
+        .filter(
+          (item): item is Downpayment =>
+            Boolean(item && typeof item === "object")
+        )
+        .map((item) => ({
+          month: String(item.month ?? ""),
+          amount: String(item.amount ?? ""),
+        }))
+    : legacyDownpayments;
+
+  const requestedCount = clampInteger(
+    parseNumber(String(stored.downpaymentCount ?? sourceDownpayments.length)),
+    0,
+    10
+  );
+
+  const downpayments = sourceDownpayments.slice(0, requestedCount);
+  while (downpayments.length < requestedCount) {
+    downpayments.push({ month: "", amount: "" });
+  }
+
+  return {
+    ...base,
+    ...stored,
+    projectType: normalizeProjectType(stored.projectType ?? base.projectType),
+    projectOwnership: normalizeProjectOwnership(
+      stored.projectOwnership ?? base.projectOwnership
+    ),
+    downpaymentCount: String(requestedCount),
+    downpayments,
   };
 }
 
@@ -202,13 +308,12 @@ export default function LosNaranjosClient({
     createInitialForm(initialData)
   );
   const [storageReady, setStorageReady] = useState(false);
-  const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        setForm({ ...createInitialForm(initialData), ...JSON.parse(saved) });
+        setForm(normalizeStoredForm(JSON.parse(saved), initialData));
       }
     } catch (error) {
       console.warn("De lokale Los Naranjos-invoer kon niet worden geladen.", error);
@@ -222,36 +327,58 @@ export default function LosNaranjosClient({
     localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
   }, [form, storageReady]);
 
-  function updateField(field: keyof FormState, value: string) {
+  function updateField<K extends keyof FormState>(
+    field: K,
+    value: FormState[K]
+  ) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateDownpaymentCount(value: string) {
+    const count = clampInteger(parseNumber(value), 0, 10);
+
+    setForm((current) => {
+      const downpayments = current.downpayments.slice(0, count);
+      while (downpayments.length < count) {
+        downpayments.push({ month: "", amount: "" });
+      }
+
+      return {
+        ...current,
+        downpaymentCount: String(count),
+        downpayments,
+      };
+    });
+  }
+
+  function updateDownpayment(
+    index: number,
+    field: keyof Downpayment,
+    value: string
+  ) {
+    setForm((current) => ({
+      ...current,
+      downpayments: current.downpayments.map((payment, paymentIndex) =>
+        paymentIndex === index ? { ...payment, [field]: value } : payment
+      ),
+    }));
+  }
+
+  function printReport() {
+    window.print();
   }
 
   function resetForm() {
     localStorage.removeItem(STORAGE_KEY);
     setForm(createInitialForm(initialData));
-    setUploadedPhotos([]);
   }
 
-  function handlePhotos(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.currentTarget.files ?? []).slice(0, 3);
-    Promise.all(
-      files.map(
-        (file) =>
-          new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(file);
-          })
-      )
-    )
-      .then(setUploadedPhotos)
-      .catch((error) => console.warn("Foto's konden niet worden geladen.", error));
-  }
 
   const data = useMemo(() => {
     const projectName = form.projectName.trim() || config.title;
-    const projectType = form.projectType.trim() || "Project";
+    const projectType = form.projectType;
+    const projectOwnership = form.projectOwnership;
+    const isSharedProject = projectOwnership === "shared";
     const surfaceM2 = Math.max(0, parseNumber(form.surfaceM2));
     const plotM2 = Math.max(0, parseNumber(form.plotM2));
     const durationMonths = Math.max(1, Math.round(parseNumber(form.durationMonths)));
@@ -286,16 +413,16 @@ export default function LosNaranjosClient({
       parsePercent(form.contingencyPercentage)
     );
     const furniture = Math.max(0, parseNumber(form.furniture));
-    const projectManagementPercentage = Math.max(
-      0,
-      parsePercent(form.projectManagementPercentage)
-    );
+    const projectManagementPercentage = isSharedProject
+      ? Math.max(0, parsePercent(form.projectManagementPercentage))
+      : 0;
 
     const baseBuildCost = surfaceM2 * buildCostPerM2;
     const contingency = baseBuildCost * contingencyPercentage;
     const projectSubtotal = baseBuildCost + contingency + furniture;
-    const projectManagement =
-      projectSubtotal * projectManagementPercentage;
+    const projectManagement = isSharedProject
+      ? projectSubtotal * projectManagementPercentage
+      : 0;
     const totalProjectCost = projectSubtotal + projectManagement;
     const capitalDeployed = totalAcquisition + totalProjectCost;
 
@@ -310,18 +437,19 @@ export default function LosNaranjosClient({
     const roi = capitalDeployed ? netProfit / capitalDeployed : 0;
     const irr = calculateAnnualizedReturn(roi, durationMonths);
 
-    const firstPaymentMonth = Math.max(
+    const downpaymentCount = clampInteger(
+      parseNumber(form.downpaymentCount),
       0,
-      Math.round(parseNumber(form.firstPaymentMonth))
+      10
     );
-    const secondPaymentMonth = Math.max(
-      0,
-      Math.round(parseNumber(form.secondPaymentMonth))
-    );
-    const thirdPaymentMonth = Math.max(
-      0,
-      Math.round(parseNumber(form.thirdPaymentMonth))
-    );
+    const downpayments = form.downpayments
+      .slice(0, downpaymentCount)
+      .map((payment, index) => ({
+        index,
+        month: Math.max(0, Math.round(parseNumber(payment.month))),
+        amount: Math.max(0, parseNumber(payment.amount)),
+      }));
+
     const closingMonth = Math.max(
       0,
       Math.round(parseNumber(form.closingMonth))
@@ -334,55 +462,54 @@ export default function LosNaranjosClient({
       1,
       Math.round(parseNumber(form.constructionDraws))
     );
+    const furniturePaymentMonths = clampInteger(
+      parseNumber(form.furniturePaymentMonths),
+      1,
+      constructionDraws
+    );
 
-    const firstPaymentAmount = Math.max(
-      0,
-      parseNumber(form.firstPaymentAmount)
-    );
-    const secondPaymentAmount = Math.max(
-      0,
-      parseNumber(form.secondPaymentAmount)
-    );
-    const thirdPaymentAmount = Math.max(
-      0,
-      parseNumber(form.thirdPaymentAmount)
+    const totalDownpayments = downpayments.reduce(
+      (sum, payment) => sum + payment.amount,
+      0
     );
     const finalPurchasePayment = Math.max(
       0,
-      purchasePrice -
-        firstPaymentAmount -
-        secondPaymentAmount -
-        thirdPaymentAmount
+      purchasePrice - totalDownpayments
     );
 
     const rawCashflow: Omit<CashflowItem, "runningCapital">[] = [
-      {
-        month: firstPaymentMonth,
-        event: "Downpayment 1",
-        outflow: firstPaymentAmount,
-        inflow: 0,
-      },
-      {
-        month: secondPaymentMonth,
-        event: "Downpayment 2",
-        outflow: secondPaymentAmount,
-        inflow: 0,
-      },
-      {
-        month: thirdPaymentMonth,
-        event: "Downpayment 3",
-        outflow: thirdPaymentAmount,
-        inflow: 0,
-      },
+      ...downpayments
+        .filter((payment) => payment.amount > 0)
+        .map((payment) => ({
+          month: payment.month,
+          event: `Downpayment ${payment.index + 1}`,
+          outflow: payment.amount,
+          inflow: 0,
+        })),
       {
         month: closingMonth,
         event: "Final purchase payment",
         outflow: finalPurchasePayment,
         inflow: 0,
       },
-      { month: closingMonth, event: "Transfer tax", outflow: transferTax, inflow: 0 },
-      { month: closingMonth, event: "Lawyer fee", outflow: lawyerFee, inflow: 0 },
-      { month: closingMonth, event: "Notary fee", outflow: notaryFee, inflow: 0 },
+      {
+        month: closingMonth,
+        event: "Transfer tax",
+        outflow: transferTax,
+        inflow: 0,
+      },
+      {
+        month: closingMonth,
+        event: "Lawyer fee",
+        outflow: lawyerFee,
+        inflow: 0,
+      },
+      {
+        month: closingMonth,
+        event: "Notary fee",
+        outflow: notaryFee,
+        inflow: 0,
+      },
       {
         month: closingMonth,
         event: "Other acquisition costs",
@@ -391,8 +518,26 @@ export default function LosNaranjosClient({
       },
     ];
 
-    const constructionDrawAmount = totalProjectCost / constructionDraws;
+    // De gewone projectkosten worden gelijk over alle construction draws verdeeld.
+    // Het interieur wordt daar niet als losse regel naast gezet, maar bovenop de
+    // laatste gekozen construction draws verdeeld. Daardoor blijft iedere periode
+    // één construction-betaling tonen en wordt het interieur niet dubbel geteld.
+    const projectCostExcludingFurniture = Math.max(
+      0,
+      totalProjectCost - furniture
+    );
+    const baseConstructionDrawAmount =
+      projectCostExcludingFurniture / constructionDraws;
+    const furniturePerSelectedDraw = furniture / furniturePaymentMonths;
+    const firstFurnitureDrawIndex =
+      constructionDraws - furniturePaymentMonths;
+
     for (let index = 0; index < constructionDraws; index += 1) {
+      const includesFurniture = index >= firstFurnitureDrawIndex;
+      const constructionDrawAmount =
+        baseConstructionDrawAmount +
+        (includesFurniture ? furniturePerSelectedDraw : 0);
+
       rawCashflow.push({
         month: constructionStartMonth + index,
         event: `Construction draw ${index + 1}/${constructionDraws}`,
@@ -416,6 +561,10 @@ export default function LosNaranjosClient({
       return { ...item, runningCapital };
     });
 
+    const cashAtMonth0 = cashflow
+      .filter((item) => item.month === 0)
+      .reduce((sum, item) => sum + item.outflow, 0);
+
     const monthlyCapital = Array.from({ length: durationMonths + 1 }, (_, month) => {
       const matching = cashflow.filter((item) => item.month <= month);
       return matching.length > 0
@@ -430,8 +579,9 @@ export default function LosNaranjosClient({
     const averageCapitalDuration = peakDeployed
       ? capitalMonthArea / peakDeployed
       : 0;
-    const cashByConstructionStart =
-      monthlyCapital[Math.min(constructionStartMonth, durationMonths)] ?? 0;
+    // Alleen aankoopprijs, downpayments/final payment, belasting en aankoopfees.
+    // Bouw- en interieurbetalingen tellen hier nooit mee, ook niet als ze eerder starten.
+    const cashByNotary = totalAcquisition;
 
     const exitScenarios = [6, 9, 12, 15, 18, durationMonths]
       .filter((month, index, values) => month > 0 && values.indexOf(month) === index)
@@ -480,6 +630,8 @@ export default function LosNaranjosClient({
       projectName,
       analysisDate: form.analysisDate,
       projectType,
+      projectOwnership,
+      isSharedProject,
       surfaceM2,
       plotM2,
       durationMonths,
@@ -512,15 +664,65 @@ export default function LosNaranjosClient({
       monthlyCapital,
       peakDeployed,
       averageCapitalDuration,
-      cashByConstructionStart,
-      firstPaymentAmount,
+      cashByNotary,
+      cashAtMonth0,
+      furniturePaymentMonths,
+      downpaymentCount,
       exitScenarios,
       saleSensitivity,
       projectCostSensitivity,
     };
   }, [config.title, form]);
 
-  const photos = uploadedPhotos.length > 0 ? uploadedPhotos : initialData.photoUrls;
+
+  const constructionDrawCountForInput = Math.max(
+    1,
+    Math.round(parseNumber(form.constructionDraws))
+  );
+  const furniturePaymentMonthsValue = String(
+    clampInteger(
+      parseNumber(form.furniturePaymentMonths),
+      1,
+      constructionDrawCountForInput
+    )
+  );
+  const furniturePaymentOptions = Array.from(
+    { length: constructionDrawCountForInput },
+    (_, index) => {
+      const months = index + 1;
+      return {
+        value: String(months),
+        shortLabel: months === 1 ? "1 maand" : `${months} maanden`,
+        label:
+          months === 1
+            ? "1 maand · bij de laatste construction draw"
+            : `${months} maanden · over de laatste ${months} construction draws`,
+      };
+    }
+  );
+
+  const photos =
+    initialData.photoUrls.length > 0
+      ? initialData.photoUrls
+      : DEFAULT_PROJECT_PHOTOS;
+
+  // Houd de kasstroomtabel altijd binnen een A4-pagina.
+  // Extra bouwbetalingen krijgen automatisch een vervolgpaginа.
+  const cashflowRowsPerPage = 22;
+  const cashflowPageCount = Math.max(
+    1,
+    Math.ceil(data.cashflow.length / cashflowRowsPerPage)
+  );
+  const cashflowPages = Array.from({ length: cashflowPageCount }, (_, pageIndex) =>
+    data.cashflow.slice(
+      pageIndex * cashflowRowsPerPage,
+      (pageIndex + 1) * cashflowRowsPerPage
+    )
+  );
+
+  const sensitivityPageNumber = 4 + cashflowPageCount;
+  const photosPageNumber = sensitivityPageNumber + 1;
+  const totalPages = photosPageNumber;
 
   return (
     <main className="screen">
@@ -532,51 +734,205 @@ export default function LosNaranjosClient({
             <span>Live invoer</span>
             <h1>Los Naranjos analyse</h1>
           </div>
-          <button type="button" onClick={resetForm}>
-            Reset naar beginwaarden
-          </button>
+          <div className="input-actions">
+            <button type="button" className="print-button" onClick={printReport}>
+              Afdrukken
+            </button>
+            <button type="button" onClick={resetForm}>
+              Reset naar beginwaarden
+            </button>
+          </div>
         </header>
 
         <InputGroup title="Projectgegevens">
-          <InputField label="Projectnaam" value={form.projectName} onChange={(value) => updateField("projectName", value)} />
-          <InputField label="Analyse-datum" type="date" value={form.analysisDate} onChange={(value) => updateField("analysisDate", value)} />
-          <InputField label="Projecttype" value={form.projectType} onChange={(value) => updateField("projectType", value)} />
-          <InputField label="Oppervlakte m²" value={form.surfaceM2} onChange={(value) => updateField("surfaceM2", value)} />
-          <InputField label="Perceel m²" value={form.plotM2} onChange={(value) => updateField("plotM2", value)} />
-          <InputField label="Looptijd maanden" value={form.durationMonths} onChange={(value) => updateField("durationMonths", value)} />
-          <label className="field field-wide">
-            <span>Projectfoto’s (maximaal 3)</span>
-            <input type="file" accept="image/*" multiple onChange={handlePhotos} />
-          </label>
+          <SelectField
+            label="Projectvorm"
+            value={form.projectOwnership}
+            options={[
+              { value: "own", label: "Eigen project" },
+              { value: "shared", label: "Gedeeld project" },
+            ]}
+            onChange={(value) =>
+              updateField("projectOwnership", value as ProjectOwnership)
+            }
+          />
+          <InputField
+            label="Projectnaam"
+            value={form.projectName}
+            onChange={(value) => updateField("projectName", value)}
+          />
+          <InputField
+            label="Analyse-datum"
+            type="date"
+            value={form.analysisDate}
+            onChange={(value) => updateField("analysisDate", value)}
+          />
+          <SelectField
+            label="Projecttype"
+            value={form.projectType}
+            options={[
+              { value: "New Build", label: "New Build" },
+              { value: "Renovation", label: "Renovation" },
+            ]}
+            onChange={(value) =>
+              updateField("projectType", value as ProjectType)
+            }
+          />
+          <InputField
+            label="Oppervlakte m²"
+            value={form.surfaceM2}
+            onChange={(value) => updateField("surfaceM2", value)}
+          />
+          <InputField
+            label="Perceel m²"
+            value={form.plotM2}
+            onChange={(value) => updateField("plotM2", value)}
+          />
+          <InputField
+            label="Looptijd maanden"
+            value={form.durationMonths}
+            onChange={(value) => updateField("durationMonths", value)}
+          />
         </InputGroup>
 
         <InputGroup title="Aankoop">
-          <InputField label="Aankoopprijs" value={form.purchasePrice} onChange={(value) => updateField("purchasePrice", value)} />
-          <InputField label="Overdrachtsbelasting %" value={form.transferTaxPercentage} onChange={(value) => updateField("transferTaxPercentage", value)} />
-          <InputField label="Advocaatkosten %" value={form.lawyerFeePercentage} onChange={(value) => updateField("lawyerFeePercentage", value)} />
-          <InputField label="Notariskosten" value={form.notaryFee} onChange={(value) => updateField("notaryFee", value)} />
-          <InputField label="Overige aankoopkosten" value={form.otherAcquisitionCosts} onChange={(value) => updateField("otherAcquisitionCosts", value)} />
+          <InputField
+            label="Aankoopprijs"
+            value={form.purchasePrice}
+            onChange={(value) => updateField("purchasePrice", value)}
+          />
+          <InputField
+            label="Overdrachtsbelasting %"
+            value={form.transferTaxPercentage}
+            onChange={(value) =>
+              updateField("transferTaxPercentage", value)
+            }
+          />
+          <InputField
+            label="Advocaatkosten %"
+            value={form.lawyerFeePercentage}
+            onChange={(value) => updateField("lawyerFeePercentage", value)}
+          />
+          <InputField
+            label="Notariskosten"
+            value={form.notaryFee}
+            onChange={(value) => updateField("notaryFee", value)}
+          />
+          <InputField
+            label="Overige aankoopkosten"
+            value={form.otherAcquisitionCosts}
+            onChange={(value) =>
+              updateField("otherAcquisitionCosts", value)
+            }
+          />
         </InputGroup>
 
         <InputGroup title="Bouw en verkoop">
-          <InputField label="Bouwkosten per m²" value={form.buildCostPerM2} onChange={(value) => updateField("buildCostPerM2", value)} />
-          <InputField label="Onvoorzien %" value={form.contingencyPercentage} onChange={(value) => updateField("contingencyPercentage", value)} />
-          <InputField label="Meubilair" value={form.furniture} onChange={(value) => updateField("furniture", value)} />
-          <InputField label="Projectmanagement %" value={form.projectManagementPercentage} onChange={(value) => updateField("projectManagementPercentage", value)} />
-          <InputField label="Verkoopprijs" value={form.salePrice} onChange={(value) => updateField("salePrice", value)} />
-          <InputField label="Makelaarscommissie %" value={form.agentCommissionPercentage} onChange={(value) => updateField("agentCommissionPercentage", value)} />
+          <InputField
+            label="Bouwkosten per m²"
+            value={form.buildCostPerM2}
+            onChange={(value) => updateField("buildCostPerM2", value)}
+          />
+          <InputField
+            label="Onvoorzien %"
+            value={form.contingencyPercentage}
+            onChange={(value) =>
+              updateField("contingencyPercentage", value)
+            }
+          />
+          <InputField
+            label="Meubilair"
+            value={form.furniture}
+            onChange={(value) => updateField("furniture", value)}
+          />
+          <DetailedSelectField
+            label="Interieur betalen over"
+            value={furniturePaymentMonthsValue}
+            options={furniturePaymentOptions}
+            onChange={(value) =>
+              updateField("furniturePaymentMonths", value)
+            }
+          />
+          {form.projectOwnership === "shared" && (
+            <InputField
+              label="Projectmanagement %"
+              value={form.projectManagementPercentage}
+              onChange={(value) =>
+                updateField("projectManagementPercentage", value)
+              }
+            />
+          )}
+          <InputField
+            label="Verkoopprijs"
+            value={form.salePrice}
+            onChange={(value) => updateField("salePrice", value)}
+          />
+          <InputField
+            label="Makelaarscommissie %"
+            value={form.agentCommissionPercentage}
+            onChange={(value) =>
+              updateField("agentCommissionPercentage", value)
+            }
+          />
         </InputGroup>
 
         <InputGroup title="Betalingsplanning">
-          <InputField label="1e betaling maand" value={form.firstPaymentMonth} onChange={(value) => updateField("firstPaymentMonth", value)} />
-          <InputField label="1e betaling bedrag" value={form.firstPaymentAmount} onChange={(value) => updateField("firstPaymentAmount", value)} />
-          <InputField label="2e betaling maand" value={form.secondPaymentMonth} onChange={(value) => updateField("secondPaymentMonth", value)} />
-          <InputField label="2e betaling bedrag" value={form.secondPaymentAmount} onChange={(value) => updateField("secondPaymentAmount", value)} />
-          <InputField label="3e betaling maand" value={form.thirdPaymentMonth} onChange={(value) => updateField("thirdPaymentMonth", value)} />
-          <InputField label="3e betaling bedrag" value={form.thirdPaymentAmount} onChange={(value) => updateField("thirdPaymentAmount", value)} />
-          <InputField label="Passeerdatum maand" value={form.closingMonth} onChange={(value) => updateField("closingMonth", value)} />
-          <InputField label="Start bouwbetalingen" value={form.constructionStartMonth} onChange={(value) => updateField("constructionStartMonth", value)} />
-          <InputField label="Aantal bouwbetalingen" value={form.constructionDraws} onChange={(value) => updateField("constructionDraws", value)} />
+          <RangeField
+            label="Aantal downpayments"
+            value={form.downpaymentCount}
+            min={0}
+            max={10}
+            onChange={updateDownpaymentCount}
+          />
+
+          {form.downpayments.length > 0 ? (
+            <div className="downpayment-list field-full">
+              {form.downpayments.map((payment, index) => (
+                <section className="downpayment-card" key={`downpayment-${index}`}>
+                  <h3>Downpayment {index + 1}</h3>
+                  <div className="downpayment-card-grid">
+                    <InputField
+                      label="Maand"
+                      value={payment.month}
+                      onChange={(value) =>
+                        updateDownpayment(index, "month", value)
+                      }
+                    />
+                    <InputField
+                      label="Bedrag"
+                      value={payment.amount}
+                      onChange={(value) =>
+                        updateDownpayment(index, "amount", value)
+                      }
+                    />
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <p className="input-hint field-full">
+              Geen downpayments: de volledige resterende aankoopprijs wordt
+              opgenomen bij de passeerdatum.
+            </p>
+          )}
+
+          <InputField
+            label="Passeerdatum maand"
+            value={form.closingMonth}
+            onChange={(value) => updateField("closingMonth", value)}
+          />
+          <InputField
+            label="Start bouwbetalingen"
+            value={form.constructionStartMonth}
+            onChange={(value) =>
+              updateField("constructionStartMonth", value)
+            }
+          />
+          <InputField
+            label="Aantal bouwbetalingen"
+            value={form.constructionDraws}
+            onChange={(value) => updateField("constructionDraws", value)}
+          />
         </InputGroup>
       </section>
 
@@ -609,9 +965,26 @@ export default function LosNaranjosClient({
             <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} />
             <DataRow label={`Contingency (${percent(data.contingencyPercentage)})`} value={euro(data.contingency)} />
             <DataRow label="Furniture" value={euro(data.furniture)} />
-            <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
-            <DataRow label={`Project Management (${percent(data.projectManagementPercentage)})`} value={euro(data.projectManagement)} />
-            <DataRow label="Total Project Cost" value={euro(data.totalProjectCost)} strong />
+            {data.isSharedProject && (
+              <>
+                <DataRow
+                  label="Subtotal"
+                  value={euro(data.projectSubtotal)}
+                  strong
+                />
+                <DataRow
+                  label={`Project Management (${percent(
+                    data.projectManagementPercentage
+                  )})`}
+                  value={euro(data.projectManagement)}
+                />
+              </>
+            )}
+            <DataRow
+              label="Total Project Cost"
+              value={euro(data.totalProjectCost)}
+              strong
+            />
           </DataBlock>
         </div>
 
@@ -629,7 +1002,7 @@ export default function LosNaranjosClient({
           commission={data.agentCommission}
           profit={data.netProfit}
         />
-        <PageFooter label={config.footerLabel} page="1 / 5" />
+        <PageFooter label={config.footerLabel} page={`1 / ${totalPages}`} />
       </section>
 
       <section className="report-page">
@@ -649,85 +1022,187 @@ export default function LosNaranjosClient({
           </tbody>
         </table>
         <p className="note"><strong>Note:</strong> The base case assumes a <strong>{data.durationMonths} months</strong> development and exit period. Earlier exit scenarios use the same profit but annualise the return over a shorter holding period.</p>
-        <PageFooter label={config.footerLabel} page="2 / 5" />
+        <PageFooter label={config.footerLabel} page={`2 / ${totalPages}`} />
       </section>
 
-      <section className="report-page cash-page">
-        <SectionHeading number="03" eyebrow="Cash plan" title="Capital Deployment Schedule" subtitle={`Custom schedule · ${data.cashflow.length} tranches · ${data.durationMonths} months to exit`} />
+      <section className="report-page cash-page cash-overview-page">
+        <SectionHeading
+          number="03"
+          eyebrow="Cash plan"
+          title="Capital Deployment Schedule"
+          subtitle={`Custom schedule · ${data.cashflow.length} tranches · ${data.durationMonths} months to exit`}
+        />
+
         <div className="metric-grid compact-metrics">
-          <Metric label="Cash @ Month 0" value={euro(data.firstPaymentAmount)} sub={`${percent(data.capitalDeployed ? data.firstPaymentAmount / data.capitalDeployed : 0)} of total capital`} />
-          <Metric label="Cash by construction" value={euro(data.cashByConstructionStart)} sub={`By month ${parseNumber(form.constructionStartMonth)}`} />
-          <Metric label="Peak Deployed" value={euro(data.peakDeployed)} sub={`Before exit in month ${data.durationMonths}`} />
-          <Metric label="Avg. Capital Duration" value={`${numberFormatter.format(data.averageCapitalDuration)}m`} sub="Weighted by € × months" />
+          <Metric
+            label="Cash @ Month 0"
+            value={euro(data.cashAtMonth0)}
+            sub={`${percent(
+              data.capitalDeployed
+                ? data.cashAtMonth0 / data.capitalDeployed
+                : 0
+            )} of total capital`}
+          />
+          <Metric
+            label="Cash by notary"
+            value={euro(data.cashByNotary)}
+            sub={`Purchase, tax and fees only · month ${parseNumber(
+              form.closingMonth
+            )}`}
+          />
+          <Metric
+            label="Peak Deployed"
+            value={euro(data.peakDeployed)}
+            sub={`Before exit in month ${data.durationMonths}`}
+          />
+          <Metric
+            label="Avg. Capital Duration"
+            value={`${numberFormatter.format(data.averageCapitalDuration)}m`}
+            sub="Weighted by € × months"
+          />
         </div>
-        <CapitalChart monthlyCapital={data.monthlyCapital} durationMonths={data.durationMonths} peak={data.peakDeployed} />
-        <TableTitle>Cash flow detail</TableTitle>
-        <div className="table-scroll">
+
+        <CapitalChart
+          monthlyCapital={data.monthlyCapital}
+          durationMonths={data.durationMonths}
+          peak={data.peakDeployed}
+        />
+
+        <section className="cash-summary-card">
+          <TableTitle>Deployment summary</TableTitle>
           <table>
-            <thead><tr><th>Month</th><th>Event</th><th>Outflow</th><th>Inflow</th><th>Running Capital</th></tr></thead>
             <tbody>
-              {data.cashflow.map((row, index) => (
-                <tr key={`${row.month}-${row.event}-${index}`} className={row.inflow > 0 ? "sale-row" : undefined}>
-                  <td>{row.month}</td>
-                  <td><strong>{row.event}</strong></td>
-                  <td className="negative">{row.outflow ? `-${euro(row.outflow)}` : "—"}</td>
-                  <td className="positive">{row.inflow ? euro(row.inflow) : "—"}</td>
-                  <td>{signedEuro(row.runningCapital)}</td>
-                </tr>
-              ))}
+              <tr>
+                <td><strong>Acquisition and purchase</strong></td>
+                <td>{euro(data.totalAcquisition)}</td>
+              </tr>
+              <tr>
+                <td><strong>Construction and project</strong></td>
+                <td>{euro(data.totalProjectCost)}</td>
+              </tr>
+              <tr>
+                <td><strong>Total capital deployed</strong></td>
+                <td>{euro(data.capitalDeployed)}</td>
+              </tr>
+              <tr className="sale-row">
+                <td><strong>Net sale proceeds</strong></td>
+                <td className="positive">{euro(data.netProceeds)}</td>
+              </tr>
             </tbody>
           </table>
-        </div>
-        <PageFooter label={config.footerLabel} page="3 / 5" />
+        </section>
+
+        <PageFooter label={config.footerLabel} page={`3 / ${totalPages}`} />
       </section>
+
+      {cashflowPages.map((rows, pageIndex) => {
+        const pageNumber = 4 + pageIndex;
+        const firstRowNumber = pageIndex * cashflowRowsPerPage + 1;
+        const lastRowNumber = firstRowNumber + rows.length - 1;
+
+        return (
+          <section
+            className="report-page cash-page cash-detail-page"
+            key={`cashflow-page-${pageIndex}`}
+          >
+            <SectionHeading
+              number="03"
+              eyebrow="Cash detail"
+              title={
+                pageIndex === 0
+                  ? "Cash Flow Detail"
+                  : "Cash Flow Detail — Continued"
+              }
+              subtitle={`Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length}`}
+            />
+
+            <section className="cash-table-card">
+              <TableTitle>Cash flow detail</TableTitle>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Event</th>
+                      <th>Outflow</th>
+                      <th>Inflow</th>
+                      <th>Running Capital</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, rowIndex) => (
+                      <tr
+                        key={`${row.month}-${row.event}-${pageIndex}-${rowIndex}`}
+                        className={row.inflow > 0 ? "sale-row" : undefined}
+                      >
+                        <td>{row.month}</td>
+                        <td><strong>{row.event}</strong></td>
+                        <td className="negative">
+                          {row.outflow ? `-${euro(row.outflow)}` : "—"}
+                        </td>
+                        <td className="positive">
+                          {row.inflow ? euro(row.inflow) : "—"}
+                        </td>
+                        <td>{signedEuro(row.runningCapital)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <PageFooter
+              label={config.footerLabel}
+              page={`${pageNumber} / ${totalPages}`}
+            />
+          </section>
+        );
+      })}
+
       <section className="report-page sensitivity-page">
-  <SectionHeading
-    number="04"
-    eyebrow="Sensitivity"
-    title="Sensitivity Analysis"
-    subtitle="Impact of key assumption variations, holding everything else constant."
-  />
-
-  <TableTitle>Sale price sensitivity</TableTitle>
-
-  <SensitivityTable
-    rows={data.saleSensitivity}
-    valueKey="salePrice"
-    valueLabel="Sale Price"
-  />
-
-  <TableTitle>Project cost sensitivity</TableTitle>
-
-  <SensitivityTable
-    rows={data.projectCostSensitivity}
-    valueKey="projectCost"
-    valueLabel="Project Cost"
-  />
-
-  <PageFooter label={config.footerLabel} page="4 / 5" />
-</section>
-
-<section className="report-page photos-page">
-  <TableTitle>Property photos</TableTitle>
-
-  <div className="photo-stack">
-    {photos.length > 0 ? (
-      photos.slice(0, 3).map((src, index) => (
-        <img
-          key={`${src}-${index}`}
-          src={src}
-          alt={`${data.projectName} foto ${index + 1}`}
+        <SectionHeading
+          number="04"
+          eyebrow="Sensitivity"
+          title="Sensitivity Analysis"
+          subtitle="Impact of key assumption variations, holding everything else constant."
         />
-      ))
-    ) : (
-      <div className="photo-placeholder">
-        Voeg bovenaan maximaal drie projectfoto’s toe.
-      </div>
-    )}
-  </div>
 
-  <PageFooter label={config.footerLabel} page="5 / 5" />
-</section>
+        <section className="sensitivity-block">
+          <TableTitle>Sale price sensitivity</TableTitle>
+          <SensitivityTable
+            rows={data.saleSensitivity}
+            valueKey="salePrice"
+            valueLabel="Sale Price"
+          />
+        </section>
+
+        <section className="sensitivity-block">
+          <TableTitle>Project cost sensitivity</TableTitle>
+          <SensitivityTable
+            rows={data.projectCostSensitivity}
+            valueKey="projectCost"
+            valueLabel="Project Cost"
+          />
+        </section>
+
+        <PageFooter label={config.footerLabel} page={`${sensitivityPageNumber} / ${totalPages}`} />
+      </section>
+
+      <section className="report-page photos-page">
+        <TableTitle>Property photos</TableTitle>
+        <div className="photo-stack">
+          {photos.length > 0 ? (
+            photos.slice(0, 3).map((src, index) => (
+              <img key={`${src}-${index}`} src={src} alt={`${data.projectName} foto ${index + 1}`} />
+            ))
+          ) : (
+            <div className="photo-placeholder">
+              Voeg bovenaan maximaal drie projectfoto’s toe.
+            </div>
+          )}
+        </div>
+        <PageFooter label={config.footerLabel} page={`${photosPageNumber} / ${totalPages}`} />
+      </section>
     </main>
   );
 }
@@ -756,6 +1231,107 @@ function InputField({
     <label className="field">
       <span>{label}</span>
       <input value={value} type={type} inputMode={type === "text" ? "decimal" : undefined} onChange={(event) => onChange(event.currentTarget.value)} />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      >
+        {options.map((option) => (
+          <option value={option.value} key={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+
+function DetailedSelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string; shortLabel: string }[];
+  onChange: (value: string) => void;
+}) {
+  const selectedOption =
+    options.find((option) => option.value === value) ?? options[0];
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <div className="detailed-select">
+        <span className="detailed-select-value">
+          {selectedOption?.shortLabel ?? "Kies aantal maanden"}
+        </span>
+        <select
+          value={value}
+          aria-label={label}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        >
+          {options.map((option) => (
+            <option value={option.value} key={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </label>
+  );
+}
+
+function RangeField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  min: number;
+  max: number;
+  onChange: (value: string) => void;
+}) {
+  const shownValue = clampInteger(parseNumber(value), min, max);
+
+  return (
+    <label className="range-field field-full">
+      <span>{label}</span>
+      <div className="range-control">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step="1"
+          value={shownValue}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+        <output>
+          {shownValue} {shownValue === 1 ? "downpayment" : "downpayments"}
+        </output>
+      </div>
     </label>
   );
 }
@@ -904,7 +1480,7 @@ function PageFooter({ label, page }: { label: string; page: string }) {
 const styles = `
   :root {
     --ink: #111111;
-    --muted: #9393a5;
+    --muted: #7f8390;
     --line: #d7dbe2;
     --soft: #f2f3f5;
     --paper: #ffffff;
@@ -914,8 +1490,15 @@ const styles = `
   }
 
   * { box-sizing: border-box; }
-  body { margin: 0; background: #ecebe8; color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
-  button, input { font: inherit; }
+  html { background: #ecebe8; }
+  body {
+    margin: 0;
+    background: #ecebe8;
+    color: var(--ink);
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  button, input, select { font: inherit; }
+  img, svg { max-width: 100%; }
   .screen { padding: 28px 18px 60px; }
 
   .live-input {
@@ -926,8 +1509,20 @@ const styles = `
     background: var(--warm);
     box-shadow: 0 16px 45px rgba(0,0,0,.1);
   }
-  .input-header { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
-  .input-header span, .input-group h2, .field span, .section-heading > span, .metric > span, .data-block h3, .table-title {
+  .input-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .input-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+  .input-header span,
+  .input-group h2,
+  .field span,
+  .section-heading > span,
+  .metric > span,
+  .data-block h3,
+  .table-title {
     letter-spacing: .2em;
     text-transform: uppercase;
     font-size: 11px;
@@ -935,65 +1530,243 @@ const styles = `
     color: #8d8da0;
   }
   .input-header h1 { margin: 6px 0 0; font-size: 26px; }
-  .input-header button { border: 0; border-radius: 99px; padding: 13px 20px; background: #171717; color: white; font-weight: 800; cursor: pointer; }
+  .input-header button {
+    border: 0;
+    border-radius: 99px;
+    padding: 13px 20px;
+    background: #171717;
+    color: white;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .input-header .print-button {
+    border: 1px solid #171717;
+    background: white;
+    color: #171717;
+  }
   .input-group { margin-top: 22px; padding-top: 18px; border-top: 1px solid #ddd7ce; }
   .input-group h2 { margin: 0 0 14px; color: #705c45; }
   .input-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
   .field { display: grid; gap: 7px; }
   .field-wide { grid-column: span 2; }
   .field span { color: #6a5740; letter-spacing: 0; text-transform: none; font-size: 12px; }
-  .field input { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid #d5d2cc; border-radius: 12px; background: white; }
+  .field input,
+  .field select {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 12px;
+    border: 1px solid #d5d2cc;
+    border-radius: 12px;
+    background: white;
+    color: #171717;
+  }
+  .field select { cursor: pointer; }
+  .detailed-select { position: relative; min-height: 46px; }
+  .detailed-select-value {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 38px 10px 12px;
+    border: 1px solid #d5d2cc;
+    border-radius: 12px;
+    background: white;
+    color: #171717 !important;
+    font-size: inherit !important;
+  }
+  .detailed-select::after {
+    content: "⌄";
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-55%);
+    color: #6a5740;
+    pointer-events: none;
+  }
+  .detailed-select select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .detailed-select select option { color: #171717; }
+  .field-full { grid-column: 1 / -1; }
+  .range-field {
+    display: grid;
+    gap: 9px;
+    padding: 14px 16px;
+    border: 1px solid #d8d1c7;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .55);
+  }
+  .range-field > span {
+    color: #6a5740;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .range-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px;
+    align-items: center;
+    gap: 18px;
+  }
+  .range-control input { width: 100%; accent-color: #171717; }
+  .range-control output {
+    padding: 10px 12px;
+    border: 1px solid #d5d2cc;
+    border-radius: 10px;
+    background: #ffffff;
+    font-weight: 800;
+    text-align: center;
+  }
+  .downpayment-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .downpayment-card {
+    padding: 14px;
+    border: 1px solid #d8d1c7;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .62);
+  }
+  .downpayment-card h3 {
+    margin: 0 0 11px;
+    color: #705c45;
+    font-size: 12px;
+  }
+  .downpayment-card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .input-hint {
+    margin: 0;
+    padding: 14px 16px;
+    border: 1px dashed #cfc6ba;
+    border-radius: 12px;
+    color: #6f655a;
+    background: rgba(255, 255, 255, .45);
+    font-size: 13px;
+  }
 
   .report-page {
     position: relative;
-    width: min(780px, 100%);
-    min-height: 1020px;
-    margin: 0 auto 28px;
-    padding: 42px 40px 68px;
+    width: min(980px, 100%);
+    min-height: 1320px;
+    margin: 0 auto 34px;
+    padding: 54px 56px 86px;
     background: var(--paper);
-    box-shadow: 0 18px 50px rgba(0,0,0,.12);
+    box-shadow: 0 24px 70px rgba(32, 31, 28, .18);
+    overflow: hidden;
   }
-  .report-header { padding-bottom: 20px; border-bottom: 3px solid #111; }
-  .report-header h1 { margin: 0; font-size: 30px; line-height: 1.08; }
-  .report-header p, .section-heading p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
-  .section-heading { margin-top: 27px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-  .section-heading h2 { margin: 5px 0 0; font-size: 22px; }
-  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 20px; border: 1px solid #cdd2da; }
-  .metric { min-height: 66px; padding: 14px 16px; border-right: 1px solid #cdd2da; }
+  .report-header { padding-bottom: 22px; border-bottom: 3px solid #111; }
+  .report-header h1 { margin: 0; font-size: 38px; line-height: 1.04; }
+  .report-header p,
+  .section-heading p { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+  .section-heading { margin-top: 30px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+  .section-heading h2 { margin: 6px 0 0; font-size: 27px; }
+
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin-top: 24px;
+    border: 1px solid #cdd2da;
+  }
+  .metric { min-height: 86px; padding: 16px 18px; border-right: 1px solid #cdd2da; }
   .metric:last-child { border-right: 0; }
-  .metric strong { display: block; margin-top: 6px; font-size: 20px; }
-  .metric small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
-  .compact-metrics .metric { min-height: 100px; }
+  .metric strong { display: block; margin-top: 7px; font-size: 24px; }
+  .metric small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; }
+  .compact-metrics .metric { min-height: 112px; }
   .positive { color: var(--green) !important; }
   .negative { color: var(--red) !important; }
-  .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 25px; }
-  .data-block.full { margin-top: 24px; }
-  .data-block h3 { margin: 0 0 4px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-  .data-block dl { margin: 0; }
-  .data-row { display: flex; justify-content: space-between; gap: 18px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
-  .data-row dt { min-width: 0; }
-  .data-row dd { margin: 0; text-align: right; }
-  .data-row.strong { font-weight: 800; }
-  .allocation { margin-top: 25px; }
-  .allocation-title, .chart-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-  .allocation-title .table-title, .chart-head .table-title { margin-bottom: 8px; }
-  .allocation-title > span, .chart-head > span { color: var(--muted); font-size: 10px; }
-  .allocation-bar { display: flex; height: 28px; overflow: hidden; border-radius: 4px; background: #eee; }
-  .allocation-bar span { display: flex; align-items: center; justify-content: center; min-width: 0; color: white; font-size: 10px; font-weight: 800; }
-  .acquisition { background: #050505; } .project { background: #5d5954; } .commission { background: #aaa9a4; } .profit { background: #237b4b; }
-  .allocation-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin-top: 10px; color: #6f7380; font-size: 10px; }
-  .allocation-legend i { display: inline-block; width: 5px; height: 5px; margin-right: 6px; vertical-align: middle; }
 
-  .table-title { margin: 28px 0 6px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { padding: 11px 8px; background: var(--soft); color: #657084; text-align: left; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; }
-  td { padding: 8px; border-bottom: 1px solid var(--line); }
-  th:not(:first-child), td:not(:first-child) { text-align: right; }
-  .note { margin-top: 17px; color: #687084; font-size: 11px; font-style: italic; line-height: 1.5; }
+  .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 38px; margin-top: 30px; }
+  .data-block.full { margin-top: 28px; }
+  .data-block h3 { margin: 0 0 5px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+  .data-block dl { margin: 0; }
+  .data-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+  }
+  .data-row dt { min-width: 0; }
+  .data-row dd { margin: 0; text-align: right; white-space: nowrap; }
+  .data-row.strong { font-weight: 800; }
+
+  .allocation { margin-top: 28px; }
+  .allocation-title,
+  .chart-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .allocation-title .table-title,
+  .chart-head .table-title { margin-bottom: 9px; }
+  .allocation-title > span,
+  .chart-head > span { color: var(--muted); font-size: 11px; }
+  .allocation-bar { display: flex; height: 32px; overflow: hidden; border-radius: 4px; background: #eee; }
+  .allocation-bar span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    color: white;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .acquisition { background: #050505; }
+  .project { background: #5d5954; }
+  .commission { background: #aaa9a4; }
+  .profit { background: #237b4b; }
+  .allocation-legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px 20px;
+    margin-top: 12px;
+    color: #6f7380;
+    font-size: 11px;
+  }
+  .allocation-legend i {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 7px;
+    vertical-align: middle;
+  }
+
+  .table-title { margin: 31px 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { display: table-header-group; }
+  th {
+    padding: 12px 10px;
+    background: var(--soft);
+    color: #657084;
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+  }
+  td { padding: 10px; border-bottom: 1px solid var(--line); }
+  th:not(:first-child),
+  td:not(:first-child) { text-align: right; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  .note { margin-top: 20px; color: #687084; font-size: 12px; font-style: italic; line-height: 1.55; }
   .sale-row { background: #eef8f1; }
   .table-scroll { overflow-x: auto; }
+  .cash-table-card {
+    margin-top: 24px;
+    padding: 0 18px 16px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: #ffffff;
+  }
+  .cash-table-card .table-title { margin-top: 0; padding-top: 18px; }
+  .cash-page th:nth-child(2),
+  .cash-page td:nth-child(2) { text-align: left; }
 
-  .chart-card { margin-top: 24px; padding: 16px 20px 20px; border: 1px solid var(--line); border-radius: 4px; }
+  .chart-card { margin-top: 28px; padding: 18px 22px 22px; border: 1px solid var(--line); border-radius: 4px; }
   .chart-card svg { width: 100%; height: auto; overflow: visible; }
   .grid-line { stroke: #e0e3e8; stroke-width: 1; }
   .chart-area { fill: #efefef; }
@@ -1003,25 +1776,74 @@ const styles = `
   .exit-line { stroke: var(--green); stroke-dasharray: 4 4; stroke-width: 2; }
   .exit-label { fill: var(--green) !important; font-weight: 800; }
 
-  .photo-stack { display: grid; gap: 16px; }
-  .photo-stack img { display: block; width: 100%; max-height: 275px; object-fit: cover; border-radius: 4px; }
-  .photo-placeholder { display: grid; place-items: center; min-height: 600px; border: 1px dashed #c8ccd4; color: #9297a3; }
-  footer { position: absolute; left: 40px; right: 40px; bottom: 28px; display: flex; justify-content: space-between; gap: 20px; padding-top: 12px; border-top: 1px solid var(--line); color: #b1b4bd; font-size: 10px; }
+  .sensitivity-block + .sensitivity-block { margin-top: 42px; }
+  .sensitivity-page .table-title { margin-top: 28px; }
 
+  .photos-page .table-title { margin-top: 0; }
+  .photo-stack {
+    display: grid;
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    min-height: 1120px;
+  }
+  .photo-stack img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    object-fit: cover;
+    border-radius: 4px;
+  }
+  .photo-placeholder {
+    display: grid;
+    place-items: center;
+    min-height: 1120px;
+    border: 1px dashed #c8ccd4;
+    color: #9297a3;
+  }
+
+  footer {
+    position: absolute;
+    left: 56px;
+    right: 56px;
+    bottom: 30px;
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    padding-top: 13px;
+    border-top: 1px solid var(--line);
+    color: #9297a3;
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 1000px) {
+    .report-page { width: min(980px, 100%); }
+  }
   @media (max-width: 850px) {
     .input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .downpayment-list { grid-template-columns: 1fr; }
     .metric-grid { grid-template-columns: repeat(2, 1fr); }
     .metric:nth-child(2) { border-right: 0; }
     .metric:nth-child(-n+2) { border-bottom: 1px solid #cdd2da; }
     .two-column { grid-template-columns: 1fr; }
+    .report-page { min-height: auto; overflow: visible; }
+    .photo-stack { grid-template-rows: none; min-height: 0; }
+    .photo-stack img { height: auto; max-height: 420px; }
+    .photo-placeholder { min-height: 600px; }
   }
   @media (max-width: 560px) {
     .screen { padding: 0; }
     .live-input { border-radius: 0; margin-bottom: 0; padding: 18px; }
     .input-header { flex-direction: column; }
+    .input-actions { justify-content: flex-start; }
     .input-grid { grid-template-columns: 1fr; }
     .field-wide { grid-column: auto; }
-    .report-page { min-height: auto; margin-bottom: 0; padding: 28px 18px 70px; box-shadow: none; }
+    .range-control { grid-template-columns: 1fr; }
+    .downpayment-card-grid { grid-template-columns: 1fr; }
+    .report-page { margin-bottom: 0; padding: 28px 18px 74px; box-shadow: none; }
+    .report-header h1 { font-size: 31px; }
     .metric-grid { grid-template-columns: 1fr; }
     .metric { border-right: 0; border-bottom: 1px solid #cdd2da; }
     .metric:last-child { border-bottom: 0; }
@@ -1029,14 +1851,506 @@ const styles = `
     footer { left: 18px; right: 18px; }
   }
 
-  @page { size: A4; margin: 0; }
-  @media print {
-    body { background: white; }
-    .no-print { display: none !important; }
-    .screen { padding: 0; }
-    .report-page { width: 210mm; height: 297mm; min-height: 0; margin: 0; padding: 14mm 14mm 18mm; box-shadow: none; break-after: page; page-break-after: always; overflow: hidden; }
-    .report-page:last-child { break-after: auto; page-break-after: auto; }
-    footer { left: 14mm; right: 14mm; bottom: 8mm; }
-    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page {
+    size: A4 portrait;
+    margin: 0;
   }
+
+  @media print {
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    html,
+    body {
+      width: 210mm !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .no-print {
+      display: none !important;
+    }
+
+    .screen {
+      display: block !important;
+      width: 210mm !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: visible !important;
+    }
+
+    .report-page {
+      position: relative !important;
+      width: 210mm !important;
+      height: 297mm !important;
+      min-height: 297mm !important;
+      margin: 0 !important;
+      padding: 8mm 8mm 13mm !important;
+      background: #ffffff !important;
+      box-shadow: none !important;
+      overflow: hidden !important;
+      zoom: 1 !important;
+      break-after: page !important;
+      page-break-after: always !important;
+    }
+
+    .report-page:last-child {
+      break-after: auto !important;
+      page-break-after: auto !important;
+    }
+
+    /* De voorbeeldpagina begint direct met 01 · Overview. */
+    .overview-page .report-header {
+      display: none !important;
+    }
+
+    .section-heading {
+      margin-top: 0 !important;
+      padding-bottom: 5mm !important;
+      border-bottom: 0.35mm solid #aeb5c0 !important;
+    }
+
+    .section-heading > span,
+    .metric > span,
+    .data-block h3,
+    .table-title {
+      font-size: 7.5pt !important;
+      letter-spacing: .18em !important;
+    }
+
+    .section-heading h2 {
+      margin: 1.8mm 0 0 !important;
+      font-size: 18pt !important;
+      line-height: 1.05 !important;
+      font-weight: 500 !important;
+    }
+
+    .section-heading p {
+      margin-top: 3mm !important;
+      font-size: 8.5pt !important;
+      line-height: 1.35 !important;
+    }
+
+    .metric-grid {
+      grid-template-columns: repeat(4, 1fr) !important;
+      margin-top: 6mm !important;
+      border: 0.4mm solid #a6adb8 !important;
+      background: #ffffff !important;
+    }
+
+    .metric {
+      min-height: 25mm !important;
+      padding: 5mm 4mm !important;
+      border-right: 0.35mm solid #a6adb8 !important;
+    }
+
+    .metric:last-child {
+      border-right: 0 !important;
+    }
+
+    .metric strong {
+      margin-top: 3mm !important;
+      font-size: 17pt !important;
+      line-height: 1 !important;
+    }
+
+    .metric small {
+      margin-top: 2mm !important;
+      font-size: 7.5pt !important;
+    }
+
+    .two-column {
+      grid-template-columns: 1fr 1fr !important;
+      gap: 9mm !important;
+      margin-top: 8mm !important;
+    }
+
+    .data-block.full {
+      margin-top: 7mm !important;
+    }
+
+    .data-block h3 {
+      margin-bottom: 0 !important;
+      padding-bottom: 3mm !important;
+      border-bottom: 0.3mm solid #aeb5c0 !important;
+    }
+
+    .data-row {
+      gap: 5mm !important;
+      padding: 3.1mm 0 !important;
+      border-bottom: 0.25mm solid #bcc2cb !important;
+      font-size: 8.6pt !important;
+      line-height: 1.15 !important;
+    }
+
+    .data-row dd {
+      flex: 0 0 auto !important;
+    }
+
+    .allocation {
+      margin-top: 10mm !important;
+    }
+
+    .allocation-title .table-title,
+    .chart-head .table-title {
+      margin: 0 0 2.2mm !important;
+      padding-bottom: 2.2mm !important;
+    }
+
+    .allocation-title > span,
+    .chart-head > span {
+      font-size: 7pt !important;
+    }
+
+    .allocation-bar {
+      height: 8mm !important;
+    }
+
+    .allocation-bar span {
+      font-size: 7.5pt !important;
+    }
+
+    .allocation-legend {
+      gap: 2mm 8mm !important;
+      margin-top: 3mm !important;
+      font-size: 7.3pt !important;
+    }
+
+    .table-title {
+      margin: 7mm 0 2mm !important;
+      padding-bottom: 2.5mm !important;
+      border-bottom: 0.3mm solid #aeb5c0 !important;
+    }
+
+    table {
+      font-size: 8.5pt !important;
+      border: 0.3mm solid #aeb5c0 !important;
+    }
+
+    th {
+      padding: 3mm 2.5mm !important;
+      border-bottom: 0.35mm solid #a6adb8 !important;
+      background: #eceef1 !important;
+      font-size: 7pt !important;
+    }
+
+    td {
+      padding: 2.7mm 2.5mm !important;
+      border-bottom: 0.25mm solid #bcc2cb !important;
+    }
+
+    .note {
+      margin-top: 5mm !important;
+      font-size: 8pt !important;
+      line-height: 1.45 !important;
+    }
+
+    .chart-card {
+      margin-top: 6mm !important;
+      padding: 4mm 5mm 5mm !important;
+      border: 0.35mm solid #a6adb8 !important;
+    }
+
+    /* Pagina 3: rustiger, duidelijkere vakken en beter leesbare tabel. */
+    .cash-page .metric-grid {
+      margin-top: 5mm !important;
+    }
+
+    .cash-page .metric {
+      min-height: 23mm !important;
+      padding: 3.5mm 4mm !important;
+    }
+
+    .cash-page .metric strong {
+      font-size: 14.5pt !important;
+    }
+
+    .cash-page .chart-card {
+      margin-top: 5mm !important;
+      padding: 3mm 4mm 3mm !important;
+      border: 0.4mm solid #a6adb8 !important;
+      background: #ffffff !important;
+    }
+
+    .cash-page .chart-card svg {
+      width: 100% !important;
+      height: 42mm !important;
+    }
+
+    .cash-page .cash-table-card {
+      margin-top: 5mm !important;
+      padding: 0 3.5mm 3mm !important;
+      border: 0.4mm solid #a6adb8 !important;
+      border-radius: 0 !important;
+      background: #ffffff !important;
+    }
+
+    .cash-page .cash-table-card .table-title {
+      margin: 0 !important;
+      padding: 3.5mm 0 2.5mm !important;
+    }
+
+    .cash-page table {
+      table-layout: fixed !important;
+      border: 0.3mm solid #aeb5c0 !important;
+      font-size: 7.5pt !important;
+    }
+
+    .cash-page th {
+      padding: 2mm 1.6mm !important;
+      font-size: 6.4pt !important;
+    }
+
+    .cash-page td {
+      padding: 1.55mm 1.6mm !important;
+      line-height: 1.15 !important;
+    }
+
+    .cash-page th:nth-child(1),
+    .cash-page td:nth-child(1) { width: 9% !important; text-align: center !important; }
+    .cash-page th:nth-child(2),
+    .cash-page td:nth-child(2) { width: 31% !important; text-align: left !important; }
+    .cash-page th:nth-child(3),
+    .cash-page td:nth-child(3),
+    .cash-page th:nth-child(4),
+    .cash-page td:nth-child(4),
+    .cash-page th:nth-child(5),
+    .cash-page td:nth-child(5) { width: 20% !important; text-align: right !important; }
+
+    .cash-page .sale-row td {
+      background: #e8f5ec !important;
+      border-top: 0.35mm solid #78a98a !important;
+      font-weight: 700 !important;
+    }
+
+    /* De overzichtspagina blijft altijd stabiel, ongeacht het aantal tranches. */
+    .cash-overview-page .chart-card svg {
+      height: 78mm !important;
+    }
+
+    .cash-overview-page .cash-summary-card {
+      margin-top: 6mm !important;
+      padding: 0 4mm 3mm !important;
+      border: 0.4mm solid #a6adb8 !important;
+      background: #ffffff !important;
+    }
+
+    .cash-overview-page .cash-summary-card .table-title {
+      margin: 0 !important;
+      padding: 3.5mm 0 2.5mm !important;
+    }
+
+    .cash-overview-page .cash-summary-card table {
+      table-layout: fixed !important;
+    }
+
+    .cash-overview-page .cash-summary-card td {
+      padding: 2.3mm 2mm !important;
+      font-size: 8pt !important;
+    }
+
+    .cash-overview-page .cash-summary-card td:first-child {
+      width: 65% !important;
+      text-align: left !important;
+    }
+
+    .cash-overview-page .cash-summary-card td:last-child {
+      width: 35% !important;
+      text-align: right !important;
+      font-weight: 700 !important;
+    }
+
+    /* Detailpagina's bevatten alleen een vaste hoeveelheid tabelregels. */
+    .cash-detail-page .section-heading {
+      margin-top: 0 !important;
+    }
+
+    .cash-detail-page .cash-table-card {
+      margin-top: 8mm !important;
+    }
+
+    .cash-detail-page table {
+      font-size: 8pt !important;
+    }
+
+    .cash-detail-page th {
+      padding: 2.5mm 1.8mm !important;
+      font-size: 6.8pt !important;
+    }
+
+    .cash-detail-page td {
+      padding: 2.15mm 1.8mm !important;
+      line-height: 1.18 !important;
+    }
+
+    .cash-detail-page tr {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+
+    .sensitivity-block + .sensitivity-block {
+      margin-top: 8mm !important;
+    }
+
+    .sensitivity-page .table-title {
+      margin-top: 5mm !important;
+    }
+
+    .sensitivity-page table {
+      font-size: 8.2pt !important;
+    }
+
+    .sensitivity-page th,
+    .sensitivity-page td {
+      padding-top: 2.6mm !important;
+      padding-bottom: 2.6mm !important;
+    }
+
+    .photos-page .table-title {
+      margin-top: 0 !important;
+    }
+
+    .photos-page .photo-stack {
+      grid-template-rows: repeat(3, 1fr) !important;
+      gap: 4mm !important;
+      height: 264mm !important;
+      min-height: 0 !important;
+    }
+
+    .photos-page .photo-stack img {
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+    }
+
+    .photo-placeholder {
+      min-height: 0 !important;
+      height: 264mm !important;
+    }
+
+    .metric-grid,
+    .two-column,
+    .data-block,
+    .allocation,
+    .chart-card,
+    table,
+    .sensitivity-block,
+    .photo-stack,
+    img,
+    svg {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+
+    .table-scroll {
+      overflow: visible !important;
+    }
+
+    footer {
+      left: 8mm !important;
+      right: 8mm !important;
+      bottom: 4mm !important;
+      padding-top: 3mm !important;
+      border-top: 1pt solid #596270 !important;
+      font-size: 6.8pt !important;
+    }
+
+    /*
+     * Printer-safe line system.
+     * Hele punten (pt) en donkere, dekkende kleuren blijven scherper dan
+     * lichte fractional-pixel/mm-lijnen bij browser- en PDF-afdrukken.
+     */
+    .section-heading {
+      border-bottom: 1pt solid #596270 !important;
+    }
+
+    .metric-grid {
+      border: 1pt solid #4f5967 !important;
+      box-shadow: inset 0 0 0 0.25pt #4f5967 !important;
+    }
+
+    .metric {
+      border-right: 1pt solid #596270 !important;
+    }
+
+    .data-block h3,
+    .table-title {
+      border-bottom: 1pt solid #66717f !important;
+    }
+
+    .data-row {
+      border-bottom: 0.75pt solid #8a94a1 !important;
+    }
+
+    .chart-card,
+    .cash-page .chart-card,
+    .cash-page .cash-table-card,
+    .cash-overview-page .cash-summary-card {
+      border: 1pt solid #4f5967 !important;
+      box-shadow: inset 0 0 0 0.25pt #4f5967 !important;
+    }
+
+    table,
+    .cash-page table {
+      border: 1pt solid #596270 !important;
+      border-collapse: separate !important;
+      border-spacing: 0 !important;
+    }
+
+    th,
+    .cash-page th {
+      border: 0 !important;
+      border-bottom: 1pt solid #596270 !important;
+      background: #e7e9ed !important;
+    }
+
+    td,
+    .cash-page td {
+      border: 0 !important;
+      border-bottom: 0.75pt solid #8a94a1 !important;
+    }
+
+    th + th,
+    td + td,
+    .cash-page th + th,
+    .cash-page td + td {
+      border-left: 0.75pt solid #9aa3ae !important;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0 !important;
+    }
+
+    .cash-page .sale-row td {
+      border-top: 1pt solid #4f7f60 !important;
+    }
+
+    .chart-card svg line,
+    .chart-card svg rect {
+      shape-rendering: crispEdges;
+    }
+
+    .grid-line {
+      stroke: #9ca4af !important;
+      stroke-width: 1.2 !important;
+    }
+
+    .chart-line {
+      stroke: #111827 !important;
+      stroke-width: 2.6 !important;
+    }
+
+    .exit-line {
+      stroke: #237b4b !important;
+      stroke-width: 2 !important;
+    }
+  }
+
 `;
