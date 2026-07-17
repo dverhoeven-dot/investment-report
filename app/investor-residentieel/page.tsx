@@ -1,9 +1,12 @@
-import StartpuntClient from "./StartpuntClient";
-import { STARTPUNT_ANALYSES } from "../startpuntAnalyses";
+import ResidentieelStartpuntClient, {
+  type ReportData,
+  type StartpuntConfig,
+} from "./ResidentieelStartpuntClient";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+<<<<<<< HEAD
 type MaybeNumber = number | null;
 type YesNo = "ja" | "nee";
 
@@ -11,30 +14,73 @@ type ExpenseItem = {
   name: string;
   amount: MaybeNumber;
   percentOfRent: MaybeNumber;
+=======
+const config: StartpuntConfig = {
+  title: "Startpunt analyse",
+  subtitle:
+    "Rendementscheck voor residentieel vastgoed, inclusief rente, exploitatiekosten, vermogensbelasting en waardestijging.",
+  footerLabel: "L3 Capital · Startpunt analyse residentieel",
+>>>>>>> 8ecef1f94a0d7a33e4314510ef7ca14da6e26cf7
 };
 
-type ReportData = {
-  objectNaam: string;
-  adres: string;
-  afbeeldingUrl: string;
+const initialData: ReportData = {
+  objectNaam: "Voorbeeld Appartement",
+  adres: "Straat 0, Venlo",
+  afbeeldingUrl: "/startpunt-analyse-photos/residentieel/photo1.png",
 
-  marktwaardeVastgoed: MaybeNumber;
-  wozWaardeVastgoed: MaybeNumber;
-  financiering: MaybeNumber;
-  eigenInleg: MaybeNumber;
+  marktwaardeVastgoed: 300000,
+  wozWaardeVastgoed: 250000,
+  financiering: 10000,
+  huurPerMaand: 1900,
+  rentePercentage: 0.04,
 
-  huurPerMaand: MaybeNumber;
-  huurPerJaar: MaybeNumber;
-  brutoRendementMarktwaarde: MaybeNumber;
+  box3WozPercentage: 0.06,
+  box3FinancieringPercentage: 0.027,
+  box3BelastingPercentage: 0.36,
+  gemiddeldeWaardestijging: 0.03,
 
-  rentePercentage: MaybeNumber;
-  rentelastenPerJaar: MaybeNumber;
-  naRenteResteert: MaybeNumber;
+  fiscaalPartner: false,
+  heffingsvrijVermogenToepassen: false,
 
-  vermogensbelastingPercentage: MaybeNumber;
-  vermogensbelastingbasis: string;
-  vermogensbelastingPerJaar: MaybeNumber;
+  exploitatiekosten: [
+    {
+      name: "Gemeentelijke lasten eigenaar",
+      amount: 750,
+      percentOfRent: null,
+    },
+    {
+      name: "Opstalverzekering",
+      amount: 450,
+      percentOfRent: null,
+    },
+    {
+      name: "Klein onderhoud",
+      amount: 750,
+      percentOfRent: null,
+    },
+    {
+      name: "Reservering groot onderhoud",
+      amount: 1500,
+      percentOfRent: null,
+    },
+    {
+      name: "Beheer en administratie",
+      amount: 400,
+      percentOfRent: null,
+    },
+    {
+      name: "Verhuur- en mutatiekosten",
+      amount: 400,
+      percentOfRent: null,
+    },
+    {
+      name: "Leegstand / wanbetaling",
+      amount: 530,
+      percentOfRent: null,
+    },
+  ],
 
+<<<<<<< HEAD
   box3WozPercentage: MaybeNumber;
   box3WozBedrag: MaybeNumber;
 
@@ -216,12 +262,19 @@ function findLastValue(rows: string[][], labels: string[]) {
 function findLastRow(rows: string[][], labels: string[]) {
   const normalizedLabels = labels.map(normalizeLabel);
 
+=======
+  waarschuwingen: [],
+};
+
+export default function ResidentieelPage() {
+>>>>>>> 8ecef1f94a0d7a33e4314510ef7ca14da6e26cf7
   return (
-    [...rows].reverse().find((row) => {
-      const label = normalizeLabel(row[0] ?? "");
-      return normalizedLabels.includes(label);
-    }) ?? null
+    <ResidentieelStartpuntClient
+      initialData={initialData}
+      config={config}
+    />
   );
+<<<<<<< HEAD
 }
 
 function readNumber(rows: string[][], labels: string[]) {
@@ -650,4 +703,6 @@ export default async function ResidentieelStartpuntPage() {
   const data = await readReportData();
 
   return <StartpuntClient initialData={data} config={STARTPUNT_CONFIG} />;
+=======
+>>>>>>> 8ecef1f94a0d7a33e4314510ef7ca14da6e26cf7
 }
