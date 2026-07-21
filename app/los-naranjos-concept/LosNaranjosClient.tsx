@@ -10,6 +10,11 @@ export type LosNaranjosConfig = {
 
 type ProjectOwnership = "own" | "shared";
 type ProjectType = "New Build" | "Renovation";
+type CapitalSplitSource =
+  | "ourPercentage"
+  | "ourAmount"
+  | "partnerPercentage"
+  | "partnerAmount";
 
 type Downpayment = {
   month: string;
@@ -58,6 +63,11 @@ type FormState = {
   analysisDate: string;
   projectType: ProjectType;
   projectOwnership: ProjectOwnership;
+  capitalSplitSource: CapitalSplitSource;
+  ourEquityPercentage: string;
+  ourEquityAmount: string;
+  partnerEquityPercentage: string;
+  partnerEquityAmount: string;
   surfaceM2: string;
   plotM2: string;
   durationMonths: string;
@@ -167,6 +177,14 @@ function normalizeProjectOwnership(value: unknown): ProjectOwnership {
   return value === "own" ? "own" : "shared";
 }
 
+function normalizeCapitalSplitSource(value: unknown): CapitalSplitSource {
+  return value === "ourAmount" ||
+    value === "partnerPercentage" ||
+    value === "partnerAmount"
+    ? value
+    : "ourPercentage";
+}
+
 function createInitialForm(data: LosNaranjosInitialData): FormState {
   const downpayments: Downpayment[] = [
     {
@@ -188,6 +206,11 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     analysisDate: data.analysisDate,
     projectType: "Renovation",
     projectOwnership: "own",
+    capitalSplitSource: "ourPercentage",
+    ourEquityPercentage: "50",
+    ourEquityAmount: "",
+    partnerEquityPercentage: "50",
+    partnerEquityAmount: "",
     surfaceM2: inputNumber(data.surfaceM2),
     plotM2: inputNumber(data.plotM2),
     durationMonths: inputNumber(data.durationMonths),
@@ -278,6 +301,16 @@ function normalizeStoredForm(
     projectOwnership: normalizeProjectOwnership(
       stored.projectOwnership ?? base.projectOwnership
     ),
+    capitalSplitSource: normalizeCapitalSplitSource(
+      stored.capitalSplitSource ?? base.capitalSplitSource
+    ),
+    ourEquityAmount: String(stored.ourEquityAmount ?? base.ourEquityAmount),
+    partnerEquityPercentage: String(
+      stored.partnerEquityPercentage ?? base.partnerEquityPercentage
+    ),
+    partnerEquityAmount: String(
+      stored.partnerEquityAmount ?? base.partnerEquityAmount
+    ),
     downpaymentCount: String(requestedCount),
     downpayments,
   };
@@ -332,6 +365,24 @@ export default function LosNaranjosClient({
     value: FormState[K]
   ) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateCapitalSplit(
+    source: CapitalSplitSource,
+    value: string
+  ) {
+    const fieldBySource: Record<CapitalSplitSource, keyof FormState> = {
+      ourPercentage: "ourEquityPercentage",
+      ourAmount: "ourEquityAmount",
+      partnerPercentage: "partnerEquityPercentage",
+      partnerAmount: "partnerEquityAmount",
+    };
+
+    setForm((current) => ({
+      ...current,
+      capitalSplitSource: source,
+      [fieldBySource[source]]: value,
+    }));
   }
 
   function updateDownpaymentCount(value: string) {
@@ -426,6 +477,33 @@ export default function LosNaranjosClient({
     const totalProjectCost = projectSubtotal + projectManagement;
     const capitalDeployed = totalAcquisition + totalProjectCost;
 
+    let ourEquityPercentage = 1;
+    if (isSharedProject) {
+      switch (form.capitalSplitSource) {
+        case "ourAmount":
+          ourEquityPercentage = capitalDeployed
+            ? parseNumber(form.ourEquityAmount) / capitalDeployed
+            : 0;
+          break;
+        case "partnerPercentage":
+          ourEquityPercentage = 1 - parsePercent(form.partnerEquityPercentage);
+          break;
+        case "partnerAmount":
+          ourEquityPercentage = capitalDeployed
+            ? 1 - parseNumber(form.partnerEquityAmount) / capitalDeployed
+            : 0;
+          break;
+        case "ourPercentage":
+        default:
+          ourEquityPercentage = parsePercent(form.ourEquityPercentage);
+          break;
+      }
+      ourEquityPercentage = Math.min(1, Math.max(0, ourEquityPercentage));
+    }
+    const partnerEquityPercentage = isSharedProject
+      ? 1 - ourEquityPercentage
+      : 0;
+
     const salePrice = Math.max(0, parseNumber(form.salePrice));
     const agentCommissionPercentage = Math.max(
       0,
@@ -436,6 +514,29 @@ export default function LosNaranjosClient({
     const netProfit = netProceeds - capitalDeployed;
     const roi = capitalDeployed ? netProfit / capitalDeployed : 0;
     const irr = calculateAnnualizedReturn(roi, durationMonths);
+
+    // Bij een gedeeld project wordt de volledige kosten- en opbrengstenverdeling
+    // naar rato van de ingelegde vermogenspercentages berekend.
+    const ourInvestment = capitalDeployed * ourEquityPercentage;
+    const partnerInvestment = capitalDeployed * partnerEquityPercentage;
+    const ourAcquisitionCosts = totalAcquisition * ourEquityPercentage;
+    const partnerAcquisitionCosts = totalAcquisition * partnerEquityPercentage;
+    const ourProjectCosts = totalProjectCost * ourEquityPercentage;
+    const partnerProjectCosts = totalProjectCost * partnerEquityPercentage;
+    const ourSalesCommission = agentCommission * ourEquityPercentage;
+    const partnerSalesCommission = agentCommission * partnerEquityPercentage;
+    const ourGrossProceeds = salePrice * ourEquityPercentage;
+    const partnerGrossProceeds = salePrice * partnerEquityPercentage;
+    const ourNetProceeds = netProceeds * ourEquityPercentage;
+    const partnerNetProceeds = netProceeds * partnerEquityPercentage;
+    const ourNetProfit = netProfit * ourEquityPercentage;
+    const partnerNetProfit = netProfit * partnerEquityPercentage;
+    const ourRoi = ourInvestment ? ourNetProfit / ourInvestment : 0;
+    const partnerRoi = partnerInvestment
+      ? partnerNetProfit / partnerInvestment
+      : 0;
+    const ourIrr = calculateAnnualizedReturn(ourRoi, durationMonths);
+    const partnerIrr = calculateAnnualizedReturn(partnerRoi, durationMonths);
 
     const downpaymentCount = clampInteger(
       parseNumber(form.downpaymentCount),
@@ -632,6 +733,27 @@ export default function LosNaranjosClient({
       projectType,
       projectOwnership,
       isSharedProject,
+      capitalSplitSource: form.capitalSplitSource,
+      ourEquityPercentage,
+      partnerEquityPercentage,
+      ourInvestment,
+      partnerInvestment,
+      ourAcquisitionCosts,
+      partnerAcquisitionCosts,
+      ourProjectCosts,
+      partnerProjectCosts,
+      ourSalesCommission,
+      partnerSalesCommission,
+      ourGrossProceeds,
+      partnerGrossProceeds,
+      ourNetProceeds,
+      partnerNetProceeds,
+      ourNetProfit,
+      partnerNetProfit,
+      ourRoi,
+      partnerRoi,
+      ourIrr,
+      partnerIrr,
       surfaceM2,
       plotM2,
       durationMonths,
@@ -720,9 +842,19 @@ export default function LosNaranjosClient({
     )
   );
 
-  const sensitivityPageNumber = 4 + cashflowPageCount;
+  const sharedFinancingPageCount = data.isSharedProject ? 1 : 0;
+  const sharedFinancingPageNumber = data.isSharedProject ? 2 : 0;
+  const exitPageNumber = 2 + sharedFinancingPageCount;
+  const cashOverviewPageNumber = 3 + sharedFinancingPageCount;
+  const cashDetailStartPageNumber = cashOverviewPageNumber + 1;
+  const sensitivityPageNumber =
+    cashDetailStartPageNumber + cashflowPageCount;
   const photosPageNumber = sensitivityPageNumber + 1;
   const totalPages = photosPageNumber;
+
+  const exitSectionNumber = String(2 + sharedFinancingPageCount).padStart(2, "0");
+  const cashSectionNumber = String(3 + sharedFinancingPageCount).padStart(2, "0");
+  const sensitivitySectionNumber = String(4 + sharedFinancingPageCount).padStart(2, "0");
 
   return (
     <main className="screen">
@@ -794,6 +926,36 @@ export default function LosNaranjosClient({
             onChange={(value) => updateField("durationMonths", value)}
           />
         </InputGroup>
+
+        {form.projectOwnership === "shared" && (
+          <InputGroup title="Financiering gedeeld project">
+            <CapitalSplitFields
+              totalCapital={data.capitalDeployed}
+              source={form.capitalSplitSource}
+              ourPercentage={
+                form.capitalSplitSource === "ourPercentage"
+                  ? form.ourEquityPercentage
+                  : inputPercent(data.ourEquityPercentage)
+              }
+              ourAmount={
+                form.capitalSplitSource === "ourAmount"
+                  ? form.ourEquityAmount
+                  : inputNumber(Math.round(data.ourInvestment))
+              }
+              partnerPercentage={
+                form.capitalSplitSource === "partnerPercentage"
+                  ? form.partnerEquityPercentage
+                  : inputPercent(data.partnerEquityPercentage)
+              }
+              partnerAmount={
+                form.capitalSplitSource === "partnerAmount"
+                  ? form.partnerEquityAmount
+                  : inputNumber(Math.round(data.partnerInvestment))
+              }
+              onChange={updateCapitalSplit}
+            />
+          </InputGroup>
+        )}
 
         <InputGroup title="Aankoop">
           <InputField
@@ -1005,8 +1167,119 @@ export default function LosNaranjosClient({
         <PageFooter label={config.footerLabel} page={`1 / ${totalPages}`} />
       </section>
 
+      {data.isSharedProject && (
+        <section className="report-page shared-financing-page">
+          <SectionHeading
+            number="02"
+            eyebrow="Shared financing"
+            title="Investment & Return Split"
+            subtitle="Proportional allocation between our own equity and partner / external capital."
+          />
+
+          <div className="metric-grid shared-metrics">
+            <Metric
+              label="Our equity share"
+              value={percent(data.ourEquityPercentage)}
+              sub={euro(data.ourInvestment)}
+            />
+            <Metric
+              label="Partner / external share"
+              value={percent(data.partnerEquityPercentage)}
+              sub={euro(data.partnerInvestment)}
+            />
+            <Metric
+              label="Our net profit"
+              value={signedEuro(data.ourNetProfit)}
+              positive={data.ourNetProfit >= 0}
+            />
+            <Metric
+              label="Partner net profit"
+              value={signedEuro(data.partnerNetProfit)}
+              positive={data.partnerNetProfit >= 0}
+            />
+          </div>
+
+          <TableTitle>Costs and proceeds allocation</TableTitle>
+          <table className="split-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Total project</th>
+                <th>Our equity</th>
+                <th>Partner / external</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Acquisition and purchase</strong></td>
+                <td>{euro(data.totalAcquisition)}</td>
+                <td>{euro(data.ourAcquisitionCosts)}</td>
+                <td>{euro(data.partnerAcquisitionCosts)}</td>
+              </tr>
+              <tr>
+                <td><strong>Construction and project</strong></td>
+                <td>{euro(data.totalProjectCost)}</td>
+                <td>{euro(data.ourProjectCosts)}</td>
+                <td>{euro(data.partnerProjectCosts)}</td>
+              </tr>
+              <tr className="split-total-row">
+                <td><strong>Total investment</strong></td>
+                <td><strong>{euro(data.capitalDeployed)}</strong></td>
+                <td><strong>{euro(data.ourInvestment)}</strong></td>
+                <td><strong>{euro(data.partnerInvestment)}</strong></td>
+              </tr>
+              <tr>
+                <td><strong>Gross sale proceeds</strong></td>
+                <td>{euro(data.salePrice)}</td>
+                <td>{euro(data.ourGrossProceeds)}</td>
+                <td>{euro(data.partnerGrossProceeds)}</td>
+              </tr>
+              <tr>
+                <td><strong>Sales commission</strong></td>
+                <td>-{euro(data.agentCommission)}</td>
+                <td>-{euro(data.ourSalesCommission)}</td>
+                <td>-{euro(data.partnerSalesCommission)}</td>
+              </tr>
+              <tr className="sale-row">
+                <td><strong>Net sale proceeds</strong></td>
+                <td className="positive"><strong>{euro(data.netProceeds)}</strong></td>
+                <td className="positive"><strong>{euro(data.ourNetProceeds)}</strong></td>
+                <td className="positive"><strong>{euro(data.partnerNetProceeds)}</strong></td>
+              </tr>
+              <tr className="split-profit-row">
+                <td><strong>Net profit / (loss)</strong></td>
+                <td className={data.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfit)}</td>
+                <td className={data.ourNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfit)}</td>
+                <td className={data.partnerNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.partnerNetProfit)}</td>
+              </tr>
+              <tr className="split-return-row">
+                <td><strong>ROI</strong></td>
+                <td className={data.roi >= 0 ? "positive" : "negative"}>{percent(data.roi, true)}</td>
+                <td className={data.ourRoi >= 0 ? "positive" : "negative"}>{percent(data.ourRoi, true)}</td>
+                <td className={data.partnerRoi >= 0 ? "positive" : "negative"}>{percent(data.partnerRoi, true)}</td>
+              </tr>
+              <tr className="split-return-row">
+                <td><strong>IRR ({data.durationMonths}M annualised)</strong></td>
+                <td className={data.irr >= 0 ? "positive" : "negative"}>{percent(data.irr, true)}</td>
+                <td className={data.ourIrr >= 0 ? "positive" : "negative"}>{percent(data.ourIrr, true)}</td>
+                <td className={data.partnerIrr >= 0 ? "positive" : "negative"}>{percent(data.partnerIrr, true)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p className="note">
+            <strong>Assumption:</strong> costs, sale proceeds and profit are split in the same proportion as the capital contribution. Interest, preferred returns or a separate profit waterfall are not included.
+          </p>
+
+          <PageFooter
+            label={config.footerLabel}
+            page={`${sharedFinancingPageNumber} / ${totalPages}`}
+          />
+        </section>
+      )}
+
       <section className="report-page">
-        <SectionHeading number="02" eyebrow="Exit analysis" title="Returns by Exit Timeline" subtitle="Returns under different exit scenarios." />
+        <SectionHeading number={exitSectionNumber} eyebrow="Exit analysis" title="Returns by Exit Timeline" subtitle="Returns under different exit scenarios." />
         <TableTitle>Returns by exit timeline</TableTitle>
         <table>
           <thead><tr><th>Exit</th><th>Net Profit</th><th>ROI</th><th>IRR (Ann.)</th></tr></thead>
@@ -1022,12 +1295,12 @@ export default function LosNaranjosClient({
           </tbody>
         </table>
         <p className="note"><strong>Note:</strong> The base case assumes a <strong>{data.durationMonths} months</strong> development and exit period. Earlier exit scenarios use the same profit but annualise the return over a shorter holding period.</p>
-        <PageFooter label={config.footerLabel} page={`2 / ${totalPages}`} />
+        <PageFooter label={config.footerLabel} page={`${exitPageNumber} / ${totalPages}`} />
       </section>
 
       <section className="report-page cash-page cash-overview-page">
         <SectionHeading
-          number="03"
+          number={cashSectionNumber}
           eyebrow="Cash plan"
           title="Capital Deployment Schedule"
           subtitle={`Custom schedule · ${data.cashflow.length} tranches · ${data.durationMonths} months to exit`}
@@ -1092,11 +1365,11 @@ export default function LosNaranjosClient({
           </table>
         </section>
 
-        <PageFooter label={config.footerLabel} page={`3 / ${totalPages}`} />
+        <PageFooter label={config.footerLabel} page={`${cashOverviewPageNumber} / ${totalPages}`} />
       </section>
 
       {cashflowPages.map((rows, pageIndex) => {
-        const pageNumber = 4 + pageIndex;
+        const pageNumber = cashDetailStartPageNumber + pageIndex;
         const firstRowNumber = pageIndex * cashflowRowsPerPage + 1;
         const lastRowNumber = firstRowNumber + rows.length - 1;
 
@@ -1106,25 +1379,39 @@ export default function LosNaranjosClient({
             key={`cashflow-page-${pageIndex}`}
           >
             <SectionHeading
-              number="03"
+              number={cashSectionNumber}
               eyebrow="Cash detail"
               title={
                 pageIndex === 0
                   ? "Cash Flow Detail"
                   : "Cash Flow Detail — Continued"
               }
-              subtitle={`Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length}`}
+              subtitle={
+                data.isSharedProject
+                  ? `Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length} · split ${percent(data.ourEquityPercentage)} / ${percent(data.partnerEquityPercentage)}`
+                  : `Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length}`
+              }
             />
 
             <section className="cash-table-card">
               <TableTitle>Cash flow detail</TableTitle>
               <div className="table-scroll">
-                <table>
+                <table
+                  className={
+                    data.isSharedProject ? "shared-cashflow-table" : undefined
+                  }
+                >
                   <thead>
                     <tr>
                       <th>Month</th>
                       <th>Event</th>
                       <th>Outflow</th>
+                      {data.isSharedProject && (
+                        <>
+                          <th>Our investment</th>
+                          <th>Partner investment</th>
+                        </>
+                      )}
                       <th>Inflow</th>
                       <th>Running Capital</th>
                     </tr>
@@ -1140,6 +1427,24 @@ export default function LosNaranjosClient({
                         <td className="negative">
                           {row.outflow ? `-${euro(row.outflow)}` : "—"}
                         </td>
+                        {data.isSharedProject && (
+                          <>
+                            <td className="negative party-investment-cell">
+                              {row.outflow
+                                ? `-${euro(
+                                    row.outflow * data.ourEquityPercentage
+                                  )}`
+                                : "—"}
+                            </td>
+                            <td className="negative party-investment-cell">
+                              {row.outflow
+                                ? `-${euro(
+                                    row.outflow * data.partnerEquityPercentage
+                                  )}`
+                                : "—"}
+                            </td>
+                          </>
+                        )}
                         <td className="positive">
                           {row.inflow ? euro(row.inflow) : "—"}
                         </td>
@@ -1161,7 +1466,7 @@ export default function LosNaranjosClient({
 
       <section className="report-page sensitivity-page">
         <SectionHeading
-          number="04"
+          number={sensitivitySectionNumber}
           eyebrow="Sensitivity"
           title="Sensitivity Analysis"
           subtitle="Impact of key assumption variations, holding everything else constant."
@@ -1298,6 +1603,75 @@ function DetailedSelectField({
         </select>
       </div>
     </label>
+  );
+}
+
+function CapitalSplitFields({
+  totalCapital,
+  source,
+  ourPercentage,
+  ourAmount,
+  partnerPercentage,
+  partnerAmount,
+  onChange,
+}: {
+  totalCapital: number;
+  source: CapitalSplitSource;
+  ourPercentage: string;
+  ourAmount: string;
+  partnerPercentage: string;
+  partnerAmount: string;
+  onChange: (source: CapitalSplitSource, value: string) => void;
+}) {
+  const field = (
+    label: string,
+    value: string,
+    fieldSource: CapitalSplitSource,
+    suffix: string
+  ) => (
+    <label
+      className={`capital-input ${source === fieldSource ? "capital-input-active" : ""}`}
+    >
+      <span>{label}</span>
+      <div className="capital-input-box">
+        <input
+          value={value}
+          inputMode="decimal"
+          onChange={(event) => onChange(fieldSource, event.currentTarget.value)}
+        />
+        <small>{suffix}</small>
+      </div>
+    </label>
+  );
+
+  return (
+    <div className="capital-split-fields field-full">
+      <div className="capital-split-heading">
+        <div>
+          <span>Totale investering</span>
+          <strong>{euro(totalCapital)}</strong>
+        </div>
+        <p>Het laatst aangepaste bedrag of percentage bepaalt automatisch de overige drie velden.</p>
+      </div>
+
+      <div className="capital-party-grid">
+        <section>
+          <h3>Ons eigen vermogen</h3>
+          <div className="capital-party-fields">
+            {field("Bedrag", ourAmount, "ourAmount", "€")}
+            {field("Percentage", ourPercentage, "ourPercentage", "%")}
+          </div>
+        </section>
+
+        <section>
+          <h3>Partner / vreemd vermogen</h3>
+          <div className="capital-party-fields">
+            {field("Bedrag", partnerAmount, "partnerAmount", "€")}
+            {field("Percentage", partnerPercentage, "partnerPercentage", "%")}
+          </div>
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1621,6 +1995,93 @@ const styles = `
     font-weight: 800;
     text-align: center;
   }
+  .capital-split-fields {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 16px;
+    padding: 18px;
+    border: 1px solid #d8d1c7;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .55);
+  }
+  .capital-split-heading {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .capital-split-heading > div { display: grid; gap: 4px; }
+  .capital-split-heading span {
+    color: #6a5740;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .capital-split-heading strong { font-size: 20px; }
+  .capital-split-heading p {
+    max-width: 430px;
+    margin: 0;
+    color: #756d64;
+    font-size: 12px;
+    line-height: 1.45;
+    text-align: right;
+  }
+  .capital-party-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .capital-party-grid section {
+    padding: 15px;
+    border: 1px solid #ded8cf;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+  .capital-party-grid h3 {
+    margin: 0 0 12px;
+    font-size: 14px;
+  }
+  .capital-party-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .capital-input { display: grid; gap: 7px; }
+  .capital-input > span {
+    color: #6f655a;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .capital-input-box {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    border: 1px solid #cfc7bc;
+    border-radius: 8px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+  .capital-input-box input {
+    width: 100%;
+    min-width: 0;
+    padding: 10px 11px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font: inherit;
+  }
+  .capital-input-box small {
+    padding: 0 11px;
+    color: #6f655a;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .capital-input-active .capital-input-box {
+    border-color: #171717;
+    box-shadow: 0 0 0 1px #171717;
+  }
+
   .downpayment-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1776,6 +2237,14 @@ const styles = `
   .exit-line { stroke: var(--green); stroke-dasharray: 4 4; stroke-width: 2; }
   .exit-label { fill: var(--green) !important; font-weight: 800; }
 
+  .shared-financing-page .shared-metrics { margin-bottom: 34px; }
+  .shared-financing-page .split-table td:first-child,
+  .shared-financing-page .split-table th:first-child { text-align: left; }
+  .split-total-row { background: #f2f3f5; }
+  .split-profit-row { font-weight: 800; border-top: 2px solid #111111; }
+  .split-return-row { font-weight: 800; }
+  .split-return-row:last-child { border-bottom: 2px solid #111111; }
+
   .sensitivity-block + .sensitivity-block { margin-top: 42px; }
   .sensitivity-page .table-title { margin-top: 28px; }
 
@@ -1842,6 +2311,9 @@ const styles = `
     .field-wide { grid-column: auto; }
     .range-control { grid-template-columns: 1fr; }
     .downpayment-card-grid { grid-template-columns: 1fr; }
+    .capital-split-heading { align-items: start; flex-direction: column; }
+    .capital-split-heading p { text-align: left; }
+    .capital-party-grid, .capital-party-fields { grid-template-columns: 1fr; }
     .report-page { margin-bottom: 0; padding: 28px 18px 74px; box-shadow: none; }
     .report-header h1 { font-size: 31px; }
     .metric-grid { grid-template-columns: 1fr; }
@@ -2193,6 +2665,40 @@ const styles = `
     .cash-detail-page tr {
       break-inside: avoid !important;
       page-break-inside: avoid !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table {
+      table-layout: fixed !important;
+      font-size: 6.9pt !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table th {
+      padding: 2.2mm 1mm !important;
+      font-size: 5.8pt !important;
+      letter-spacing: .08em !important;
+      white-space: normal !important;
+      line-height: 1.15 !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table td {
+      padding: 2mm 1mm !important;
+      white-space: nowrap !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table th:nth-child(1),
+    .cash-detail-page .shared-cashflow-table td:nth-child(1) {
+      width: 6% !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table th:nth-child(2),
+    .cash-detail-page .shared-cashflow-table td:nth-child(2) {
+      width: 24% !important;
+      white-space: normal !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table th:nth-child(n+3),
+    .cash-detail-page .shared-cashflow-table td:nth-child(n+3) {
+      width: 14% !important;
     }
 
     .sensitivity-block + .sensitivity-block {
