@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 export type LosNaranjosConfig = {
   title: string;
@@ -39,7 +39,10 @@ export type LosNaranjosInitialData = {
   buildCostPerM2: number;
   contingencyPercentage: number;
   furniture: number;
+  fixedInterior?: number;
+  looseFurniture?: number;
   furniturePaymentMonths?: number;
+  looseFurniturePaymentMonths?: number;
   projectManagementPercentage: number;
 
   salePrice: number;
@@ -80,8 +83,10 @@ type FormState = {
 
   buildCostPerM2: string;
   contingencyPercentage: string;
-  furniture: string;
+  fixedInterior: string;
+  looseFurniture: string;
   furniturePaymentMonths: string;
+  looseFurniturePaymentMonths: string;
   projectManagementPercentage: string;
 
   salePrice: string;
@@ -103,12 +108,6 @@ type CashflowItem = {
 };
 
 const STORAGE_KEY = "l3capital.los-naranjos.first-setup.v1";
-
-const DEFAULT_PROJECT_PHOTOS = [
-  "/los-naranjos-concept/photo1.jpg",
-  "/los-naranjos-concept/photo2.jpg",
-  "/los-naranjos-concept/photo3.jpg",
-];
 
 const euroFormatter = new Intl.NumberFormat("nl-NL", {
   style: "currency",
@@ -186,57 +185,53 @@ function normalizeCapitalSplitSource(value: unknown): CapitalSplitSource {
 }
 
 function createInitialForm(data: LosNaranjosInitialData): FormState {
-  const downpayments: Downpayment[] = [
-    {
-      month: inputNumber(data.firstPaymentMonth),
-      amount: inputNumber(data.firstPaymentAmount),
-    },
-    {
-      month: inputNumber(data.secondPaymentMonth),
-      amount: inputNumber(data.secondPaymentAmount),
-    },
-    {
-      month: inputNumber(data.thirdPaymentMonth),
-      amount: inputNumber(data.thirdPaymentAmount),
-    },
-  ];
+  const downpayments: Downpayment[] = Array.from({ length: 10 }, () => ({
+    month: "0",
+    amount: "0",
+  }));
 
   return {
-    projectName: data.projectName,
+    projectName: "",
     analysisDate: data.analysisDate,
     projectType: "Renovation",
     projectOwnership: "own",
     capitalSplitSource: "ourPercentage",
+
+    // De gedeelde-projectverdeling blijft op een bruikbare standaard staan.
+    // Deze velden zijn verborgen zolang "Eigen project" is geselecteerd.
     ourEquityPercentage: "50",
-    ourEquityAmount: "",
+    ourEquityAmount: "0",
     partnerEquityPercentage: "50",
-    partnerEquityAmount: "",
-    surfaceM2: inputNumber(data.surfaceM2),
-    plotM2: inputNumber(data.plotM2),
-    durationMonths: inputNumber(data.durationMonths),
+    partnerEquityAmount: "0",
 
-    purchasePrice: inputNumber(data.purchasePrice),
-    transferTaxPercentage: inputPercent(data.transferTaxPercentage),
-    lawyerFeePercentage: inputPercent(data.lawyerFeePercentage),
-    notaryFee: inputNumber(data.notaryFee),
-    otherAcquisitionCosts: inputNumber(data.otherAcquisitionCosts),
+    surfaceM2: "0",
+    plotM2: "0",
+    durationMonths: "0",
 
-    buildCostPerM2: inputNumber(data.buildCostPerM2),
-    contingencyPercentage: inputPercent(data.contingencyPercentage),
-    furniture: inputNumber(data.furniture),
-    furniturePaymentMonths: inputNumber(data.furniturePaymentMonths ?? 1),
-    projectManagementPercentage: inputPercent(
-      data.projectManagementPercentage
-    ),
+    purchasePrice: "0",
+    transferTaxPercentage: "0",
+    lawyerFeePercentage: "0",
+    notaryFee: "0",
+    otherAcquisitionCosts: "0",
 
-    salePrice: inputNumber(data.salePrice),
-    agentCommissionPercentage: inputPercent(data.agentCommissionPercentage),
+    buildCostPerM2: "0",
+    contingencyPercentage: "0",
+    fixedInterior: "0",
+    looseFurniture: "0",
 
-    downpaymentCount: String(downpayments.length),
+    // Een betaalperiode en construction draw kunnen niet uit nul maanden bestaan.
+    furniturePaymentMonths: "1",
+    looseFurniturePaymentMonths: "1",
+    projectManagementPercentage: "0",
+
+    salePrice: "0",
+    agentCommissionPercentage: "0",
+
+    downpaymentCount: "0",
     downpayments,
-    closingMonth: inputNumber(data.closingMonth),
-    constructionStartMonth: inputNumber(data.constructionStartMonth),
-    constructionDraws: inputNumber(data.constructionDraws),
+    closingMonth: "0",
+    constructionStartMonth: "0",
+    constructionDraws: "1",
   };
 }
 
@@ -248,6 +243,7 @@ function normalizeStoredForm(
   if (!value || typeof value !== "object") return base;
 
   const stored = value as Partial<FormState> & {
+    furniture?: string;
     firstPaymentMonth?: string;
     firstPaymentAmount?: string;
     secondPaymentMonth?: string;
@@ -311,14 +307,88 @@ function normalizeStoredForm(
     partnerEquityAmount: String(
       stored.partnerEquityAmount ?? base.partnerEquityAmount
     ),
+    fixedInterior: String(
+      stored.fixedInterior ?? stored.furniture ?? base.fixedInterior
+    ),
+    looseFurniture: String(stored.looseFurniture ?? base.looseFurniture),
+    looseFurniturePaymentMonths: String(
+      stored.looseFurniturePaymentMonths ?? base.looseFurniturePaymentMonths
+    ),
     downpaymentCount: String(requestedCount),
     downpayments,
   };
 }
 
-function calculateAnnualizedReturn(roi: number, months: number) {
-  if (months <= 0 || 1 + roi <= 0) return 0;
-  return Math.pow(1 + roi, 12 / months) - 1;
+function calculateAnnualizedIrr(
+  cashflows: Array<Pick<CashflowItem, "month" | "outflow" | "inflow">>
+) {
+  if (cashflows.length === 0) return Number.NaN;
+
+  const lastMonth = Math.max(
+    0,
+    ...cashflows.map((item) => Math.max(0, Math.round(item.month)))
+  );
+  const monthlyNetCashflows = Array.from(
+    { length: lastMonth + 1 },
+    () => 0
+  );
+
+  cashflows.forEach((item) => {
+    const month = Math.max(0, Math.round(item.month));
+    monthlyNetCashflows[month] += item.inflow - item.outflow;
+  });
+
+  const hasInvestment = monthlyNetCashflows.some((value) => value < 0);
+  const hasReturn = monthlyNetCashflows.some((value) => value > 0);
+  if (!hasInvestment || !hasReturn) return Number.NaN;
+
+  const npv = (monthlyRate: number) =>
+    monthlyNetCashflows.reduce(
+      (sum, cashflow, month) =>
+        sum + cashflow / Math.pow(1 + monthlyRate, month),
+      0
+    );
+
+  let lowerRate = -0.999999;
+  let upperRate = 1;
+  let lowerNpv = npv(lowerRate);
+  let upperNpv = npv(upperRate);
+
+  while (
+    Number.isFinite(upperNpv) &&
+    Math.sign(lowerNpv) === Math.sign(upperNpv) &&
+    upperRate < 1_000_000
+  ) {
+    upperRate *= 2;
+    upperNpv = npv(upperRate);
+  }
+
+  if (
+    !Number.isFinite(lowerNpv) ||
+    !Number.isFinite(upperNpv) ||
+    Math.sign(lowerNpv) === Math.sign(upperNpv)
+  ) {
+    return Number.NaN;
+  }
+
+  let monthlyIrr = 0;
+  for (let iteration = 0; iteration < 200; iteration += 1) {
+    monthlyIrr = (lowerRate + upperRate) / 2;
+    const middleNpv = npv(monthlyIrr);
+
+    if (!Number.isFinite(middleNpv)) return Number.NaN;
+    if (Math.abs(middleNpv) < 0.01) break;
+
+    if (Math.sign(middleNpv) === Math.sign(lowerNpv)) {
+      lowerRate = monthlyIrr;
+      lowerNpv = middleNpv;
+    } else {
+      upperRate = monthlyIrr;
+      upperNpv = middleNpv;
+    }
+  }
+
+  return Math.pow(1 + monthlyIrr, 12) - 1;
 }
 
 function formatDate(date: string) {
@@ -341,6 +411,8 @@ export default function LosNaranjosClient({
     createInitialForm(initialData)
   );
   const [storageReady, setStorageReady] = useState(false);
+  const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
 
   useEffect(() => {
     try {
@@ -422,11 +494,37 @@ export default function LosNaranjosClient({
   function resetForm() {
     localStorage.removeItem(STORAGE_KEY);
     setForm(createInitialForm(initialData));
+    setUploadedPhotos([]);
+    setPhotoInputKey((current) => current + 1);
   }
 
+  function handlePhotos(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.currentTarget.files ?? []).slice(0, 3);
+
+    if (selectedFiles.length === 0) {
+      setUploadedPhotos([]);
+      return;
+    }
+
+    Promise.all(
+      selectedFiles.map(
+        (file) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          })
+      )
+    )
+      .then(setUploadedPhotos)
+      .catch((error) =>
+        console.warn("Foto's konden niet worden geladen.", error)
+      );
+  }
 
   const data = useMemo(() => {
-    const projectName = form.projectName.trim() || config.title;
+    const projectName = form.projectName.trim();
     const projectType = form.projectType;
     const projectOwnership = form.projectOwnership;
     const isSharedProject = projectOwnership === "shared";
@@ -463,19 +561,21 @@ export default function LosNaranjosClient({
       0,
       parsePercent(form.contingencyPercentage)
     );
-    const furniture = Math.max(0, parseNumber(form.furniture));
+    const fixedInterior = Math.max(0, parseNumber(form.fixedInterior));
+    const looseFurniture = Math.max(0, parseNumber(form.looseFurniture));
     const projectManagementPercentage = isSharedProject
       ? Math.max(0, parsePercent(form.projectManagementPercentage))
       : 0;
 
     const baseBuildCost = surfaceM2 * buildCostPerM2;
     const contingency = baseBuildCost * contingencyPercentage;
-    const projectSubtotal = baseBuildCost + contingency + furniture;
+    const projectSubtotal = baseBuildCost + contingency + fixedInterior;
     const projectManagement = isSharedProject
       ? projectSubtotal * projectManagementPercentage
       : 0;
     const totalProjectCost = projectSubtotal + projectManagement;
-    const capitalDeployed = totalAcquisition + totalProjectCost;
+    const developmentCapital = totalAcquisition + totalProjectCost;
+    const capitalDeployed = developmentCapital + looseFurniture;
 
     let ourEquityPercentage = 1;
     if (isSharedProject) {
@@ -510,10 +610,10 @@ export default function LosNaranjosClient({
       parsePercent(form.agentCommissionPercentage)
     );
     const agentCommission = salePrice * agentCommissionPercentage;
-    const netProceeds = salePrice - agentCommission;
-    const netProfit = netProceeds - capitalDeployed;
+    const netSaleProceedsBeforeFurniture = salePrice - agentCommission;
+    const netProceeds = netSaleProceedsBeforeFurniture;
+    const netProfit = netSaleProceedsBeforeFurniture - capitalDeployed;
     const roi = capitalDeployed ? netProfit / capitalDeployed : 0;
-    const irr = calculateAnnualizedReturn(roi, durationMonths);
 
     // Bij een gedeeld project wordt de volledige kosten- en opbrengstenverdeling
     // naar rato van de ingelegde vermogenspercentages berekend.
@@ -523,6 +623,8 @@ export default function LosNaranjosClient({
     const partnerAcquisitionCosts = totalAcquisition * partnerEquityPercentage;
     const ourProjectCosts = totalProjectCost * ourEquityPercentage;
     const partnerProjectCosts = totalProjectCost * partnerEquityPercentage;
+    const ourLooseFurniture = looseFurniture * ourEquityPercentage;
+    const partnerLooseFurniture = looseFurniture * partnerEquityPercentage;
     const ourSalesCommission = agentCommission * ourEquityPercentage;
     const partnerSalesCommission = agentCommission * partnerEquityPercentage;
     const ourGrossProceeds = salePrice * ourEquityPercentage;
@@ -535,8 +637,6 @@ export default function LosNaranjosClient({
     const partnerRoi = partnerInvestment
       ? partnerNetProfit / partnerInvestment
       : 0;
-    const ourIrr = calculateAnnualizedReturn(ourRoi, durationMonths);
-    const partnerIrr = calculateAnnualizedReturn(partnerRoi, durationMonths);
 
     const downpaymentCount = clampInteger(
       parseNumber(form.downpaymentCount),
@@ -565,6 +665,11 @@ export default function LosNaranjosClient({
     );
     const furniturePaymentMonths = clampInteger(
       parseNumber(form.furniturePaymentMonths),
+      1,
+      constructionDraws
+    );
+    const looseFurniturePaymentMonths = clampInteger(
+      parseNumber(form.looseFurniturePaymentMonths),
       1,
       constructionDraws
     );
@@ -619,25 +724,32 @@ export default function LosNaranjosClient({
       },
     ];
 
-    // De gewone projectkosten worden gelijk over alle construction draws verdeeld.
-    // Het interieur wordt daar niet als losse regel naast gezet, maar bovenop de
-    // laatste gekozen construction draws verdeeld. Daardoor blijft iedere periode
-    // één construction-betaling tonen en wordt het interieur niet dubbel geteld.
-    const projectCostExcludingFurniture = Math.max(
+    // De gewone bouw- en projectkosten worden gelijk over alle construction draws
+    // verdeeld. Vaste inbouw en losse meubels worden bovenop de laatste gekozen
+    // construction draws gezet. Er ontstaan dus geen losse meubelregels meer.
+    const projectCostExcludingFixedInterior = Math.max(
       0,
-      totalProjectCost - furniture
+      totalProjectCost - fixedInterior
     );
     const baseConstructionDrawAmount =
-      projectCostExcludingFurniture / constructionDraws;
-    const furniturePerSelectedDraw = furniture / furniturePaymentMonths;
-    const firstFurnitureDrawIndex =
+      projectCostExcludingFixedInterior / constructionDraws;
+    const fixedInteriorPerSelectedDraw =
+      fixedInterior / furniturePaymentMonths;
+    const firstFixedInteriorDrawIndex =
       constructionDraws - furniturePaymentMonths;
+    const looseFurniturePerSelectedMonth =
+      looseFurniture / looseFurniturePaymentMonths;
+    const firstLooseFurnitureDrawIndex =
+      constructionDraws - looseFurniturePaymentMonths;
 
     for (let index = 0; index < constructionDraws; index += 1) {
-      const includesFurniture = index >= firstFurnitureDrawIndex;
+      const includesFixedInterior = index >= firstFixedInteriorDrawIndex;
+      const includesLooseFurniture =
+        index >= firstLooseFurnitureDrawIndex;
       const constructionDrawAmount =
         baseConstructionDrawAmount +
-        (includesFurniture ? furniturePerSelectedDraw : 0);
+        (includesFixedInterior ? fixedInteriorPerSelectedDraw : 0) +
+        (includesLooseFurniture ? looseFurniturePerSelectedMonth : 0);
 
       rawCashflow.push({
         month: constructionStartMonth + index,
@@ -649,9 +761,9 @@ export default function LosNaranjosClient({
 
     rawCashflow.push({
       month: durationMonths,
-      event: "Sales proceeds (net)",
+      event: "Sales proceeds (after commission)",
       outflow: 0,
-      inflow: netProceeds,
+      inflow: netSaleProceedsBeforeFurniture,
     });
 
     rawCashflow.sort((a, b) => a.month - b.month || a.event.localeCompare(b.event));
@@ -661,6 +773,28 @@ export default function LosNaranjosClient({
       runningCapital += item.outflow - item.inflow;
       return { ...item, runningCapital };
     });
+
+    const irr = calculateAnnualizedIrr(rawCashflow);
+    const ourIrr =
+      ourInvestment > 0
+        ? calculateAnnualizedIrr(
+            rawCashflow.map((item) => ({
+              ...item,
+              outflow: item.outflow * ourEquityPercentage,
+              inflow: item.inflow * ourEquityPercentage,
+            }))
+          )
+        : Number.NaN;
+    const partnerIrr =
+      partnerInvestment > 0
+        ? calculateAnnualizedIrr(
+            rawCashflow.map((item) => ({
+              ...item,
+              outflow: item.outflow * partnerEquityPercentage,
+              inflow: item.inflow * partnerEquityPercentage,
+            }))
+          )
+        : Number.NaN;
 
     const cashAtMonth0 = cashflow
       .filter((item) => item.month === 0)
@@ -684,6 +818,10 @@ export default function LosNaranjosClient({
     // Bouw- en interieurbetalingen tellen hier nooit mee, ook niet als ze eerder starten.
     const cashByNotary = totalAcquisition;
 
+    const investmentCashflow = rawCashflow.filter(
+      (item) => item.event !== "Sales proceeds (after commission)"
+    );
+
     const exitScenarios = [6, 9, 12, 15, 18, durationMonths]
       .filter((month, index, values) => month > 0 && values.indexOf(month) === index)
       .sort((a, b) => a - b)
@@ -691,14 +829,25 @@ export default function LosNaranjosClient({
         month,
         netProfit,
         roi,
-        irr: calculateAnnualizedReturn(roi, month),
+        irr: calculateAnnualizedIrr([
+          ...investmentCashflow,
+          {
+            month,
+            event: "Sales proceeds (after commission)",
+            outflow: 0,
+            inflow: netSaleProceedsBeforeFurniture,
+          },
+        ]),
       }));
 
     const saleSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map((change) => {
       const scenarioSalePrice = salePrice * (1 + change);
-      const scenarioNetProceeds =
+      const scenarioNetSaleProceedsBeforeFurniture =
         scenarioSalePrice * (1 - agentCommissionPercentage);
-      const scenarioProfit = scenarioNetProceeds - capitalDeployed;
+      const scenarioNetProceeds =
+        scenarioNetSaleProceedsBeforeFurniture;
+      const scenarioProfit =
+        scenarioNetSaleProceedsBeforeFurniture - capitalDeployed;
       const scenarioRoi = capitalDeployed
         ? scenarioProfit / capitalDeployed
         : 0;
@@ -707,22 +856,68 @@ export default function LosNaranjosClient({
         salePrice: scenarioSalePrice,
         netProfit: scenarioProfit,
         roi: scenarioRoi,
-        irr: calculateAnnualizedReturn(scenarioRoi, durationMonths),
+        irr: calculateAnnualizedIrr([
+          ...investmentCashflow,
+          {
+            month: durationMonths,
+            event: "Sales proceeds (after commission)",
+            outflow: 0,
+            inflow: scenarioNetSaleProceedsBeforeFurniture,
+          },
+        ]),
       };
     });
 
     const projectCostSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map(
       (change) => {
         const scenarioProjectCost = totalProjectCost * (1 + change);
-        const scenarioCapital = totalAcquisition + scenarioProjectCost;
-        const scenarioProfit = netProceeds - scenarioCapital;
+        const scenarioCapital =
+          totalAcquisition + scenarioProjectCost + looseFurniture;
+        const scenarioProfit =
+          netSaleProceedsBeforeFurniture - scenarioCapital;
         const scenarioRoi = scenarioCapital ? scenarioProfit / scenarioCapital : 0;
+        const constructionCostFactor = totalProjectCost
+          ? scenarioProjectCost / totalProjectCost
+          : 0;
+        const scenarioInvestmentCashflow = investmentCashflow.map((item) => {
+          const constructionDrawMatch = item.event.match(
+            /^Construction draw (\d+)\/(\d+)$/
+          );
+
+          if (!constructionDrawMatch) return item;
+
+          const drawIndex = Number(constructionDrawMatch[1]) - 1;
+          const looseFurniturePortion =
+            drawIndex >= firstLooseFurnitureDrawIndex
+              ? looseFurniturePerSelectedMonth
+              : 0;
+          const projectCostPortion = Math.max(
+            0,
+            item.outflow - looseFurniturePortion
+          );
+
+          return {
+            ...item,
+            outflow:
+              projectCostPortion * constructionCostFactor +
+              looseFurniturePortion,
+          };
+        });
+
         return {
           change,
           projectCost: scenarioProjectCost,
           netProfit: scenarioProfit,
           roi: scenarioRoi,
-          irr: calculateAnnualizedReturn(scenarioRoi, durationMonths),
+          irr: calculateAnnualizedIrr([
+            ...scenarioInvestmentCashflow,
+            {
+              month: durationMonths,
+              event: "Sales proceeds (after commission)",
+              outflow: 0,
+              inflow: netSaleProceedsBeforeFurniture,
+            },
+          ]),
         };
       }
     );
@@ -742,6 +937,8 @@ export default function LosNaranjosClient({
       partnerAcquisitionCosts,
       ourProjectCosts,
       partnerProjectCosts,
+      ourLooseFurniture,
+      partnerLooseFurniture,
       ourSalesCommission,
       partnerSalesCommission,
       ourGrossProceeds,
@@ -767,7 +964,8 @@ export default function LosNaranjosClient({
       totalAcquisition,
       buildCostPerM2,
       contingencyPercentage,
-      furniture,
+      fixedInterior,
+      looseFurniture,
       projectManagementPercentage,
       baseBuildCost,
       contingency,
@@ -778,6 +976,7 @@ export default function LosNaranjosClient({
       salePrice,
       agentCommissionPercentage,
       agentCommission,
+      netSaleProceedsBeforeFurniture,
       netProceeds,
       netProfit,
       roi,
@@ -789,12 +988,13 @@ export default function LosNaranjosClient({
       cashByNotary,
       cashAtMonth0,
       furniturePaymentMonths,
+      looseFurniturePaymentMonths,
       downpaymentCount,
       exitScenarios,
       saleSensitivity,
       projectCostSensitivity,
     };
-  }, [config.title, form]);
+  }, [form]);
 
 
   const constructionDrawCountForInput = Math.max(
@@ -822,11 +1022,30 @@ export default function LosNaranjosClient({
       };
     }
   );
+  const looseFurniturePaymentMonthsValue = String(
+    clampInteger(
+      parseNumber(form.looseFurniturePaymentMonths),
+      1,
+      constructionDrawCountForInput
+    )
+  );
+  const looseFurniturePaymentOptions = Array.from(
+    { length: constructionDrawCountForInput },
+    (_, index) => {
+      const months = index + 1;
+      return {
+        value: String(months),
+        shortLabel: months === 1 ? "1 maand" : `${months} maanden`,
+        label:
+          months === 1
+            ? "1 maand · in de laatste construction-drawmaand"
+            : `${months} maanden · over de laatste ${months} construction-drawmaanden`,
+      };
+    }
+  );
 
-  const photos =
-    initialData.photoUrls.length > 0
-      ? initialData.photoUrls
-      : DEFAULT_PROJECT_PHOTOS;
+  const photos = uploadedPhotos.slice(0, 3);
+  const hasPhotos = photos.length > 0;
 
   // Houd de kasstroomtabel altijd binnen een A4-pagina.
   // Extra bouwbetalingen krijgen automatisch een vervolgpaginа.
@@ -849,8 +1068,8 @@ export default function LosNaranjosClient({
   const cashDetailStartPageNumber = cashOverviewPageNumber + 1;
   const sensitivityPageNumber =
     cashDetailStartPageNumber + cashflowPageCount;
-  const photosPageNumber = sensitivityPageNumber + 1;
-  const totalPages = photosPageNumber;
+  const photosPageNumber = hasPhotos ? sensitivityPageNumber + 1 : 0;
+  const totalPages = sensitivityPageNumber + (hasPhotos ? 1 : 0);
 
   const exitSectionNumber = String(2 + sharedFinancingPageCount).padStart(2, "0");
   const cashSectionNumber = String(3 + sharedFinancingPageCount).padStart(2, "0");
@@ -864,7 +1083,7 @@ export default function LosNaranjosClient({
         <header className="input-header">
           <div>
             <span>Live invoer</span>
-            <h1>Los Naranjos analyse</h1>
+            <h1>{form.projectName.trim()}</h1>
           </div>
           <div className="input-actions">
             <button type="button" className="print-button" onClick={printReport}>
@@ -925,6 +1144,21 @@ export default function LosNaranjosClient({
             value={form.durationMonths}
             onChange={(value) => updateField("durationMonths", value)}
           />
+          <label className="field field-wide">
+            <span>Projectfoto’s (maximaal 3)</span>
+            <input
+              key={photoInputKey}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handlePhotos}
+            />
+            <small>
+              {hasPhotos
+                ? `${photos.length} foto${photos.length === 1 ? "" : "’s"} geselecteerd`
+                : "Geen foto’s geselecteerd — de fotopagina wordt dan niet opgenomen."}
+            </small>
+          </label>
         </InputGroup>
 
         {form.projectOwnership === "shared" && (
@@ -1003,27 +1237,18 @@ export default function LosNaranjosClient({
             }
           />
           <InputField
-            label="Meubilair"
-            value={form.furniture}
-            onChange={(value) => updateField("furniture", value)}
+            label="Vaste inbouw"
+            value={form.fixedInterior}
+            onChange={(value) => updateField("fixedInterior", value)}
           />
           <DetailedSelectField
-            label="Interieur betalen over"
+            label="Vaste inbouw betalen over"
             value={furniturePaymentMonthsValue}
             options={furniturePaymentOptions}
             onChange={(value) =>
               updateField("furniturePaymentMonths", value)
             }
           />
-          {form.projectOwnership === "shared" && (
-            <InputField
-              label="Projectmanagement %"
-              value={form.projectManagementPercentage}
-              onChange={(value) =>
-                updateField("projectManagementPercentage", value)
-              }
-            />
-          )}
           <InputField
             label="Verkoopprijs"
             value={form.salePrice}
@@ -1036,6 +1261,28 @@ export default function LosNaranjosClient({
               updateField("agentCommissionPercentage", value)
             }
           />
+          <InputField
+            label="Losse meubels"
+            value={form.looseFurniture}
+            onChange={(value) => updateField("looseFurniture", value)}
+          />
+          <DetailedSelectField
+            label="Losse meubels betalen over"
+            value={looseFurniturePaymentMonthsValue}
+            options={looseFurniturePaymentOptions}
+            onChange={(value) =>
+              updateField("looseFurniturePaymentMonths", value)
+            }
+          />
+          {form.projectOwnership === "shared" && (
+            <InputField
+              label="Projectmanagement %"
+              value={form.projectManagementPercentage}
+              onChange={(value) =>
+                updateField("projectManagementPercentage", value)
+              }
+            />
+          )}
         </InputGroup>
 
         <InputGroup title="Betalingsplanning">
@@ -1126,7 +1373,7 @@ export default function LosNaranjosClient({
             <DataRow label="Duration" value={`${data.durationMonths} months`} strong />
             <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} />
             <DataRow label={`Contingency (${percent(data.contingencyPercentage)})`} value={euro(data.contingency)} />
-            <DataRow label="Furniture" value={euro(data.furniture)} />
+            <DataRow label="Fixed Built-in" value={euro(data.fixedInterior)} />
             {data.isSharedProject && (
               <>
                 <DataRow
@@ -1153,6 +1400,7 @@ export default function LosNaranjosClient({
         <DataBlock title="Exit & Returns" full>
           <DataRow label="Gross Sale Price" value={euro(data.salePrice)} strong />
           <DataRow label={`Agent Commission (${percent(data.agentCommissionPercentage)})`} value={euro(data.agentCommission)} />
+          <DataRow label="Loose Furniture" value={euro(data.looseFurniture)} />
           <DataRow label="Net Proceeds" value={euro(data.netProceeds)} strong />
           <DataRow label="Net Profit / (Loss)" value={signedEuro(data.netProfit)} strong positive={data.netProfit >= 0} />
         </DataBlock>
@@ -1160,7 +1408,7 @@ export default function LosNaranjosClient({
         <AllocationBar
           salePrice={data.salePrice}
           acquisition={data.totalAcquisition}
-          project={data.totalProjectCost}
+          project={data.totalProjectCost + data.looseFurniture}
           commission={data.agentCommission}
           profit={data.netProfit}
         />
@@ -1221,6 +1469,12 @@ export default function LosNaranjosClient({
                 <td>{euro(data.totalProjectCost)}</td>
                 <td>{euro(data.ourProjectCosts)}</td>
                 <td>{euro(data.partnerProjectCosts)}</td>
+              </tr>
+              <tr>
+                <td><strong>Loose furniture</strong></td>
+                <td>{euro(data.looseFurniture)}</td>
+                <td>{euro(data.ourLooseFurniture)}</td>
+                <td>{euro(data.partnerLooseFurniture)}</td>
               </tr>
               <tr className="split-total-row">
                 <td><strong>Total investment</strong></td>
@@ -1294,7 +1548,7 @@ export default function LosNaranjosClient({
             ))}
           </tbody>
         </table>
-        <p className="note"><strong>Note:</strong> The base case assumes a <strong>{data.durationMonths} months</strong> development and exit period. Earlier exit scenarios use the same profit but annualise the return over a shorter holding period.</p>
+        <p className="note"><strong>Note:</strong> IRR is calculated from the actual monthly downpayments, acquisition costs, construction draws, loose-furniture payments and sale proceeds. Earlier exit scenarios keep the same planned costs and move the net sale proceeds to the selected exit month.</p>
         <PageFooter label={config.footerLabel} page={`${exitPageNumber} / ${totalPages}`} />
       </section>
 
@@ -1352,6 +1606,10 @@ export default function LosNaranjosClient({
               <tr>
                 <td><strong>Construction and project</strong></td>
                 <td>{euro(data.totalProjectCost)}</td>
+              </tr>
+              <tr>
+                <td><strong>Loose furniture</strong></td>
+                <td>{euro(data.looseFurniture)}</td>
               </tr>
               <tr>
                 <td><strong>Total capital deployed</strong></td>
@@ -1493,21 +1751,24 @@ export default function LosNaranjosClient({
         <PageFooter label={config.footerLabel} page={`${sensitivityPageNumber} / ${totalPages}`} />
       </section>
 
-      <section className="report-page photos-page">
-        <TableTitle>Property photos</TableTitle>
-        <div className="photo-stack">
-          {photos.length > 0 ? (
-            photos.slice(0, 3).map((src, index) => (
-              <img key={`${src}-${index}`} src={src} alt={`${data.projectName} foto ${index + 1}`} />
-            ))
-          ) : (
-            <div className="photo-placeholder">
-              Voeg bovenaan maximaal drie projectfoto’s toe.
-            </div>
-          )}
-        </div>
-        <PageFooter label={config.footerLabel} page={`${photosPageNumber} / ${totalPages}`} />
-      </section>
+      {hasPhotos && (
+        <section className="report-page photos-page">
+          <TableTitle>Property photos</TableTitle>
+          <div className="photo-stack">
+            {photos.map((src, index) => (
+              <img
+                key={`${src}-${index}`}
+                src={src}
+                alt={`${data.projectName} foto ${index + 1}`}
+              />
+            ))}
+          </div>
+          <PageFooter
+            label={config.footerLabel}
+            page={`${photosPageNumber} / ${totalPages}`}
+          />
+        </section>
+      )}
     </main>
   );
 }
