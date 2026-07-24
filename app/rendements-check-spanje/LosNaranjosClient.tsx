@@ -10,20 +10,31 @@ export type LosNaranjosConfig = {
 
 type ProjectOwnership = "own" | "shared";
 type ProjectType = "New Build" | "Renovation";
-type CapitalSplitSource =
-  | "ourPercentage"
-  | "ourAmount"
-  | "partnerPercentage"
-  | "partnerAmount";
-
 type Downpayment = {
   month: string;
   amount: string;
 };
 
+type CoInvestor = {
+  name: string;
+  monthlyTotalAmount: string;
+};
+
+type CashflowCategory = "acquisition" | "project" | "sale";
+
+type RawCashflowItem = {
+  paymentId?: string;
+  month: number;
+  event: string;
+  outflow: number;
+  inflow: number;
+  category: CashflowCategory;
+};
+
 export type LosNaranjosInitialData = {
   projectName: string;
   analysisDate: string;
+  projectStartDate?: string;
   projectType: string;
   projectOwnership?: ProjectOwnership;
   surfaceM2: number;
@@ -41,6 +52,7 @@ export type LosNaranjosInitialData = {
   furniture: number;
   fixedInterior?: number;
   looseFurniture?: number;
+  furnitureMarkupPercentage?: number;
   furniturePaymentMonths?: number;
   looseFurniturePaymentMonths?: number;
   projectManagementPercentage: number;
@@ -64,13 +76,11 @@ export type LosNaranjosInitialData = {
 type FormState = {
   projectName: string;
   analysisDate: string;
+  projectStartDate: string;
   projectType: ProjectType;
   projectOwnership: ProjectOwnership;
-  capitalSplitSource: CapitalSplitSource;
-  ourEquityPercentage: string;
-  ourEquityAmount: string;
-  partnerEquityPercentage: string;
-  partnerEquityAmount: string;
+  coInvestorCount: string;
+  coInvestors: CoInvestor[];
   surfaceM2: string;
   plotM2: string;
   durationMonths: string;
@@ -85,6 +95,7 @@ type FormState = {
   contingencyPercentage: string;
   fixedInterior: string;
   looseFurniture: string;
+  furnitureMarkupPercentage: string;
   furniturePaymentMonths: string;
   looseFurniturePaymentMonths: string;
   projectManagementPercentage: string;
@@ -99,19 +110,31 @@ type FormState = {
   constructionDraws: string;
 };
 
-type CashflowItem = {
-  month: number;
-  event: string;
-  outflow: number;
-  inflow: number;
+type CashflowItem = RawCashflowItem & {
+  date: string;
   runningCapital: number;
+  ourInvestment: number;
+  coInvestorInvestments: number[];
 };
 
-const STORAGE_KEY = "l3capital.los-naranjos.first-setup.v1";
+type ParticipantSummary = {
+  name: string;
+  plannedCapital: number;
+  usedCapital: number;
+  unusedCapital: number;
+  capitalShare: number;
+  netProfit: number;
+  netProceeds: number;
+  roi: number;
+  irr: number;
+};
 
-const euroFormatter = new Intl.NumberFormat("nl-NL", {
-  style: "currency",
-  currency: "EUR",
+const STORAGE_KEY = "l3capital.los-naranjos.first-setup.v2";
+const LEGACY_STORAGE_KEY = "l3capital.los-naranjos.first-setup.v1";
+const MAX_CO_INVESTORS = 8;
+
+const amountFormatter = new Intl.NumberFormat("nl-NL", {
+  minimumFractionDigits: 0,
   maximumFractionDigits: 0,
 });
 
@@ -120,12 +143,13 @@ const numberFormatter = new Intl.NumberFormat("nl-NL", {
 });
 
 function euro(value: number) {
-  return euroFormatter.format(Number.isFinite(value) ? value : 0);
+  const safeValue = Number.isFinite(value) ? Math.abs(value) : 0;
+  return `€ ${amountFormatter.format(safeValue)}`;
 }
 
 function signedEuro(value: number) {
   if (!Number.isFinite(value)) return "—";
-  return value < 0 ? `-${euro(Math.abs(value))}` : euro(value);
+  return value < 0 ? `-${euro(value)}` : euro(value);
 }
 
 function percent(value: number, plus = false) {
@@ -134,31 +158,50 @@ function percent(value: number, plus = false) {
   return plus && value > 0 ? `+${shown}` : shown;
 }
 
-function inputNumber(value: number) {
-  return String(value);
-}
-
-function inputPercent(value: number) {
-  return String(Number((value * 100).toFixed(2))).replace(".", ",");
-}
-
 function parseNumber(value: string) {
   const raw = value.trim().replace(/\s/g, "");
   if (!raw) return 0;
 
   let normalized = raw.replace(/[^\d,.-]/g, "");
-  if (normalized.includes(",") && normalized.includes(".")) {
-    normalized = normalized.replace(/\./g, "").replace(",", ".");
-  } else if (normalized.includes(",")) {
+  const commaIndex = normalized.lastIndexOf(",");
+  const dotIndex = normalized.lastIndexOf(".");
+
+  if (commaIndex >= 0 && dotIndex >= 0) {
+    if (commaIndex > dotIndex) {
+      normalized = normalized.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  } else if (commaIndex >= 0) {
     normalized = normalized.replace(",", ".");
+  } else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(normalized)) {
+    normalized = normalized.replace(/\./g, "");
   }
 
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeAmountInput(value: string) {
+  return value.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+}
+
+function formatAmountInput(value: string) {
+  const digits = normalizeAmountInput(value);
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+function caretPositionAfterDigits(value: string, digitCount: number) {
+  if (digitCount <= 0) return 0;
+  let seenDigits = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (/\d/.test(value[index])) seenDigits += 1;
+    if (seenDigits >= digitCount) return index + 1;
+  }
+  return value.length;
+}
+
 function parsePercent(value: string) {
-  // In de live invoer betekent 1 altijd 1% en 0,9 altijd 0,9%.
   return parseNumber(value) / 100;
 }
 
@@ -176,33 +219,33 @@ function normalizeProjectOwnership(value: unknown): ProjectOwnership {
   return value === "own" ? "own" : "shared";
 }
 
-function normalizeCapitalSplitSource(value: unknown): CapitalSplitSource {
-  return value === "ourAmount" ||
-    value === "partnerPercentage" ||
-    value === "partnerAmount"
-    ? value
-    : "ourPercentage";
+function createBlankDownpayment(): Downpayment {
+  return { month: "", amount: "" };
+}
+
+function emptyIfZeroString(value: unknown) {
+  const shown = String(value ?? "").trim();
+  return /^0(?:[.,]0+)?$/.test(shown) ? "" : shown;
+}
+
+function createInvestor(index: number): CoInvestor {
+  return {
+    name: `Mede-investeerder ${index + 1}`,
+    monthlyTotalAmount: "",
+  };
 }
 
 function createInitialForm(data: LosNaranjosInitialData): FormState {
-  const downpayments: Downpayment[] = Array.from({ length: 10 }, () => ({
-    month: "0",
-    amount: "0",
-  }));
+  const downpayments: Downpayment[] = [];
 
   return {
     projectName: "",
     analysisDate: data.analysisDate,
+    projectStartDate: data.projectStartDate ?? data.analysisDate,
     projectType: "Renovation",
     projectOwnership: "own",
-    capitalSplitSource: "ourPercentage",
-
-    // De gedeelde-projectverdeling blijft op een bruikbare standaard staan.
-    // Deze velden zijn verborgen zolang "Eigen project" is geselecteerd.
-    ourEquityPercentage: "50",
-    ourEquityAmount: "0",
-    partnerEquityPercentage: "50",
-    partnerEquityAmount: "0",
+    coInvestorCount: "1",
+    coInvestors: [createInvestor(0)],
 
     surfaceM2: "0",
     plotM2: "0",
@@ -218,8 +261,7 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     contingencyPercentage: "0",
     fixedInterior: "0",
     looseFurniture: "0",
-
-    // Een betaalperiode en construction draw kunnen niet uit nul maanden bestaan.
+    furnitureMarkupPercentage: "0",
     furniturePaymentMonths: "1",
     looseFurniturePaymentMonths: "1",
     projectManagementPercentage: "0",
@@ -250,6 +292,7 @@ function normalizeStoredForm(
     secondPaymentAmount?: string;
     thirdPaymentMonth?: string;
     thirdPaymentAmount?: string;
+    partnerEquityAmount?: string;
   };
 
   const legacyDownpayments: Downpayment[] = [
@@ -274,20 +317,96 @@ function normalizeStoredForm(
             Boolean(item && typeof item === "object")
         )
         .map((item) => ({
-          month: String(item.month ?? ""),
-          amount: String(item.amount ?? ""),
+          month: emptyIfZeroString(item.month),
+          amount: emptyIfZeroString(item.amount),
         }))
     : legacyDownpayments;
 
-  const requestedCount = clampInteger(
-    parseNumber(String(stored.downpaymentCount ?? sourceDownpayments.length)),
+  const requestedDownpaymentCount = clampInteger(
+    parseNumber(
+      String(stored.downpaymentCount ?? sourceDownpayments.length)
+    ),
     0,
     10
   );
-
-  const downpayments = sourceDownpayments.slice(0, requestedCount);
-  while (downpayments.length < requestedCount) {
+  const downpayments = sourceDownpayments.slice(0, requestedDownpaymentCount);
+  while (downpayments.length < requestedDownpaymentCount) {
     downpayments.push({ month: "", amount: "" });
+  }
+
+  const legacyPartnerAmount = Math.max(
+    0,
+    parseNumber(String(stored.partnerEquityAmount ?? "0"))
+  );
+  type LegacyInvestor = Partial<CoInvestor> & {
+    contributions?: Array<{
+      month?: string;
+      amount?: string;
+      paymentId?: string;
+    }>;
+    monthlyStartMonth?: string;
+    monthlyEndMonth?: string;
+    monthlyAmount?: string;
+  };
+  const storedInvestors = Array.isArray((stored as { coInvestors?: unknown }).coInvestors)
+    ? ((stored as { coInvestors: LegacyInvestor[] }).coInvestors ?? [])
+    : [];
+  const sourceInvestors: LegacyInvestor[] = storedInvestors.length > 0
+    ? storedInvestors
+    : legacyPartnerAmount > 0
+      ? [
+          {
+            name: "Mede-investeerder 1",
+            monthlyTotalAmount: String(legacyPartnerAmount),
+          },
+        ]
+      : base.coInvestors;
+  const requestedInvestorCount = clampInteger(
+    parseNumber(String(stored.coInvestorCount ?? sourceInvestors.length)),
+    1,
+    MAX_CO_INVESTORS
+  );
+  const coInvestors: CoInvestor[] = sourceInvestors
+    .slice(0, requestedInvestorCount)
+    .map((investor, investorIndex) => {
+      const storedMonthlyTotal = Math.max(
+        0,
+        parseNumber(String(investor.monthlyTotalAmount ?? ""))
+      );
+      const legacyContributionTotal = Array.isArray(investor.contributions)
+        ? investor.contributions.reduce(
+            (sum, contribution) =>
+              sum + Math.max(0, parseNumber(String(contribution?.amount ?? ""))),
+            0
+          )
+        : 0;
+      const legacyMonthlyAmount = Math.max(
+        0,
+        parseNumber(String(investor.monthlyAmount ?? ""))
+      );
+      const legacyStartMonth = Math.max(
+        0,
+        Math.round(parseNumber(String(investor.monthlyStartMonth ?? "")))
+      );
+      const legacyEndMonth = Math.max(
+        legacyStartMonth,
+        Math.round(parseNumber(String(investor.monthlyEndMonth ?? "")))
+      );
+      const legacyMonthlyTotal =
+        legacyMonthlyAmount > 0
+          ? legacyMonthlyAmount * (legacyEndMonth - legacyStartMonth + 1)
+          : 0;
+      const migratedTotal =
+        storedMonthlyTotal || legacyContributionTotal || legacyMonthlyTotal;
+
+      return {
+        name: String(investor.name ?? `Mede-investeerder ${investorIndex + 1}`),
+        monthlyTotalAmount:
+          migratedTotal > 0 ? String(Math.round(migratedTotal)) : "",
+      };
+    });
+  while (coInvestors.length < requestedInvestorCount) {
+    coInvestors.push(createInvestor(coInvestors.length));
   }
 
   return {
@@ -297,26 +416,51 @@ function normalizeStoredForm(
     projectOwnership: normalizeProjectOwnership(
       stored.projectOwnership ?? base.projectOwnership
     ),
-    capitalSplitSource: normalizeCapitalSplitSource(
-      stored.capitalSplitSource ?? base.capitalSplitSource
-    ),
-    ourEquityAmount: String(stored.ourEquityAmount ?? base.ourEquityAmount),
-    partnerEquityPercentage: String(
-      stored.partnerEquityPercentage ?? base.partnerEquityPercentage
-    ),
-    partnerEquityAmount: String(
-      stored.partnerEquityAmount ?? base.partnerEquityAmount
+    projectStartDate: String(
+      stored.projectStartDate ?? base.projectStartDate
     ),
     fixedInterior: String(
       stored.fixedInterior ?? stored.furniture ?? base.fixedInterior
     ),
     looseFurniture: String(stored.looseFurniture ?? base.looseFurniture),
+    furnitureMarkupPercentage: String(
+      stored.furnitureMarkupPercentage ?? base.furnitureMarkupPercentage
+    ),
     looseFurniturePaymentMonths: String(
       stored.looseFurniturePaymentMonths ?? base.looseFurniturePaymentMonths
     ),
-    downpaymentCount: String(requestedCount),
+    coInvestorCount: String(requestedInvestorCount),
+    coInvestors,
+    downpaymentCount: String(requestedDownpaymentCount),
     downpayments,
   };
+}
+
+function addMonthsToDate(date: string, month: number) {
+  if (!date) return "";
+  const parsed = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const originalDay = parsed.getDate();
+  parsed.setDate(1);
+  parsed.setMonth(parsed.getMonth() + Math.max(0, Math.round(month)));
+  const lastDayOfTargetMonth = new Date(
+    parsed.getFullYear(),
+    parsed.getMonth() + 1,
+    0
+  ).getDate();
+  parsed.setDate(Math.min(originalDay, lastDayOfTargetMonth));
+  return parsed.toISOString().slice(0, 10);
+}
+
+function formatShortDate(date: string) {
+  if (!date) return "—";
+  const parsed = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat("nl-NL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(parsed);
 }
 
 function calculateAnnualizedIrr(
@@ -393,7 +537,7 @@ function calculateAnnualizedIrr(
 
 function formatDate(date: string) {
   if (!date) return "Datum niet ingevuld";
-  return new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("nl-NL", {
     day: "2-digit",
     month: "long",
     year: "numeric",
@@ -416,7 +560,9 @@ export default function LosNaranjosClient({
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved =
+        localStorage.getItem(STORAGE_KEY) ??
+        localStorage.getItem(LEGACY_STORAGE_KEY);
       if (saved) {
         setForm(normalizeStoredForm(JSON.parse(saved), initialData));
       }
@@ -429,7 +575,10 @@ export default function LosNaranjosClient({
 
   useEffect(() => {
     if (!storageReady) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
+    const saveHandle = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
+    }, 180);
+    return () => window.clearTimeout(saveHandle);
   }, [form, storageReady]);
 
   function updateField<K extends keyof FormState>(
@@ -439,21 +588,41 @@ export default function LosNaranjosClient({
     setForm((current) => ({ ...current, [field]: value }));
   }
 
-  function updateCapitalSplit(
-    source: CapitalSplitSource,
-    value: string
-  ) {
-    const fieldBySource: Record<CapitalSplitSource, keyof FormState> = {
-      ourPercentage: "ourEquityPercentage",
-      ourAmount: "ourEquityAmount",
-      partnerPercentage: "partnerEquityPercentage",
-      partnerAmount: "partnerEquityAmount",
-    };
+  function updateCoInvestorCount(value: string) {
+    const count = clampInteger(parseNumber(value), 1, MAX_CO_INVESTORS);
+    setForm((current) => {
+      const coInvestors = current.coInvestors.slice(0, count);
+      while (coInvestors.length < count) {
+        coInvestors.push(createInvestor(coInvestors.length));
+      }
+      return {
+        ...current,
+        coInvestorCount: String(count),
+        coInvestors,
+      };
+    });
+  }
 
+  function updateCoInvestorName(index: number, value: string) {
     setForm((current) => ({
       ...current,
-      capitalSplitSource: source,
-      [fieldBySource[source]]: value,
+      coInvestors: current.coInvestors.map((investor, investorIndex) =>
+        investorIndex === index ? { ...investor, name: value } : investor
+      ),
+    }));
+  }
+
+  function updateInvestorMonthlyTotal(
+    investorIndex: number,
+    value: string
+  ) {
+    setForm((current) => ({
+      ...current,
+      coInvestors: current.coInvestors.map((investor, currentIndex) =>
+        currentIndex === investorIndex
+          ? { ...investor, monthlyTotalAmount: value }
+          : investor
+      ),
     }));
   }
 
@@ -463,7 +632,7 @@ export default function LosNaranjosClient({
     setForm((current) => {
       const downpayments = current.downpayments.slice(0, count);
       while (downpayments.length < count) {
-        downpayments.push({ month: "", amount: "" });
+        downpayments.push(createBlankDownpayment());
       }
 
       return {
@@ -493,6 +662,7 @@ export default function LosNaranjosClient({
 
   function resetForm() {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
     setForm(createInitialForm(initialData));
     setUploadedPhotos([]);
     setPhotoInputKey((current) => current + 1);
@@ -525,12 +695,27 @@ export default function LosNaranjosClient({
 
   const data = useMemo(() => {
     const projectName = form.projectName.trim();
+    const projectStartDate = form.projectStartDate;
     const projectType = form.projectType;
     const projectOwnership = form.projectOwnership;
     const isSharedProject = projectOwnership === "shared";
     const surfaceM2 = Math.max(0, parseNumber(form.surfaceM2));
     const plotM2 = Math.max(0, parseNumber(form.plotM2));
     const durationMonths = Math.max(1, Math.round(parseNumber(form.durationMonths)));
+
+    const coInvestorCount = isSharedProject
+      ? clampInteger(parseNumber(form.coInvestorCount), 1, MAX_CO_INVESTORS)
+      : 0;
+    const coInvestors = form.coInvestors
+      .slice(0, coInvestorCount)
+      .map((investor, investorIndex) => ({
+        index: investorIndex,
+        name: investor.name.trim() || `Mede-investeerder ${investorIndex + 1}`,
+        plannedCapital: Math.max(
+          0,
+          parseNumber(investor.monthlyTotalAmount)
+        ),
+      }));
 
     const purchasePrice = Math.max(0, parseNumber(form.purchasePrice));
     const transferTaxPercentage = Math.max(
@@ -563,46 +748,27 @@ export default function LosNaranjosClient({
     );
     const fixedInterior = Math.max(0, parseNumber(form.fixedInterior));
     const looseFurniture = Math.max(0, parseNumber(form.looseFurniture));
+    const furnitureMarkupPercentage = Math.min(
+      1,
+      Math.max(0, parsePercent(form.furnitureMarkupPercentage))
+    );
     const projectManagementPercentage = isSharedProject
       ? Math.max(0, parsePercent(form.projectManagementPercentage))
       : 0;
 
     const baseBuildCost = surfaceM2 * buildCostPerM2;
     const contingency = baseBuildCost * contingencyPercentage;
-    const projectSubtotal = baseBuildCost + contingency + fixedInterior;
+    const furnitureBase = fixedInterior + looseFurniture;
+    const furnitureMarkup = furnitureBase * furnitureMarkupPercentage;
+    const fixedFurnitureCost = fixedInterior * (1 + furnitureMarkupPercentage);
+    const looseFurnitureCost = looseFurniture * (1 + furnitureMarkupPercentage);
+    const projectSubtotal =
+      baseBuildCost + contingency + fixedInterior + looseFurniture + furnitureMarkup;
     const projectManagement = isSharedProject
       ? projectSubtotal * projectManagementPercentage
       : 0;
     const totalProjectCost = projectSubtotal + projectManagement;
-    const developmentCapital = totalAcquisition + totalProjectCost;
-    const capitalDeployed = developmentCapital + looseFurniture;
-
-    let ourEquityPercentage = 1;
-    if (isSharedProject) {
-      switch (form.capitalSplitSource) {
-        case "ourAmount":
-          ourEquityPercentage = capitalDeployed
-            ? parseNumber(form.ourEquityAmount) / capitalDeployed
-            : 0;
-          break;
-        case "partnerPercentage":
-          ourEquityPercentage = 1 - parsePercent(form.partnerEquityPercentage);
-          break;
-        case "partnerAmount":
-          ourEquityPercentage = capitalDeployed
-            ? 1 - parseNumber(form.partnerEquityAmount) / capitalDeployed
-            : 0;
-          break;
-        case "ourPercentage":
-        default:
-          ourEquityPercentage = parsePercent(form.ourEquityPercentage);
-          break;
-      }
-      ourEquityPercentage = Math.min(1, Math.max(0, ourEquityPercentage));
-    }
-    const partnerEquityPercentage = isSharedProject
-      ? 1 - ourEquityPercentage
-      : 0;
+    const capitalDeployed = totalAcquisition + totalProjectCost;
 
     const salePrice = Math.max(0, parseNumber(form.salePrice));
     const agentCommissionPercentage = Math.max(
@@ -610,46 +776,29 @@ export default function LosNaranjosClient({
       parsePercent(form.agentCommissionPercentage)
     );
     const agentCommission = salePrice * agentCommissionPercentage;
-    const netSaleProceedsBeforeFurniture = salePrice - agentCommission;
-    const netProceeds = netSaleProceedsBeforeFurniture;
-    const netProfit = netSaleProceedsBeforeFurniture - capitalDeployed;
+    const netProceeds = salePrice - agentCommission;
+    const netSaleProceedsBeforeFurniture = netProceeds;
+    const netProfit = netProceeds - capitalDeployed;
     const roi = capitalDeployed ? netProfit / capitalDeployed : 0;
-
-    // Bij een gedeeld project wordt de volledige kosten- en opbrengstenverdeling
-    // naar rato van de ingelegde vermogenspercentages berekend.
-    const ourInvestment = capitalDeployed * ourEquityPercentage;
-    const partnerInvestment = capitalDeployed * partnerEquityPercentage;
-    const ourAcquisitionCosts = totalAcquisition * ourEquityPercentage;
-    const partnerAcquisitionCosts = totalAcquisition * partnerEquityPercentage;
-    const ourProjectCosts = totalProjectCost * ourEquityPercentage;
-    const partnerProjectCosts = totalProjectCost * partnerEquityPercentage;
-    const ourLooseFurniture = looseFurniture * ourEquityPercentage;
-    const partnerLooseFurniture = looseFurniture * partnerEquityPercentage;
-    const ourSalesCommission = agentCommission * ourEquityPercentage;
-    const partnerSalesCommission = agentCommission * partnerEquityPercentage;
-    const ourGrossProceeds = salePrice * ourEquityPercentage;
-    const partnerGrossProceeds = salePrice * partnerEquityPercentage;
-    const ourNetProceeds = netProceeds * ourEquityPercentage;
-    const partnerNetProceeds = netProceeds * partnerEquityPercentage;
-    const ourNetProfit = netProfit * ourEquityPercentage;
-    const partnerNetProfit = netProfit * partnerEquityPercentage;
-    const ourRoi = ourInvestment ? ourNetProfit / ourInvestment : 0;
-    const partnerRoi = partnerInvestment
-      ? partnerNetProfit / partnerInvestment
-      : 0;
 
     const downpaymentCount = clampInteger(
       parseNumber(form.downpaymentCount),
       0,
       10
     );
+    let remainingPurchasePrice = purchasePrice;
     const downpayments = form.downpayments
       .slice(0, downpaymentCount)
-      .map((payment, index) => ({
-        index,
-        month: Math.max(0, Math.round(parseNumber(payment.month))),
-        amount: Math.max(0, parseNumber(payment.amount)),
-      }));
+      .map((payment, index) => {
+        const requestedAmount = Math.max(0, parseNumber(payment.amount));
+        const amount = Math.min(requestedAmount, remainingPurchasePrice);
+        remainingPurchasePrice = Math.max(0, remainingPurchasePrice - amount);
+        return {
+          index,
+          month: Math.max(0, Math.round(parseNumber(payment.month))),
+          amount,
+        };
+      });
 
     const closingMonth = Math.max(
       0,
@@ -683,119 +832,312 @@ export default function LosNaranjosClient({
       purchasePrice - totalDownpayments
     );
 
-    const rawCashflow: Omit<CashflowItem, "runningCapital">[] = [
+    const rawCashflow: RawCashflowItem[] = [
       ...downpayments
         .filter((payment) => payment.amount > 0)
         .map((payment) => ({
+          paymentId: `downpayment-${payment.index + 1}`,
           month: payment.month,
           event: `Downpayment ${payment.index + 1}`,
           outflow: payment.amount,
           inflow: 0,
+          category: "acquisition" as const,
         })),
       {
+        paymentId: "final-purchase-payment",
         month: closingMonth,
         event: "Final purchase payment",
         outflow: finalPurchasePayment,
         inflow: 0,
+        category: "acquisition",
       },
       {
+        paymentId: "transfer-tax",
         month: closingMonth,
         event: "Transfer tax",
         outflow: transferTax,
         inflow: 0,
+        category: "acquisition",
       },
       {
+        paymentId: "lawyer-fee",
         month: closingMonth,
         event: "Lawyer fee",
         outflow: lawyerFee,
         inflow: 0,
+        category: "acquisition",
       },
       {
+        paymentId: "notary-fee",
         month: closingMonth,
         event: "Notary fee",
         outflow: notaryFee,
         inflow: 0,
+        category: "acquisition",
       },
       {
+        paymentId: "other-acquisition-costs",
         month: closingMonth,
         event: "Other acquisition costs",
         outflow: otherAcquisitionCosts,
         inflow: 0,
+        category: "acquisition",
       },
     ];
 
-    // De gewone bouw- en projectkosten worden gelijk over alle construction draws
-    // verdeeld. Vaste inbouw en losse meubels worden bovenop de laatste gekozen
-    // construction draws gezet. Er ontstaan dus geen losse meubelregels meer.
-    const projectCostExcludingFixedInterior = Math.max(
+    const projectCostExcludingFurniture = Math.max(
       0,
-      totalProjectCost - fixedInterior
+      totalProjectCost - fixedFurnitureCost - looseFurnitureCost
     );
     const baseConstructionDrawAmount =
-      projectCostExcludingFixedInterior / constructionDraws;
-    const fixedInteriorPerSelectedDraw =
-      fixedInterior / furniturePaymentMonths;
-    const firstFixedInteriorDrawIndex =
+      projectCostExcludingFurniture / constructionDraws;
+    const fixedFurniturePerSelectedDraw =
+      fixedFurnitureCost / furniturePaymentMonths;
+    const firstFixedFurnitureDrawIndex =
       constructionDraws - furniturePaymentMonths;
     const looseFurniturePerSelectedMonth =
-      looseFurniture / looseFurniturePaymentMonths;
+      looseFurnitureCost / looseFurniturePaymentMonths;
     const firstLooseFurnitureDrawIndex =
       constructionDraws - looseFurniturePaymentMonths;
 
     for (let index = 0; index < constructionDraws; index += 1) {
-      const includesFixedInterior = index >= firstFixedInteriorDrawIndex;
-      const includesLooseFurniture =
-        index >= firstLooseFurnitureDrawIndex;
+      const includesFixedFurniture = index >= firstFixedFurnitureDrawIndex;
+      const includesLooseFurniture = index >= firstLooseFurnitureDrawIndex;
       const constructionDrawAmount =
         baseConstructionDrawAmount +
-        (includesFixedInterior ? fixedInteriorPerSelectedDraw : 0) +
+        (includesFixedFurniture ? fixedFurniturePerSelectedDraw : 0) +
         (includesLooseFurniture ? looseFurniturePerSelectedMonth : 0);
 
       rawCashflow.push({
+        paymentId: `construction-draw-${index + 1}`,
         month: constructionStartMonth + index,
         event: `Construction draw ${index + 1}/${constructionDraws}`,
         outflow: constructionDrawAmount,
         inflow: 0,
+        category: "project",
       });
     }
 
     rawCashflow.push({
+      paymentId: "sale-proceeds",
       month: durationMonths,
       event: "Sales proceeds (after commission)",
       outflow: 0,
-      inflow: netSaleProceedsBeforeFurniture,
+      inflow: netProceeds,
+      category: "sale",
     });
 
     rawCashflow.sort((a, b) => a.month - b.month || a.event.localeCompare(b.event));
 
+    const requestedMonthlyCapital = coInvestors.reduce(
+      (sum, investor) => sum + investor.plannedCapital,
+      0
+    );
+    const monthlyCapitalScale =
+      requestedMonthlyCapital > capitalDeployed && requestedMonthlyCapital > 0
+        ? capitalDeployed / requestedMonthlyCapital
+        : 1;
+    const monthlyCapitalShares = coInvestors.map((investor) =>
+      capitalDeployed > 0
+        ? (investor.plannedCapital * monthlyCapitalScale) / capitalDeployed
+        : 0
+    );
+
+    const investorUsedCapital = coInvestors.map(() => 0);
     let runningCapital = 0;
+
     const cashflow: CashflowItem[] = rawCashflow.map((item) => {
+      const coInvestorInvestments = coInvestors.map(() => 0);
+      let ourInvestment = 0;
+
+      if (item.outflow > 0 && isSharedProject) {
+        let remainingOutflow = item.outflow;
+
+        coInvestors.forEach((_, investorIndex) => {
+          const allocation = Math.min(
+            remainingOutflow,
+            item.outflow * monthlyCapitalShares[investorIndex]
+          );
+          coInvestorInvestments[investorIndex] = allocation;
+          investorUsedCapital[investorIndex] += allocation;
+          remainingOutflow -= allocation;
+        });
+
+        ourInvestment = Math.max(0, remainingOutflow);
+      } else if (item.outflow > 0) {
+        ourInvestment = item.outflow;
+      }
+
       runningCapital += item.outflow - item.inflow;
-      return { ...item, runningCapital };
+      return {
+        ...item,
+        date: addMonthsToDate(projectStartDate, item.month),
+        runningCapital,
+        ourInvestment,
+        coInvestorInvestments,
+      };
     });
 
-    const irr = calculateAnnualizedIrr(rawCashflow);
-    const ourIrr =
-      ourInvestment > 0
-        ? calculateAnnualizedIrr(
-            rawCashflow.map((item) => ({
-              ...item,
-              outflow: item.outflow * ourEquityPercentage,
-              inflow: item.inflow * ourEquityPercentage,
-            }))
-          )
-        : Number.NaN;
-    const partnerIrr =
-      partnerInvestment > 0
-        ? calculateAnnualizedIrr(
-            rawCashflow.map((item) => ({
-              ...item,
-              outflow: item.outflow * partnerEquityPercentage,
-              inflow: item.inflow * partnerEquityPercentage,
-            }))
-          )
+    const ourInvestment = cashflow.reduce(
+      (sum, item) => sum + item.ourInvestment,
+      0
+    );
+    const partnerInvestment = investorUsedCapital.reduce(
+      (sum, value) => sum + value,
+      0
+    );
+    const ourEquityPercentage = capitalDeployed
+      ? ourInvestment / capitalDeployed
+      : 1;
+    const partnerEquityPercentage = capitalDeployed
+      ? partnerInvestment / capitalDeployed
+      : 0;
+
+    const ourNetProfit = netProfit * ourEquityPercentage;
+    const partnerNetProfit = netProfit * partnerEquityPercentage;
+    const ourNetProceeds = ourInvestment + ourNetProfit;
+    const partnerNetProceeds = partnerInvestment + partnerNetProfit;
+    const ourRoi = ourInvestment ? ourNetProfit / ourInvestment : 0;
+    const partnerRoi = partnerInvestment
+      ? partnerNetProfit / partnerInvestment
+      : 0;
+
+    const participantIrr = (
+      outflows: Array<{ month: number; amount: number }>,
+      proceeds: number
+    ) =>
+      outflows.some((item) => item.amount > 0)
+        ? calculateAnnualizedIrr([
+            ...outflows
+              .filter((item) => item.amount > 0)
+              .map((item) => ({
+                month: item.month,
+                outflow: item.amount,
+                inflow: 0,
+              })),
+            {
+              month: durationMonths,
+              outflow: 0,
+              inflow: proceeds,
+            },
+          ])
         : Number.NaN;
 
+    const ourIrr = participantIrr(
+      cashflow.map((item) => ({
+        month: item.month,
+        amount: item.ourInvestment,
+      })),
+      ourNetProceeds
+    );
+    const partnerIrr = participantIrr(
+      cashflow.map((item) => ({
+        month: item.month,
+        amount: item.coInvestorInvestments.reduce(
+          (sum, allocation) => sum + allocation,
+          0
+        ),
+      })),
+      partnerNetProceeds
+    );
+
+    const coInvestorSummaries: ParticipantSummary[] = coInvestors.map(
+      (investor, investorIndex) => {
+        const usedCapital = investorUsedCapital[investorIndex];
+        const capitalShare = capitalDeployed
+          ? usedCapital / capitalDeployed
+          : 0;
+        const investorNetProfit = netProfit * capitalShare;
+        const investorNetProceeds = usedCapital + investorNetProfit;
+        return {
+          name: investor.name,
+          plannedCapital: investor.plannedCapital,
+          usedCapital,
+          unusedCapital: Math.max(0, investor.plannedCapital - usedCapital),
+          capitalShare,
+          netProfit: investorNetProfit,
+          netProceeds: investorNetProceeds,
+          roi: usedCapital ? investorNetProfit / usedCapital : 0,
+          irr: participantIrr(
+            cashflow.map((item) => ({
+              month: item.month,
+              amount: item.coInvestorInvestments[investorIndex] ?? 0,
+            })),
+            investorNetProceeds
+          ),
+        };
+      }
+    );
+
+    const ourSummary: ParticipantSummary = {
+      name: "Ons kapitaal",
+      plannedCapital: ourInvestment,
+      usedCapital: ourInvestment,
+      unusedCapital: 0,
+      capitalShare: ourEquityPercentage,
+      netProfit: ourNetProfit,
+      netProceeds: ourNetProceeds,
+      roi: ourRoi,
+      irr: ourIrr,
+    };
+    const participantSummaries = [ourSummary, ...coInvestorSummaries];
+
+    const plannedPartnerCapital = coInvestors.reduce(
+      (sum, investor) => sum + investor.plannedCapital,
+      0
+    );
+    const unusedPartnerCapital = Math.max(
+      0,
+      plannedPartnerCapital - partnerInvestment
+    );
+
+    const ourAcquisitionCosts = cashflow
+      .filter((item) => item.category === "acquisition")
+      .reduce((sum, item) => sum + item.ourInvestment, 0);
+    const partnerAcquisitionCosts = cashflow
+      .filter((item) => item.category === "acquisition")
+      .reduce(
+        (sum, item) =>
+          sum + item.coInvestorInvestments.reduce((subtotal, amount) => subtotal + amount, 0),
+        0
+      );
+    const ourProjectCosts = cashflow
+      .filter((item) => item.category === "project")
+      .reduce((sum, item) => sum + item.ourInvestment, 0);
+    const partnerProjectCosts = cashflow
+      .filter((item) => item.category === "project")
+      .reduce(
+        (sum, item) =>
+          sum + item.coInvestorInvestments.reduce((subtotal, amount) => subtotal + amount, 0),
+        0
+      );
+    const coInvestorAcquisitionCosts = coInvestors.map((_, investorIndex) =>
+      cashflow
+        .filter((item) => item.category === "acquisition")
+        .reduce(
+          (sum, item) => sum + (item.coInvestorInvestments[investorIndex] ?? 0),
+          0
+        )
+    );
+    const coInvestorProjectCosts = coInvestors.map((_, investorIndex) =>
+      cashflow
+        .filter((item) => item.category === "project")
+        .reduce(
+          (sum, item) => sum + (item.coInvestorInvestments[investorIndex] ?? 0),
+          0
+        )
+    );
+    const coInvestorGrossProceeds = coInvestorSummaries.map(
+      (summary) => salePrice * summary.capitalShare
+    );
+    const coInvestorSalesCommission = coInvestorSummaries.map(
+      (summary) => agentCommission * summary.capitalShare
+    );
+    const ourGrossProceeds = salePrice * ourEquityPercentage;
+    const partnerGrossProceeds = salePrice * partnerEquityPercentage;
+    const ourSalesCommission = agentCommission * ourEquityPercentage;
+    const partnerSalesCommission = agentCommission * partnerEquityPercentage;
+    const irr = calculateAnnualizedIrr(rawCashflow);
     const cashAtMonth0 = cashflow
       .filter((item) => item.month === 0)
       .reduce((sum, item) => sum + item.outflow, 0);
@@ -814,12 +1156,10 @@ export default function LosNaranjosClient({
     const averageCapitalDuration = peakDeployed
       ? capitalMonthArea / peakDeployed
       : 0;
-    // Alleen aankoopprijs, downpayments/final payment, belasting en aankoopfees.
-    // Bouw- en interieurbetalingen tellen hier nooit mee, ook niet als ze eerder starten.
     const cashByNotary = totalAcquisition;
 
     const investmentCashflow = rawCashflow.filter(
-      (item) => item.event !== "Sales proceeds (after commission)"
+      (item) => item.category !== "sale"
     );
 
     const exitScenarios = [6, 9, 12, 15, 18, durationMonths]
@@ -827,6 +1167,7 @@ export default function LosNaranjosClient({
       .sort((a, b) => a - b)
       .map((month) => ({
         month,
+        date: addMonthsToDate(projectStartDate, month),
         netProfit,
         roi,
         irr: calculateAnnualizedIrr([
@@ -835,19 +1176,17 @@ export default function LosNaranjosClient({
             month,
             event: "Sales proceeds (after commission)",
             outflow: 0,
-            inflow: netSaleProceedsBeforeFurniture,
+            inflow: netProceeds,
+            category: "sale" as const,
           },
         ]),
       }));
 
     const saleSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map((change) => {
       const scenarioSalePrice = salePrice * (1 + change);
-      const scenarioNetSaleProceedsBeforeFurniture =
-        scenarioSalePrice * (1 - agentCommissionPercentage);
       const scenarioNetProceeds =
-        scenarioNetSaleProceedsBeforeFurniture;
-      const scenarioProfit =
-        scenarioNetSaleProceedsBeforeFurniture - capitalDeployed;
+        scenarioSalePrice * (1 - agentCommissionPercentage);
+      const scenarioProfit = scenarioNetProceeds - capitalDeployed;
       const scenarioRoi = capitalDeployed
         ? scenarioProfit / capitalDeployed
         : 0;
@@ -862,7 +1201,8 @@ export default function LosNaranjosClient({
             month: durationMonths,
             event: "Sales proceeds (after commission)",
             outflow: 0,
-            inflow: scenarioNetSaleProceedsBeforeFurniture,
+            inflow: scenarioNetProceeds,
+            category: "sale" as const,
           },
         ]),
       };
@@ -871,38 +1211,17 @@ export default function LosNaranjosClient({
     const projectCostSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map(
       (change) => {
         const scenarioProjectCost = totalProjectCost * (1 + change);
-        const scenarioCapital =
-          totalAcquisition + scenarioProjectCost + looseFurniture;
-        const scenarioProfit =
-          netSaleProceedsBeforeFurniture - scenarioCapital;
+        const scenarioCapital = totalAcquisition + scenarioProjectCost;
+        const scenarioProfit = netProceeds - scenarioCapital;
         const scenarioRoi = scenarioCapital ? scenarioProfit / scenarioCapital : 0;
         const constructionCostFactor = totalProjectCost
           ? scenarioProjectCost / totalProjectCost
           : 0;
-        const scenarioInvestmentCashflow = investmentCashflow.map((item) => {
-          const constructionDrawMatch = item.event.match(
-            /^Construction draw (\d+)\/(\d+)$/
-          );
-
-          if (!constructionDrawMatch) return item;
-
-          const drawIndex = Number(constructionDrawMatch[1]) - 1;
-          const looseFurniturePortion =
-            drawIndex >= firstLooseFurnitureDrawIndex
-              ? looseFurniturePerSelectedMonth
-              : 0;
-          const projectCostPortion = Math.max(
-            0,
-            item.outflow - looseFurniturePortion
-          );
-
-          return {
-            ...item,
-            outflow:
-              projectCostPortion * constructionCostFactor +
-              looseFurniturePortion,
-          };
-        });
+        const scenarioInvestmentCashflow = investmentCashflow.map((item) =>
+          item.category === "project"
+            ? { ...item, outflow: item.outflow * constructionCostFactor }
+            : item
+        );
 
         return {
           change,
@@ -915,7 +1234,8 @@ export default function LosNaranjosClient({
               month: durationMonths,
               event: "Sales proceeds (after commission)",
               outflow: 0,
-              inflow: netSaleProceedsBeforeFurniture,
+              inflow: netProceeds,
+              category: "sale" as const,
             },
           ]),
         };
@@ -925,28 +1245,35 @@ export default function LosNaranjosClient({
     return {
       projectName,
       analysisDate: form.analysisDate,
+      projectStartDate,
       projectType,
       projectOwnership,
       isSharedProject,
-      capitalSplitSource: form.capitalSplitSource,
+      coInvestors,
+      coInvestorSummaries,
+      participantSummaries,
+      coInvestorAcquisitionCosts,
+      coInvestorProjectCosts,
+      coInvestorGrossProceeds,
+      coInvestorSalesCommission,
+      plannedPartnerCapital,
+      unusedPartnerCapital,
       ourEquityPercentage,
       partnerEquityPercentage,
       ourInvestment,
       partnerInvestment,
+      ourNetProfit,
+      partnerNetProfit,
+      ourNetProceeds,
+      partnerNetProceeds,
       ourAcquisitionCosts,
       partnerAcquisitionCosts,
       ourProjectCosts,
       partnerProjectCosts,
-      ourLooseFurniture,
-      partnerLooseFurniture,
-      ourSalesCommission,
-      partnerSalesCommission,
       ourGrossProceeds,
       partnerGrossProceeds,
-      ourNetProceeds,
-      partnerNetProceeds,
-      ourNetProfit,
-      partnerNetProfit,
+      ourSalesCommission,
+      partnerSalesCommission,
       ourRoi,
       partnerRoi,
       ourIrr,
@@ -966,6 +1293,10 @@ export default function LosNaranjosClient({
       contingencyPercentage,
       fixedInterior,
       looseFurniture,
+      furnitureMarkupPercentage,
+      furnitureMarkup,
+      fixedFurnitureCost,
+      looseFurnitureCost,
       projectManagementPercentage,
       baseBuildCost,
       contingency,
@@ -987,6 +1318,7 @@ export default function LosNaranjosClient({
       averageCapitalDuration,
       cashByNotary,
       cashAtMonth0,
+      closingMonth,
       furniturePaymentMonths,
       looseFurniturePaymentMonths,
       downpaymentCount,
@@ -1061,19 +1393,251 @@ export default function LosNaranjosClient({
     )
   );
 
-  const sharedFinancingPageCount = data.isSharedProject ? 1 : 0;
+  const investorEntries = data.coInvestorSummaries.map(
+    (summary, investorIndex) => ({ summary, investorIndex })
+  );
+  const investorColumnsPerTable = 2;
+  const investorPrintGroups = data.isSharedProject
+    ? Array.from(
+        {
+          length: Math.max(
+            1,
+            Math.ceil(investorEntries.length / investorColumnsPerTable)
+          ),
+        },
+        (_, groupIndex) =>
+          investorEntries.slice(
+            groupIndex * investorColumnsPerTable,
+            (groupIndex + 1) * investorColumnsPerTable
+          )
+      )
+    : [];
+  const investorTablesPerPrintPage = 2;
+  const investorPrintPages = data.isSharedProject
+    ? Array.from(
+        {
+          length: Math.max(
+            1,
+            Math.ceil(investorPrintGroups.length / investorTablesPerPrintPage)
+          ),
+        },
+        (_, pageIndex) =>
+          investorPrintGroups.slice(
+            pageIndex * investorTablesPerPrintPage,
+            (pageIndex + 1) * investorTablesPerPrintPage
+          )
+      )
+    : [];
+
+  const sharedFinancingPageCount = data.isSharedProject
+    ? investorPrintPages.length
+    : 0;
   const sharedFinancingPageNumber = data.isSharedProject ? 2 : 0;
   const exitPageNumber = 2 + sharedFinancingPageCount;
   const cashOverviewPageNumber = 3 + sharedFinancingPageCount;
   const cashDetailStartPageNumber = cashOverviewPageNumber + 1;
+  const printedCashflowPageCount = data.isSharedProject
+    ? cashflowPageCount * investorPrintGroups.length
+    : cashflowPageCount;
   const sensitivityPageNumber =
-    cashDetailStartPageNumber + cashflowPageCount;
+    cashDetailStartPageNumber + printedCashflowPageCount;
   const photosPageNumber = hasPhotos ? sensitivityPageNumber + 1 : 0;
   const totalPages = sensitivityPageNumber + (hasPhotos ? 1 : 0);
 
-  const exitSectionNumber = String(2 + sharedFinancingPageCount).padStart(2, "0");
-  const cashSectionNumber = String(3 + sharedFinancingPageCount).padStart(2, "0");
-  const sensitivitySectionNumber = String(4 + sharedFinancingPageCount).padStart(2, "0");
+  function renderParticipantSplitTable(
+    entries: typeof investorEntries,
+    compact = false
+  ) {
+    return (
+      <div className="table-scroll participant-table-scroll">
+        <table
+          className={`split-table participant-split-table${compact ? " print-compact-table" : ""}`}
+          style={
+            compact
+              ? { width: "100%", minWidth: 0, tableLayout: "fixed" }
+              : {
+                  minWidth: `${Math.max(900, 430 + (entries.length + 2) * 115)}px`,
+                }
+          }
+        >
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Total project</th>
+              <th>Our equity</th>
+              {entries.map(({ summary, investorIndex }) => (
+                <th key={`split-head-${investorIndex}`}>{summary.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Acquisition and purchase</strong></td>
+              <td>{euro(data.totalAcquisition)}</td>
+              <td>{euro(data.ourAcquisitionCosts)}</td>
+              {entries.map(({ investorIndex }) => (
+                <td key={`acquisition-${investorIndex}`}>
+                  {euro(data.coInvestorAcquisitionCosts[investorIndex] ?? 0)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td><strong>Construction and project</strong></td>
+              <td>{euro(data.totalProjectCost)}</td>
+              <td>{euro(data.ourProjectCosts)}</td>
+              {entries.map(({ investorIndex }) => (
+                <td key={`project-${investorIndex}`}>
+                  {euro(data.coInvestorProjectCosts[investorIndex] ?? 0)}
+                </td>
+              ))}
+            </tr>
+            <tr className="split-total-row">
+              <td><strong>Total investment</strong></td>
+              <td><strong>{euro(data.capitalDeployed)}</strong></td>
+              <td><strong>{euro(data.ourInvestment)}</strong></td>
+              {entries.map(({ summary, investorIndex }) => (
+                <td key={`investment-${investorIndex}`}>
+                  <strong>{euro(summary.usedCapital)}</strong>
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td><strong>Gross sale proceeds</strong></td>
+              <td>{euro(data.salePrice)}</td>
+              <td>{euro(data.ourGrossProceeds)}</td>
+              {entries.map(({ investorIndex }) => (
+                <td key={`gross-${investorIndex}`}>
+                  {euro(data.coInvestorGrossProceeds[investorIndex] ?? 0)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td><strong>Sales commission</strong></td>
+              <td>-{euro(data.agentCommission)}</td>
+              <td>-{euro(data.ourSalesCommission)}</td>
+              {entries.map(({ investorIndex }) => (
+                <td key={`commission-${investorIndex}`}>
+                  -{euro(data.coInvestorSalesCommission[investorIndex] ?? 0)}
+                </td>
+              ))}
+            </tr>
+            <tr className="sale-row">
+              <td><strong>Net sale proceeds</strong></td>
+              <td className="positive"><strong>{euro(data.netProceeds)}</strong></td>
+              <td className="positive"><strong>{euro(data.ourNetProceeds)}</strong></td>
+              {entries.map(({ summary, investorIndex }) => (
+                <td className="positive" key={`net-proceeds-${investorIndex}`}>
+                  <strong>{euro(summary.netProceeds)}</strong>
+                </td>
+              ))}
+            </tr>
+            <tr className="split-profit-row">
+              <td><strong>Net profit / (loss)</strong></td>
+              <td className={data.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfit)}</td>
+              <td className={data.ourNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfit)}</td>
+              {entries.map(({ summary, investorIndex }) => (
+                <td className={summary.netProfit >= 0 ? "positive" : "negative"} key={`profit-${investorIndex}`}>
+                  {signedEuro(summary.netProfit)}
+                </td>
+              ))}
+            </tr>
+            <tr className="split-return-row">
+              <td><strong>ROI</strong></td>
+              <td className={data.roi >= 0 ? "positive" : "negative"}>{percent(data.roi, true)}</td>
+              <td className={data.ourRoi >= 0 ? "positive" : "negative"}>{percent(data.ourRoi, true)}</td>
+              {entries.map(({ summary, investorIndex }) => (
+                <td className={summary.roi >= 0 ? "positive" : "negative"} key={`roi-${investorIndex}`}>
+                  {percent(summary.roi, true)}
+                </td>
+              ))}
+            </tr>
+            <tr className="split-return-row">
+              <td><strong>IRR ({data.durationMonths}M annualised)</strong></td>
+              <td className={data.irr >= 0 ? "positive" : "negative"}>{percent(data.irr, true)}</td>
+              <td className={data.ourIrr >= 0 ? "positive" : "negative"}>{percent(data.ourIrr, true)}</td>
+              {entries.map(({ summary, investorIndex }) => (
+                <td className={summary.irr >= 0 ? "positive" : "negative"} key={`irr-${investorIndex}`}>
+                  {percent(summary.irr, true)}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderCashflowTable(
+    rows: CashflowItem[],
+    entries: typeof investorEntries,
+    compact = false
+  ) {
+    return (
+      <section className="cash-table-card">
+        <TableTitle>Cash flow detail</TableTitle>
+        <div className="table-scroll">
+          <table
+            className={`shared-cashflow-table${compact ? " print-compact-table" : ""}`}
+            style={{
+              minWidth: `${Math.max(980, 650 + entries.length * 105)}px`,
+            }}
+          >
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Date</th>
+                <th>Event</th>
+                <th>Outflow</th>
+                <th>Our investment</th>
+                {entries.map(({ summary, investorIndex }) => (
+                  <th key={`cashflow-head-${investorIndex}`}>{summary.name}</th>
+                ))}
+                <th>Inflow</th>
+                <th>Running Capital</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr
+                  key={`${row.month}-${row.event}-${rowIndex}`}
+                  className={row.inflow > 0 ? "sale-row" : undefined}
+                >
+                  <td>{row.month}</td>
+                  <td>{formatShortDate(row.date)}</td>
+                  <td><strong>{row.event}</strong></td>
+                  <td className="negative">
+                    {row.outflow ? `-${euro(row.outflow)}` : "—"}
+                  </td>
+                  <td className="negative party-investment-cell">
+                    {row.ourInvestment ? `-${euro(row.ourInvestment)}` : "—"}
+                  </td>
+                  {entries.map(({ investorIndex }) => {
+                    const amount = row.coInvestorInvestments[investorIndex] ?? 0;
+                    return (
+                      <td
+                        className="negative party-investment-cell"
+                        key={`cashflow-investor-${investorIndex}`}
+                      >
+                        {amount ? `-${euro(amount)}` : "—"}
+                      </td>
+                    );
+                  })}
+                  <td className="positive">
+                    {row.inflow ? euro(row.inflow) : "—"}
+                  </td>
+                  <td>{signedEuro(row.runningCapital)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
+  const exitSectionNumber = data.isSharedProject ? "03" : "02";
+  const cashSectionNumber = data.isSharedProject ? "04" : "03";
+  const sensitivitySectionNumber = data.isSharedProject ? "05" : "04";
 
   return (
     <main className="screen">
@@ -1110,6 +1674,7 @@ export default function LosNaranjosClient({
           <InputField
             label="Projectnaam"
             value={form.projectName}
+            numeric={false}
             onChange={(value) => updateField("projectName", value)}
           />
           <InputField
@@ -1117,6 +1682,12 @@ export default function LosNaranjosClient({
             type="date"
             value={form.analysisDate}
             onChange={(value) => updateField("analysisDate", value)}
+          />
+          <InputField
+            label="Startdatum project"
+            type="date"
+            value={form.projectStartDate}
+            onChange={(value) => updateField("projectStartDate", value)}
           />
           <SelectField
             label="Projecttype"
@@ -1163,31 +1734,78 @@ export default function LosNaranjosClient({
 
         {form.projectOwnership === "shared" && (
           <InputGroup title="Financiering gedeeld project">
-            <CapitalSplitFields
-              totalCapital={data.capitalDeployed}
-              source={form.capitalSplitSource}
-              ourPercentage={
-                form.capitalSplitSource === "ourPercentage"
-                  ? form.ourEquityPercentage
-                  : inputPercent(data.ourEquityPercentage)
-              }
-              ourAmount={
-                form.capitalSplitSource === "ourAmount"
-                  ? form.ourEquityAmount
-                  : inputNumber(Math.round(data.ourInvestment))
-              }
-              partnerPercentage={
-                form.capitalSplitSource === "partnerPercentage"
-                  ? form.partnerEquityPercentage
-                  : inputPercent(data.partnerEquityPercentage)
-              }
-              partnerAmount={
-                form.capitalSplitSource === "partnerAmount"
-                  ? form.partnerEquityAmount
-                  : inputNumber(Math.round(data.partnerInvestment))
-              }
-              onChange={updateCapitalSplit}
+            <RangeField
+              label="Aantal mede-investeerders"
+              value={form.coInvestorCount}
+              min={1}
+              max={MAX_CO_INVESTORS}
+              singular="mede-investeerder"
+              plural="mede-investeerders"
+              onChange={updateCoInvestorCount}
             />
+
+            <div className="investor-list field-full">
+              {form.coInvestors.map((investor, investorIndex) => {
+                const summary = data.coInvestorSummaries[investorIndex];
+                return (
+                  <section className="investor-card" key={`investor-${investorIndex}`}>
+                    <div className="investor-card-top">
+                      <div className="investor-card-heading">
+                        <span className="investor-card-kicker">
+                          Mede-investeerder {investorIndex + 1}
+                        </span>
+                        <h3>{investor.name.trim() || `Mede-investeerder ${investorIndex + 1}`}</h3>
+                        <p>
+                          Het totale investeringsbedrag bepaalt het vaste aandeel. Deze mede-investeerder betaalt bij iedere projectbetaling automatisch hetzelfde percentage mee.
+                        </p>
+                      </div>
+
+                      <div className="investor-card-stats" aria-label="Investeerderssamenvatting">
+                        <div className="investor-stat">
+                          <span>Investering</span>
+                          <strong>{euro(summary?.usedCapital ?? 0)}</strong>
+                        </div>
+                        <div className="investor-stat investor-stat-accent">
+                          <span>Percentage</span>
+                          <strong>{percent(summary?.capitalShare ?? 0)}</strong>
+                        </div>
+                        <div className="investor-stat">
+                          <span>Netto winst</span>
+                          <strong>{signedEuro(summary?.netProfit ?? 0)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="investor-card-grid investor-card-grid-simple">
+                      <InputField
+                        label="Naam"
+                        value={investor.name}
+                        numeric={false}
+                        onChange={(value) => updateCoInvestorName(investorIndex, value)}
+                      />
+                      <InputField
+                        label="Totaal investeringsbedrag"
+                        value={investor.monthlyTotalAmount}
+                        format="amount"
+                        placeholder="Bijv. 500.000"
+                        helper={
+                          parseNumber(investor.monthlyTotalAmount) > 0
+                            ? `${percent(summary?.capitalShare ?? 0)} van iedere projectbetaling`
+                            : "Vul het totale investeringsbedrag in"
+                        }
+                        onChange={(value) =>
+                          updateInvestorMonthlyTotal(investorIndex, value)
+                        }
+                      />
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+
+            <p className="input-hint field-full">
+              Iedere mede-investeerder betaalt bij elke projectbetaling zijn vaste aandeel mee. Wij vullen automatisch het resterende bedrag aan. Winst en opbrengst worden per investeerder berekend over het daadwerkelijk gebruikte kapitaal.
+            </p>
           </InputGroup>
         )}
 
@@ -1195,6 +1813,7 @@ export default function LosNaranjosClient({
           <InputField
             label="Aankoopprijs"
             value={form.purchasePrice}
+            format="amount"
             onChange={(value) => updateField("purchasePrice", value)}
           />
           <InputField
@@ -1212,21 +1831,24 @@ export default function LosNaranjosClient({
           <InputField
             label="Notariskosten"
             value={form.notaryFee}
+            format="amount"
             onChange={(value) => updateField("notaryFee", value)}
           />
           <InputField
             label="Overige aankoopkosten"
             value={form.otherAcquisitionCosts}
+            format="amount"
             onChange={(value) =>
               updateField("otherAcquisitionCosts", value)
             }
           />
         </InputGroup>
 
-        <InputGroup title="Bouw en verkoop">
+        <InputGroup title="Bouw, meubels en verkoop">
           <InputField
             label="Bouwkosten per m²"
             value={form.buildCostPerM2}
+            format="amount"
             onChange={(value) => updateField("buildCostPerM2", value)}
           />
           <InputField
@@ -1237,37 +1859,38 @@ export default function LosNaranjosClient({
             }
           />
           <InputField
-            label="Vaste inbouw"
+            label="Built-in furniture"
             value={form.fixedInterior}
+            format="amount"
             onChange={(value) => updateField("fixedInterior", value)}
           />
+          <InputField
+            label="Furniture"
+            value={form.looseFurniture}
+            format="amount"
+            onChange={(value) => updateField("looseFurniture", value)}
+          />
+          <RangeField
+            label="Meubelopslag"
+            value={form.furnitureMarkupPercentage}
+            min={0}
+            max={100}
+            singular="%"
+            plural="%"
+            onChange={(value) =>
+              updateField("furnitureMarkupPercentage", value)
+            }
+          />
           <DetailedSelectField
-            label="Vaste inbouw betalen over"
+            label="Built-in furniture betalen over"
             value={furniturePaymentMonthsValue}
             options={furniturePaymentOptions}
             onChange={(value) =>
               updateField("furniturePaymentMonths", value)
             }
           />
-          <InputField
-            label="Verkoopprijs"
-            value={form.salePrice}
-            onChange={(value) => updateField("salePrice", value)}
-          />
-          <InputField
-            label="Makelaarscommissie %"
-            value={form.agentCommissionPercentage}
-            onChange={(value) =>
-              updateField("agentCommissionPercentage", value)
-            }
-          />
-          <InputField
-            label="Losse meubels"
-            value={form.looseFurniture}
-            onChange={(value) => updateField("looseFurniture", value)}
-          />
           <DetailedSelectField
-            label="Losse meubels betalen over"
+            label="Furniture betalen over"
             value={looseFurniturePaymentMonthsValue}
             options={looseFurniturePaymentOptions}
             onChange={(value) =>
@@ -1283,6 +1906,19 @@ export default function LosNaranjosClient({
               }
             />
           )}
+          <InputField
+            label="Verkoopprijs"
+            value={form.salePrice}
+            format="amount"
+            onChange={(value) => updateField("salePrice", value)}
+          />
+          <InputField
+            label="Makelaarscommissie %"
+            value={form.agentCommissionPercentage}
+            onChange={(value) =>
+              updateField("agentCommissionPercentage", value)
+            }
+          />
         </InputGroup>
 
         <InputGroup title="Betalingsplanning">
@@ -1291,6 +1927,8 @@ export default function LosNaranjosClient({
             value={form.downpaymentCount}
             min={0}
             max={10}
+            singular="downpayment"
+            plural="downpayments"
             onChange={updateDownpaymentCount}
           />
 
@@ -1303,6 +1941,15 @@ export default function LosNaranjosClient({
                     <InputField
                       label="Maand"
                       value={payment.month}
+                      placeholder="Bijv. 0"
+                      helper={payment.month.trim()
+                        ? `Datum · ${formatShortDate(
+                            addMonthsToDate(
+                              form.projectStartDate,
+                              parseNumber(payment.month)
+                            )
+                          )}`
+                        : "Datum volgt na invoer"}
                       onChange={(value) =>
                         updateDownpayment(index, "month", value)
                       }
@@ -1310,6 +1957,8 @@ export default function LosNaranjosClient({
                     <InputField
                       label="Bedrag"
                       value={payment.amount}
+                      format="amount"
+                      placeholder="Bijv. 100.000"
                       onChange={(value) =>
                         updateDownpayment(index, "amount", value)
                       }
@@ -1328,11 +1977,27 @@ export default function LosNaranjosClient({
           <InputField
             label="Passeerdatum maand"
             value={form.closingMonth}
+            helper={form.closingMonth.trim()
+              ? `Datum · ${formatShortDate(
+                  addMonthsToDate(
+                    form.projectStartDate,
+                    parseNumber(form.closingMonth)
+                  )
+                )}`
+              : "Datum volgt na invoer"}
             onChange={(value) => updateField("closingMonth", value)}
           />
           <InputField
             label="Start bouwbetalingen"
             value={form.constructionStartMonth}
+            helper={form.constructionStartMonth.trim()
+              ? `Datum · ${formatShortDate(
+                  addMonthsToDate(
+                    form.projectStartDate,
+                    parseNumber(form.constructionStartMonth)
+                  )
+                )}`
+              : "Datum volgt na invoer"}
             onChange={(value) =>
               updateField("constructionStartMonth", value)
             }
@@ -1347,12 +2012,17 @@ export default function LosNaranjosClient({
 
       <section className="report-page overview-page">
         <ReportHeader data={data} config={config} />
-        <SectionHeading number="01" eyebrow="Overview" title="Deal Metrics" subtitle="Headline return metrics, cost structure, and exit timeline." />
+        <SectionHeading
+          number="01"
+          eyebrow="Overview"
+          title="Deal Metrics"
+          subtitle="Headline return metrics, cost structure, and exit timeline."
+        />
 
         <div className="metric-grid">
-          <Metric label="Net Profit" value={euro(data.netProfit)} positive />
-          <Metric label="ROI" value={percent(data.roi, true)} positive />
-          <Metric label={`IRR (${data.durationMonths}M EXIT)`} value={percent(data.irr, true)} positive />
+          <Metric label="Net Profit" value={signedEuro(data.netProfit)} positive={data.netProfit >= 0} />
+          <Metric label="ROI" value={percent(data.roi, true)} positive={data.roi >= 0} />
+          <Metric label={`IRR (${data.durationMonths}M EXIT)`} value={percent(data.irr, true)} positive={data.irr >= 0} />
           <Metric label="Capital Deployed" value={euro(data.capitalDeployed)} />
         </div>
 
@@ -1373,34 +2043,26 @@ export default function LosNaranjosClient({
             <DataRow label="Duration" value={`${data.durationMonths} months`} strong />
             <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} />
             <DataRow label={`Contingency (${percent(data.contingencyPercentage)})`} value={euro(data.contingency)} />
-            <DataRow label="Fixed Built-in" value={euro(data.fixedInterior)} />
+            <DataRow label="Built-in Furniture" value={euro(data.fixedInterior)} />
+            <DataRow label="Furniture" value={euro(data.looseFurniture)} />
+            <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
             {data.isSharedProject && (
-              <>
-                <DataRow
-                  label="Subtotal"
-                  value={euro(data.projectSubtotal)}
-                  strong
-                />
-                <DataRow
-                  label={`Project Management (${percent(
-                    data.projectManagementPercentage
-                  )})`}
-                  value={euro(data.projectManagement)}
-                />
-              </>
+              <DataRow
+                label={`Project Management (${percent(data.projectManagementPercentage)})`}
+                value={euro(data.projectManagement)}
+              />
             )}
-            <DataRow
-              label="Total Project Cost"
-              value={euro(data.totalProjectCost)}
-              strong
-            />
+            <DataRow label="Total Project Cost" value={euro(data.totalProjectCost)} strong />
           </DataBlock>
         </div>
 
         <DataBlock title="Exit & Returns" full>
           <DataRow label="Gross Sale Price" value={euro(data.salePrice)} strong />
           <DataRow label={`Agent Commission (${percent(data.agentCommissionPercentage)})`} value={euro(data.agentCommission)} />
-          <DataRow label="Loose Furniture" value={euro(data.looseFurniture)} />
+          <DataRow
+            label={`Furniture Mark-up (${percent(data.furnitureMarkupPercentage)})`}
+            value={euro(data.furnitureMarkup)}
+          />
           <DataRow label="Net Proceeds" value={euro(data.netProceeds)} strong />
           <DataRow label="Net Profit / (Loss)" value={signedEuro(data.netProfit)} strong positive={data.netProfit >= 0} />
         </DataBlock>
@@ -1408,7 +2070,7 @@ export default function LosNaranjosClient({
         <AllocationBar
           salePrice={data.salePrice}
           acquisition={data.totalAcquisition}
-          project={data.totalProjectCost + data.looseFurniture}
+          project={data.totalProjectCost}
           commission={data.agentCommission}
           profit={data.netProfit}
         />
@@ -1416,12 +2078,12 @@ export default function LosNaranjosClient({
       </section>
 
       {data.isSharedProject && (
-        <section className="report-page shared-financing-page">
+        <section className="report-page shared-financing-page screen-only">
           <SectionHeading
             number="02"
             eyebrow="Shared financing"
             title="Investment & Return Split"
-            subtitle="Proportional allocation between our own equity and partner / external capital."
+            subtitle="Allocation of investment, proceeds and returns for us and each individual co-investor."
           />
 
           <div className="metric-grid shared-metrics">
@@ -1431,7 +2093,7 @@ export default function LosNaranjosClient({
               sub={euro(data.ourInvestment)}
             />
             <Metric
-              label="Partner / external share"
+              label="Total co-investors share"
               value={percent(data.partnerEquityPercentage)}
               sub={euro(data.partnerInvestment)}
             />
@@ -1441,88 +2103,17 @@ export default function LosNaranjosClient({
               positive={data.ourNetProfit >= 0}
             />
             <Metric
-              label="Partner net profit"
+              label="Total co-investors net profit"
               value={signedEuro(data.partnerNetProfit)}
               positive={data.partnerNetProfit >= 0}
             />
           </div>
 
           <TableTitle>Costs and proceeds allocation</TableTitle>
-          <table className="split-table">
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th>Total project</th>
-                <th>Our equity</th>
-                <th>Partner / external</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Acquisition and purchase</strong></td>
-                <td>{euro(data.totalAcquisition)}</td>
-                <td>{euro(data.ourAcquisitionCosts)}</td>
-                <td>{euro(data.partnerAcquisitionCosts)}</td>
-              </tr>
-              <tr>
-                <td><strong>Construction and project</strong></td>
-                <td>{euro(data.totalProjectCost)}</td>
-                <td>{euro(data.ourProjectCosts)}</td>
-                <td>{euro(data.partnerProjectCosts)}</td>
-              </tr>
-              <tr>
-                <td><strong>Loose furniture</strong></td>
-                <td>{euro(data.looseFurniture)}</td>
-                <td>{euro(data.ourLooseFurniture)}</td>
-                <td>{euro(data.partnerLooseFurniture)}</td>
-              </tr>
-              <tr className="split-total-row">
-                <td><strong>Total investment</strong></td>
-                <td><strong>{euro(data.capitalDeployed)}</strong></td>
-                <td><strong>{euro(data.ourInvestment)}</strong></td>
-                <td><strong>{euro(data.partnerInvestment)}</strong></td>
-              </tr>
-              <tr>
-                <td><strong>Gross sale proceeds</strong></td>
-                <td>{euro(data.salePrice)}</td>
-                <td>{euro(data.ourGrossProceeds)}</td>
-                <td>{euro(data.partnerGrossProceeds)}</td>
-              </tr>
-              <tr>
-                <td><strong>Sales commission</strong></td>
-                <td>-{euro(data.agentCommission)}</td>
-                <td>-{euro(data.ourSalesCommission)}</td>
-                <td>-{euro(data.partnerSalesCommission)}</td>
-              </tr>
-              <tr className="sale-row">
-                <td><strong>Net sale proceeds</strong></td>
-                <td className="positive"><strong>{euro(data.netProceeds)}</strong></td>
-                <td className="positive"><strong>{euro(data.ourNetProceeds)}</strong></td>
-                <td className="positive"><strong>{euro(data.partnerNetProceeds)}</strong></td>
-              </tr>
-              <tr className="split-profit-row">
-                <td><strong>Net profit / (loss)</strong></td>
-                <td className={data.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfit)}</td>
-                <td className={data.ourNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfit)}</td>
-                <td className={data.partnerNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.partnerNetProfit)}</td>
-              </tr>
-              <tr className="split-return-row">
-                <td><strong>ROI</strong></td>
-                <td className={data.roi >= 0 ? "positive" : "negative"}>{percent(data.roi, true)}</td>
-                <td className={data.ourRoi >= 0 ? "positive" : "negative"}>{percent(data.ourRoi, true)}</td>
-                <td className={data.partnerRoi >= 0 ? "positive" : "negative"}>{percent(data.partnerRoi, true)}</td>
-              </tr>
-              <tr className="split-return-row">
-                <td><strong>IRR ({data.durationMonths}M annualised)</strong></td>
-                <td className={data.irr >= 0 ? "positive" : "negative"}>{percent(data.irr, true)}</td>
-                <td className={data.ourIrr >= 0 ? "positive" : "negative"}>{percent(data.ourIrr, true)}</td>
-                <td className={data.partnerIrr >= 0 ? "positive" : "negative"}>{percent(data.partnerIrr, true)}</td>
-              </tr>
-            </tbody>
-          </table>
+          {renderParticipantSplitTable(investorEntries)}
 
           <p className="note">
-            <strong>Assumption:</strong> costs, sale proceeds and profit are split in the same proportion as the capital contribution. Interest, preferred returns or a separate profit waterfall are not included.
+            <strong>Assumption:</strong> every mede-investeerder participates in each project payment using a fixed capital share. Profit and proceeds are allocated per participant over capital actually used.
           </p>
 
           <PageFooter
@@ -1532,23 +2123,120 @@ export default function LosNaranjosClient({
         </section>
       )}
 
+      {data.isSharedProject &&
+        investorPrintPages.map((tableGroups, pageIndex) => {
+          const flatEntries = tableGroups.flat();
+          const firstInvestorNumber =
+            investorEntries.findIndex(
+              (entry) => entry.investorIndex === flatEntries[0]?.investorIndex
+            ) + 1;
+          const lastInvestorNumber =
+            investorEntries.findIndex(
+              (entry) =>
+                entry.investorIndex ===
+                flatEntries[flatEntries.length - 1]?.investorIndex
+            ) + 1;
+
+          return (
+            <section
+              className="report-page shared-financing-page print-only"
+              key={`shared-financing-print-${pageIndex}`}
+            >
+              <SectionHeading
+                number="02"
+                eyebrow="Shared financing"
+                title={
+                  pageIndex === 0
+                    ? "Investment & Return Split"
+                    : "Investment & Return Split — Continued"
+                }
+                subtitle={`Mede-investeerders ${firstInvestorNumber}–${lastInvestorNumber} van ${investorEntries.length} · twee investeerders per tabel.`}
+              />
+
+              <div className="metric-grid shared-metrics">
+                <Metric
+                  label="Our equity share"
+                  value={percent(data.ourEquityPercentage)}
+                  sub={euro(data.ourInvestment)}
+                />
+                <Metric
+                  label="Total co-investors share"
+                  value={percent(data.partnerEquityPercentage)}
+                  sub={euro(data.partnerInvestment)}
+                />
+                <Metric
+                  label="Our net profit"
+                  value={signedEuro(data.ourNetProfit)}
+                  positive={data.ourNetProfit >= 0}
+                />
+                <Metric
+                  label="Total co-investors net profit"
+                  value={signedEuro(data.partnerNetProfit)}
+                  positive={data.partnerNetProfit >= 0}
+                />
+              </div>
+
+              <div className="participant-print-page-grid">
+                {tableGroups.map((entries, tableIndex) => {
+                  const tableFirstInvestor =
+                    investorEntries.findIndex(
+                      (entry) => entry.investorIndex === entries[0]?.investorIndex
+                    ) + 1;
+                  const tableLastInvestor =
+                    investorEntries.findIndex(
+                      (entry) =>
+                        entry.investorIndex ===
+                        entries[entries.length - 1]?.investorIndex
+                    ) + 1;
+
+                  return (
+                    <section
+                      className="participant-print-group"
+                      key={`participant-print-table-${pageIndex}-${tableIndex}`}
+                    >
+                      <TableTitle>
+                        {entries.length === 1
+                          ? `Mede-investeerder ${tableFirstInvestor}`
+                          : `Mede-investeerders ${tableFirstInvestor}–${tableLastInvestor}`}
+                      </TableTitle>
+                      {renderParticipantSplitTable(entries, true)}
+                    </section>
+                  );
+                })}
+              </div>
+
+              <p className="note participant-print-note">
+                <strong>Assumption:</strong> every mede-investeerder participates in each project payment using a fixed capital share. Profit and proceeds are allocated per participant over capital actually used.
+              </p>
+
+              <PageFooter
+                label={config.footerLabel}
+                page={`${sharedFinancingPageNumber + pageIndex} / ${totalPages}`}
+              />
+            </section>
+          );
+        })}
+
       <section className="report-page">
         <SectionHeading number={exitSectionNumber} eyebrow="Exit analysis" title="Returns by Exit Timeline" subtitle="Returns under different exit scenarios." />
         <TableTitle>Returns by exit timeline</TableTitle>
         <table>
-          <thead><tr><th>Exit</th><th>Net Profit</th><th>ROI</th><th>IRR (Ann.)</th></tr></thead>
+          <thead>
+            <tr><th>Exit</th><th>Datum</th><th>Net Profit</th><th>ROI</th><th>IRR (Ann.)</th></tr>
+          </thead>
           <tbody>
             {data.exitScenarios.map((row) => (
               <tr key={row.month}>
                 <td><strong>{row.month} months</strong></td>
-                <td className="positive">{euro(row.netProfit)}</td>
-                <td className="positive">{percent(row.roi, true)}</td>
-                <td className="positive">{percent(row.irr, true)}</td>
+                <td>{formatShortDate(row.date)}</td>
+                <td className={row.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(row.netProfit)}</td>
+                <td className={row.roi >= 0 ? "positive" : "negative"}>{percent(row.roi, true)}</td>
+                <td className={row.irr >= 0 ? "positive" : "negative"}>{percent(row.irr, true)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="note"><strong>Note:</strong> IRR is calculated from the actual monthly downpayments, acquisition costs, construction draws, loose-furniture payments and sale proceeds. Earlier exit scenarios keep the same planned costs and move the net sale proceeds to the selected exit month.</p>
+        <p className="note"><strong>Note:</strong> IRR is calculated from the actual monthly downpayments, acquisition costs, construction draws, furniture payments and sale proceeds. Earlier exit scenarios keep the same planned costs and move the net sale proceeds to the selected exit month.</p>
         <PageFooter label={config.footerLabel} page={`${exitPageNumber} / ${totalPages}`} />
       </section>
 
@@ -1557,7 +2245,7 @@ export default function LosNaranjosClient({
           number={cashSectionNumber}
           eyebrow="Cash plan"
           title="Capital Deployment Schedule"
-          subtitle={`Custom schedule · ${data.cashflow.length} tranches · ${data.durationMonths} months to exit`}
+          subtitle={`Start ${formatShortDate(data.projectStartDate)} · ${data.cashflow.length} tranches · exit ${formatShortDate(addMonthsToDate(data.projectStartDate, data.durationMonths))}`}
         />
 
         <div className="metric-grid compact-metrics">
@@ -1573,14 +2261,14 @@ export default function LosNaranjosClient({
           <Metric
             label="Cash by notary"
             value={euro(data.cashByNotary)}
-            sub={`Purchase, tax and fees only · month ${parseNumber(
-              form.closingMonth
+            sub={`Purchase, tax and fees only · ${formatShortDate(
+              addMonthsToDate(data.projectStartDate, data.closingMonth)
             )}`}
           />
           <Metric
             label="Peak Deployed"
             value={euro(data.peakDeployed)}
-            sub={`Before exit in month ${data.durationMonths}`}
+            sub={`Before exit · ${formatShortDate(addMonthsToDate(data.projectStartDate, data.durationMonths))}`}
           />
           <Metric
             label="Avg. Capital Duration"
@@ -1608,10 +2296,6 @@ export default function LosNaranjosClient({
                 <td>{euro(data.totalProjectCost)}</td>
               </tr>
               <tr>
-                <td><strong>Loose furniture</strong></td>
-                <td>{euro(data.looseFurniture)}</td>
-              </tr>
-              <tr>
                 <td><strong>Total capital deployed</strong></td>
                 <td>{euro(data.capitalDeployed)}</td>
               </tr>
@@ -1633,7 +2317,7 @@ export default function LosNaranjosClient({
 
         return (
           <section
-            className="report-page cash-page cash-detail-page"
+            className={`report-page cash-page cash-detail-page${data.isSharedProject ? " screen-only" : ""}`}
             key={`cashflow-page-${pageIndex}`}
           >
             <SectionHeading
@@ -1646,11 +2330,14 @@ export default function LosNaranjosClient({
               }
               subtitle={
                 data.isSharedProject
-                  ? `Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length} · split ${percent(data.ourEquityPercentage)} / ${percent(data.partnerEquityPercentage)}`
+                  ? `Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length} · investment split per participant`
                   : `Tranches ${firstRowNumber}–${lastRowNumber} of ${data.cashflow.length}`
               }
             />
 
+            {data.isSharedProject ? (
+              renderCashflowTable(rows, investorEntries)
+            ) : (
             <section className="cash-table-card">
               <TableTitle>Cash flow detail</TableTitle>
               <div className="table-scroll">
@@ -1658,16 +2345,29 @@ export default function LosNaranjosClient({
                   className={
                     data.isSharedProject ? "shared-cashflow-table" : undefined
                   }
+                  style={
+                    data.isSharedProject
+                      ? {
+                          minWidth: `${Math.max(
+                            980,
+                            650 + data.coInvestorSummaries.length * 105
+                          )}px`,
+                        }
+                      : undefined
+                  }
                 >
                   <thead>
                     <tr>
                       <th>Month</th>
+                      <th>Date</th>
                       <th>Event</th>
                       <th>Outflow</th>
                       {data.isSharedProject && (
                         <>
                           <th>Our investment</th>
-                          <th>Partner investment</th>
+                          {data.coInvestorSummaries.map((summary, investorIndex) => (
+                            <th key={`cashflow-head-${investorIndex}`}>{summary.name}</th>
+                          ))}
                         </>
                       )}
                       <th>Inflow</th>
@@ -1681,6 +2381,7 @@ export default function LosNaranjosClient({
                         className={row.inflow > 0 ? "sale-row" : undefined}
                       >
                         <td>{row.month}</td>
+                        <td>{formatShortDate(row.date)}</td>
                         <td><strong>{row.event}</strong></td>
                         <td className="negative">
                           {row.outflow ? `-${euro(row.outflow)}` : "—"}
@@ -1688,19 +2389,19 @@ export default function LosNaranjosClient({
                         {data.isSharedProject && (
                           <>
                             <td className="negative party-investment-cell">
-                              {row.outflow
-                                ? `-${euro(
-                                    row.outflow * data.ourEquityPercentage
-                                  )}`
-                                : "—"}
+                              {row.ourInvestment ? `-${euro(row.ourInvestment)}` : "—"}
                             </td>
-                            <td className="negative party-investment-cell">
-                              {row.outflow
-                                ? `-${euro(
-                                    row.outflow * data.partnerEquityPercentage
-                                  )}`
-                                : "—"}
-                            </td>
+                            {data.coInvestorSummaries.map((summary, investorIndex) => {
+                              const amount = row.coInvestorInvestments[investorIndex] ?? 0;
+                              return (
+                                <td
+                                  className="negative party-investment-cell"
+                                  key={`cashflow-investor-${investorIndex}`}
+                                >
+                                  {amount ? `-${euro(amount)}` : "—"}
+                                </td>
+                              );
+                            })}
                           </>
                         )}
                         <td className="positive">
@@ -1713,6 +2414,7 @@ export default function LosNaranjosClient({
                 </table>
               </div>
             </section>
+            )}
 
             <PageFooter
               label={config.footerLabel}
@@ -1721,6 +2423,47 @@ export default function LosNaranjosClient({
           </section>
         );
       })}
+
+      {data.isSharedProject &&
+        investorPrintGroups.flatMap((entries, groupIndex) =>
+          cashflowPages.map((rows, pageIndex) => {
+            const pageNumber =
+              cashDetailStartPageNumber +
+              groupIndex * cashflowPageCount +
+              pageIndex;
+            const firstRowNumber = pageIndex * cashflowRowsPerPage + 1;
+            const lastRowNumber = firstRowNumber + rows.length - 1;
+            const firstInvestorNumber =
+              groupIndex * investorColumnsPerTable + 1;
+            const lastInvestorNumber =
+              firstInvestorNumber + entries.length - 1;
+
+            return (
+              <section
+                className="report-page cash-page cash-detail-page print-only"
+                key={`cashflow-print-${groupIndex}-${pageIndex}`}
+              >
+                <SectionHeading
+                  number={cashSectionNumber}
+                  eyebrow="Cash detail"
+                  title={
+                    pageIndex === 0 && groupIndex === 0
+                      ? "Cash Flow Detail"
+                      : "Cash Flow Detail — Continued"
+                  }
+                  subtitle={`Tranches ${firstRowNumber}–${lastRowNumber} van ${data.cashflow.length} · mede-investeerders ${firstInvestorNumber}–${lastInvestorNumber} van ${investorEntries.length}`}
+                />
+
+                {renderCashflowTable(rows, entries, true)}
+
+                <PageFooter
+                  label={config.footerLabel}
+                  page={`${pageNumber} / ${totalPages}`}
+                />
+              </section>
+            );
+          })
+        )}
 
       <section className="report-page sensitivity-page">
         <SectionHeading
@@ -1787,19 +2530,107 @@ function InputField({
   value,
   onChange,
   type = "text",
+  numeric = true,
+  placeholder,
+  format = "plain",
+  helper,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: "text" | "date";
+  numeric?: boolean;
+  placeholder?: string;
+  format?: "plain" | "amount";
+  helper?: string;
 }) {
+  const shownValue = format === "amount" ? formatAmountInput(value) : value;
+  const [draftValue, setDraftValue] = useState(shownValue);
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setDraftValue(format === "amount" ? formatAmountInput(value) : value);
+    }
+  }, [value, isFocused, format]);
+
+  const input = (
+    <input
+      value={draftValue}
+      type={type}
+      placeholder={placeholder}
+      autoComplete="off"
+      spellCheck={false}
+      inputMode={
+        type === "text"
+          ? format === "amount"
+            ? "numeric"
+            : numeric
+              ? "decimal"
+              : "text"
+          : undefined
+      }
+      onFocus={() => setIsFocused(true)}
+      onBlur={(event) => {
+        setIsFocused(false);
+        const nextValue =
+          format === "amount"
+            ? normalizeAmountInput(event.currentTarget.value)
+            : event.currentTarget.value;
+        setDraftValue(
+          format === "amount" ? formatAmountInput(nextValue) : nextValue
+        );
+        if (nextValue !== value) {
+          onChange(nextValue);
+        }
+      }}
+      onChange={(event) => {
+        if (format !== "amount") {
+          const nextValue = event.currentTarget.value;
+          setDraftValue(nextValue);
+          onChange(nextValue);
+          return;
+        }
+
+        const inputElement = event.currentTarget;
+        const rawValue = inputElement.value;
+        const cursorPosition = inputElement.selectionStart ?? rawValue.length;
+        const digitsBeforeCursor = rawValue
+          .slice(0, cursorPosition)
+          .replace(/\D/g, "").length;
+        const nextValue = normalizeAmountInput(rawValue);
+        const formattedValue = formatAmountInput(nextValue);
+
+        setDraftValue(formattedValue);
+        onChange(nextValue);
+
+        window.requestAnimationFrame(() => {
+          const nextCursorPosition = caretPositionAfterDigits(
+            formattedValue,
+            digitsBeforeCursor
+          );
+          inputElement.setSelectionRange(nextCursorPosition, nextCursorPosition);
+        });
+      }}
+    />
+  );
+
   return (
-    <label className="field">
+    <label className={`field${format === "amount" ? " field-amount" : ""}`}>
       <span>{label}</span>
-      <input value={value} type={type} inputMode={type === "text" ? "decimal" : undefined} onChange={(event) => onChange(event.currentTarget.value)} />
+      {format === "amount" ? (
+        <div className="amount-input">
+          <span className="amount-prefix" aria-hidden="true">€</span>
+          {input}
+        </div>
+      ) : (
+        input
+      )}
+      {helper ? <small className="field-helper">{helper}</small> : null}
     </label>
   );
 }
+
 
 function SelectField({
   label,
@@ -1867,86 +2698,21 @@ function DetailedSelectField({
   );
 }
 
-function CapitalSplitFields({
-  totalCapital,
-  source,
-  ourPercentage,
-  ourAmount,
-  partnerPercentage,
-  partnerAmount,
-  onChange,
-}: {
-  totalCapital: number;
-  source: CapitalSplitSource;
-  ourPercentage: string;
-  ourAmount: string;
-  partnerPercentage: string;
-  partnerAmount: string;
-  onChange: (source: CapitalSplitSource, value: string) => void;
-}) {
-  const field = (
-    label: string,
-    value: string,
-    fieldSource: CapitalSplitSource,
-    suffix: string
-  ) => (
-    <label
-      className={`capital-input ${source === fieldSource ? "capital-input-active" : ""}`}
-    >
-      <span>{label}</span>
-      <div className="capital-input-box">
-        <input
-          value={value}
-          inputMode="decimal"
-          onChange={(event) => onChange(fieldSource, event.currentTarget.value)}
-        />
-        <small>{suffix}</small>
-      </div>
-    </label>
-  );
-
-  return (
-    <div className="capital-split-fields field-full">
-      <div className="capital-split-heading">
-        <div>
-          <span>Totale investering</span>
-          <strong>{euro(totalCapital)}</strong>
-        </div>
-        <p>Het laatst aangepaste bedrag of percentage bepaalt automatisch de overige drie velden.</p>
-      </div>
-
-      <div className="capital-party-grid">
-        <section>
-          <h3>Ons eigen vermogen</h3>
-          <div className="capital-party-fields">
-            {field("Bedrag", ourAmount, "ourAmount", "€")}
-            {field("Percentage", ourPercentage, "ourPercentage", "%")}
-          </div>
-        </section>
-
-        <section>
-          <h3>Partner / vreemd vermogen</h3>
-          <div className="capital-party-fields">
-            {field("Bedrag", partnerAmount, "partnerAmount", "€")}
-            {field("Percentage", partnerPercentage, "partnerPercentage", "%")}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
 function RangeField({
   label,
   value,
   min,
   max,
+  singular,
+  plural,
   onChange,
 }: {
   label: string;
   value: string;
   min: number;
   max: number;
+  singular: string;
+  plural: string;
   onChange: (value: string) => void;
 }) {
   const shownValue = clampInteger(parseNumber(value), min, max);
@@ -1964,7 +2730,7 @@ function RangeField({
           onChange={(event) => onChange(event.currentTarget.value)}
         />
         <output>
-          {shownValue} {shownValue === 1 ? "downpayment" : "downpayments"}
+          {shownValue} {shownValue === 1 ? singular : plural}
         </output>
       </div>
     </label>
@@ -2098,9 +2864,9 @@ function SensitivityTable({ rows, valueKey, valueLabel }: { rows: SensitivityRow
           <tr key={row.change}>
             <td><strong>{row.change === 0 ? "Base" : `${row.change > 0 ? "+" : ""}${numberFormatter.format(row.change * 100)}%`}</strong></td>
             <td>{euro(row[valueKey] ?? 0)}</td>
-            <td className="positive">{euro(row.netProfit)}</td>
-            <td className="positive">{percent(row.roi, true)}</td>
-            <td className="positive">{percent(row.irr, true)}</td>
+            <td className={row.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(row.netProfit)}</td>
+            <td className={row.roi >= 0 ? "positive" : "negative"}>{percent(row.roi, true)}</td>
+            <td className={row.irr >= 0 ? "positive" : "negative"}>{percent(row.irr, true)}</td>
           </tr>
         ))}
       </tbody>
@@ -2137,83 +2903,208 @@ const styles = `
   .screen { padding: 28px 18px 60px; }
 
   .live-input {
-    width: min(1100px, 100%);
-    margin: 0 auto 34px;
-    padding: 24px;
+    width: min(1180px, 100%);
+    margin: 0 auto 30px;
+    padding: 16px;
+    border: 1px solid rgba(117, 96, 68, .18);
     border-radius: 22px;
-    background: var(--warm);
-    box-shadow: 0 16px 45px rgba(0,0,0,.1);
+    background:
+      radial-gradient(circle at top right, rgba(214, 190, 150, .16), transparent 34%),
+      #f4f0e8;
+    box-shadow: 0 18px 50px rgba(57, 48, 38, .12);
   }
   .input-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: 20px;
+    gap: 18px;
+    min-height: 72px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #201c18, #3b3128);
+    color: #ffffff;
+    box-shadow: 0 10px 24px rgba(38, 31, 25, .16);
   }
-  .input-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+  .input-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
   .input-header span,
   .input-group h2,
-  .field span,
+  .field > span,
   .section-heading > span,
   .metric > span,
   .data-block h3,
   .table-title {
-    letter-spacing: .2em;
+    letter-spacing: .16em;
     text-transform: uppercase;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     color: #8d8da0;
   }
-  .input-header h1 { margin: 6px 0 0; font-size: 26px; }
+  .input-header span { color: rgba(255, 255, 255, .62); }
+  .input-header h1 {
+    margin: 4px 0 0;
+    font-size: 23px;
+    line-height: 1.05;
+    color: #ffffff;
+  }
   .input-header button {
-    border: 0;
-    border-radius: 99px;
-    padding: 13px 20px;
-    background: #171717;
-    color: white;
+    min-height: 38px;
+    border: 1px solid rgba(255, 255, 255, .16);
+    border-radius: 10px;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, .1);
+    color: #ffffff;
+    font-size: 12px;
     font-weight: 800;
     cursor: pointer;
+    transition: transform .16s ease, background .16s ease, border-color .16s ease;
+  }
+  .input-header button:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, .16);
+    border-color: rgba(255, 255, 255, .28);
   }
   .input-header .print-button {
-    border: 1px solid #171717;
-    background: white;
-    color: #171717;
+    border-color: #d8bd8d;
+    background: #ead4ac;
+    color: #2a2119;
   }
-  .input-group { margin-top: 22px; padding-top: 18px; border-top: 1px solid #ddd7ce; }
-  .input-group h2 { margin: 0 0 14px; color: #705c45; }
-  .input-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  .field { display: grid; gap: 7px; }
+  .input-header .print-button:hover { background: #f0ddb9; }
+  .input-group {
+    margin-top: 12px;
+    padding: 14px;
+    border: 1px solid rgba(125, 105, 79, .16);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .7);
+    box-shadow: 0 5px 16px rgba(71, 58, 43, .04);
+  }
+  .input-group h2 {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    margin: 0 0 11px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: #efe7da;
+    color: #69543a;
+    letter-spacing: .1em;
+  }
+  .input-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .field {
+    display: grid;
+    align-content: start;
+    gap: 5px;
+    min-width: 0;
+  }
   .field-wide { grid-column: span 2; }
-  .field span { color: #6a5740; letter-spacing: 0; text-transform: none; font-size: 12px; }
+  .field > span {
+    color: #67543e;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 11px;
+  }
   .field input,
   .field select {
     width: 100%;
-    min-height: 46px;
-    padding: 10px 12px;
-    border: 1px solid #d5d2cc;
-    border-radius: 12px;
-    background: white;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid #d7d0c6;
+    border-radius: 9px;
+    outline: none;
+    background: rgba(255, 255, 255, .96);
     color: #171717;
+    font-size: 14px;
+    transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .field input::placeholder { color: #aaa197; }
+  .field-helper {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 22px;
+    margin-top: 1px;
+    padding: 3px 8px;
+    border: 1px solid #e5ddd2;
+    border-radius: 999px;
+    background: #f8f5f0;
+    color: #7b7066;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .field-helper::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #b89868;
+    box-shadow: 0 0 0 2px rgba(184, 152, 104, .16);
+  }
+  .field input:focus,
+  .field select:focus,
+  .amount-input:focus-within {
+    border-color: #a88655;
+    box-shadow: 0 0 0 3px rgba(168, 134, 85, .12);
+    background: #ffffff;
   }
   .field select { cursor: pointer; }
-  .detailed-select { position: relative; min-height: 46px; }
+  .amount-input {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    align-items: center;
+    min-height: 40px;
+    border: 1px solid #d7d0c6;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .96);
+    overflow: hidden;
+    transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .amount-input .amount-prefix {
+    display: grid;
+    place-items: center;
+    align-self: stretch;
+    border-right: 1px solid #e2dcd3;
+    background: #f5f0e8;
+    color: #755b39;
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .amount-input input {
+    min-height: 38px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none !important;
+  }
+  .detailed-select { position: relative; min-height: 40px; }
   .detailed-select-value {
     display: flex;
     align-items: center;
     width: 100%;
-    min-height: 46px;
-    padding: 10px 38px 10px 12px;
-    border: 1px solid #d5d2cc;
-    border-radius: 12px;
-    background: white;
+    min-height: 40px;
+    padding: 8px 34px 8px 10px;
+    border: 1px solid #d7d0c6;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .96);
     color: #171717 !important;
-    font-size: inherit !important;
+    font-size: 13px !important;
   }
   .detailed-select::after {
     content: "⌄";
     position: absolute;
     top: 50%;
-    right: 14px;
+    right: 12px;
     transform: translateY(-55%);
     color: #6a5740;
     pointer-events: none;
@@ -2230,117 +3121,118 @@ const styles = `
   .field-full { grid-column: 1 / -1; }
   .range-field {
     display: grid;
-    gap: 9px;
-    padding: 14px 16px;
-    border: 1px solid #d8d1c7;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, .55);
+    gap: 7px;
+    padding: 10px 12px;
+    border: 1px solid #d9d1c6;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, .72);
   }
   .range-field > span {
-    color: #6a5740;
-    font-size: 12px;
+    color: #67543e;
+    font-size: 11px;
     font-weight: 700;
   }
   .range-control {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 150px;
+    grid-template-columns: minmax(0, 1fr) 118px;
     align-items: center;
-    gap: 18px;
+    gap: 12px;
   }
-  .range-control input { width: 100%; accent-color: #171717; }
+  .range-control input { width: 100%; accent-color: #6f5534; }
   .range-control output {
-    padding: 10px 12px;
-    border: 1px solid #d5d2cc;
-    border-radius: 10px;
+    min-height: 36px;
+    display: grid;
+    place-items: center;
+    padding: 7px 9px;
+    border: 1px solid #d7d0c6;
+    border-radius: 8px;
     background: #ffffff;
+    font-size: 12px;
     font-weight: 800;
     text-align: center;
   }
-  .capital-split-fields {
-    grid-column: 1 / -1;
+  .investor-list {
     display: grid;
-    gap: 16px;
-    padding: 18px;
+    gap: 12px;
+  }
+  .investor-card {
+    padding: 14px;
     border: 1px solid #d8d1c7;
     border-radius: 14px;
-    background: rgba(255, 255, 255, .55);
+    background: linear-gradient(180deg, rgba(255, 255, 255, .84), rgba(255, 255, 255, .62));
+    box-shadow: 0 8px 22px rgba(88, 76, 59, .06);
   }
-  .capital-split-heading {
-    display: flex;
-    align-items: end;
-    justify-content: space-between;
-    gap: 20px;
+  .investor-card-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr);
+    gap: 12px;
+    align-items: start;
+    margin-bottom: 11px;
   }
-  .capital-split-heading > div { display: grid; gap: 4px; }
-  .capital-split-heading span {
-    color: #6a5740;
+  .investor-card-heading {
+    display: grid;
+    gap: 6px;
+  }
+  .investor-card-kicker {
+    color: #8b6e45;
     font-size: 11px;
     font-weight: 800;
     letter-spacing: .08em;
     text-transform: uppercase;
   }
-  .capital-split-heading strong { font-size: 20px; }
-  .capital-split-heading p {
-    max-width: 430px;
+  .investor-card-heading h3 {
+    margin: 0;
+    color: #3e2d1b;
+    font-size: 19px;
+    line-height: 1.1;
+  }
+  .investor-card-heading p {
     margin: 0;
     color: #756d64;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.45;
-    text-align: right;
   }
-  .capital-party-grid {
+  .investor-card-stats {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-  }
-  .capital-party-grid section {
-    padding: 15px;
-    border: 1px solid #ded8cf;
-    border-radius: 10px;
-    background: #ffffff;
-  }
-  .capital-party-grid h3 {
-    margin: 0 0 12px;
-    font-size: 14px;
-  }
-  .capital-party-fields {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
   }
-  .capital-input { display: grid; gap: 7px; }
-  .capital-input > span {
-    color: #6f655a;
-    font-size: 11px;
-    font-weight: 800;
-  }
-  .capital-input-box {
+  .investor-stat {
     display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    border: 1px solid #cfc7bc;
-    border-radius: 8px;
-    background: #ffffff;
-    overflow: hidden;
+    gap: 4px;
+    padding: 9px 10px;
+    border: 1px solid #ddd4c7;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .92);
   }
-  .capital-input-box input {
-    width: 100%;
-    min-width: 0;
-    padding: 10px 11px;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    font: inherit;
+  .investor-stat span {
+    color: #7b6e61;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
   }
-  .capital-input-box small {
-    padding: 0 11px;
-    color: #6f655a;
-    font-size: 12px;
-    font-weight: 800;
+  .investor-stat strong {
+    color: #1f1b16;
+    font-size: 14px;
+    line-height: 1.15;
   }
-  .capital-input-active .capital-input-box {
-    border-color: #171717;
-    box-shadow: 0 0 0 1px #171717;
+  .investor-stat-accent {
+    border-color: #cdb488;
+    background: linear-gradient(180deg, rgba(255, 248, 237, .98), rgba(255, 255, 255, .92));
+  }
+  .investor-card-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+  .investor-card-grid .range-field {
+    grid-column: auto;
+    height: 100%;
+  }
+  .investor-card-grid-simple {
+    grid-template-columns: minmax(0, .8fr) minmax(320px, 1.2fr);
   }
 
   .downpayment-list {
@@ -2349,7 +3241,7 @@ const styles = `
     gap: 12px;
   }
   .downpayment-card {
-    padding: 14px;
+    padding: 11px;
     border: 1px solid #d8d1c7;
     border-radius: 14px;
     background: rgba(255, 255, 255, .62);
@@ -2485,8 +3377,12 @@ const styles = `
     background: #ffffff;
   }
   .cash-table-card .table-title { margin-top: 0; padding-top: 18px; }
-  .cash-page th:nth-child(2),
-  .cash-page td:nth-child(2) { text-align: left; }
+  .cash-detail-page th:nth-child(3),
+  .cash-detail-page td:nth-child(3) { text-align: left; }
+  .cash-detail-page th:nth-child(1),
+  .cash-detail-page td:nth-child(1),
+  .cash-detail-page th:nth-child(2),
+  .cash-detail-page td:nth-child(2) { text-align: center; }
 
   .chart-card { margin-top: 28px; padding: 18px 22px 22px; border: 1px solid var(--line); border-radius: 4px; }
   .chart-card svg { width: 100%; height: auto; overflow: visible; }
@@ -2498,13 +3394,49 @@ const styles = `
   .exit-line { stroke: var(--green); stroke-dasharray: 4 4; stroke-width: 2; }
   .exit-label { fill: var(--green) !important; font-weight: 800; }
 
-  .shared-financing-page .shared-metrics { margin-bottom: 34px; }
-  .shared-financing-page .split-table td:first-child,
-  .shared-financing-page .split-table th:first-child { text-align: left; }
+  .shared-financing-page .shared-metrics { margin-bottom: 28px; }
+  .participant-print-stack {
+    display: grid;
+    gap: 18px;
+  }
+  .participant-print-block {
+    min-width: 0;
+  }
+  .participant-print-block .table-title {
+    margin-top: 0;
+  }
+  .shared-financing-page .split-table { font-size: 12px; }
+  .shared-financing-page .split-table th:first-child,
+  .shared-financing-page .split-table td:first-child { text-align: left; }
+  .shared-financing-page .split-table th:not(:first-child),
+  .shared-financing-page .split-table td:not(:first-child) { text-align: right; }
+  .participant-table-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .participant-split-table {
+    width: 100%;
+  }
+  .participant-split-table th,
+  .participant-split-table td {
+    white-space: normal;
+    vertical-align: middle;
+  }
+  .participant-split-table th:first-child,
+  .participant-split-table td:first-child {
+    min-width: 185px;
+  }
+  .split-profit-row td { border-top: 2px solid #171717; font-weight: 800; }
+  .split-return-row td { font-weight: 800; }
+  .shared-financing-page .participant-table,
+  .shared-financing-page .contribution-schedule-table { font-size: 11px; }
+  .shared-financing-page .participant-table th,
+  .shared-financing-page .participant-table td { padding-left: 6px; padding-right: 6px; }
+  .shared-financing-page .participant-table td:first-child,
+  .shared-financing-page .participant-table th:first-child,
+  .shared-financing-page .contribution-schedule-table td:first-child,
+  .shared-financing-page .contribution-schedule-table th:first-child { text-align: left; }
   .split-total-row { background: #f2f3f5; }
-  .split-profit-row { font-weight: 800; border-top: 2px solid #111111; }
-  .split-return-row { font-weight: 800; }
-  .split-return-row:last-child { border-bottom: 2px solid #111111; }
 
   .sensitivity-block + .sensitivity-block { margin-top: 42px; }
   .sensitivity-page .table-title { margin-top: 28px; }
@@ -2553,7 +3485,10 @@ const styles = `
   }
   @media (max-width: 850px) {
     .input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .downpayment-list { grid-template-columns: 1fr; }
+    .downpayment-list,
+    .investor-card-stats { grid-template-columns: 1fr; }
+    .investor-card-top,
+    .investor-card-grid,
     .metric-grid { grid-template-columns: repeat(2, 1fr); }
     .metric:nth-child(2) { border-right: 0; }
     .metric:nth-child(-n+2) { border-bottom: 1px solid #cdd2da; }
@@ -2565,16 +3500,14 @@ const styles = `
   }
   @media (max-width: 560px) {
     .screen { padding: 0; }
-    .live-input { border-radius: 0; margin-bottom: 0; padding: 18px; }
-    .input-header { flex-direction: column; }
+    .live-input { border: 0; border-radius: 0; margin-bottom: 0; padding: 10px; }
+    .input-header { align-items: stretch; flex-direction: column; padding: 13px; }
     .input-actions { justify-content: flex-start; }
     .input-grid { grid-template-columns: 1fr; }
     .field-wide { grid-column: auto; }
     .range-control { grid-template-columns: 1fr; }
-    .downpayment-card-grid { grid-template-columns: 1fr; }
-    .capital-split-heading { align-items: start; flex-direction: column; }
-    .capital-split-heading p { text-align: left; }
-    .capital-party-grid, .capital-party-fields { grid-template-columns: 1fr; }
+    .downpayment-card-grid,
+    .investor-card-stats { grid-template-columns: 1fr; }
     .report-page { margin-bottom: 0; padding: 28px 18px 74px; box-shadow: none; }
     .report-header h1 { font-size: 31px; }
     .metric-grid { grid-template-columns: 1fr; }
@@ -2589,7 +3522,11 @@ const styles = `
     margin: 0;
   }
 
+  .print-only { display: none; }
+
   @media print {
+    .screen-only { display: none !important; }
+    .print-only { display: block !important; }
     * {
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
@@ -2846,16 +3783,26 @@ const styles = `
       line-height: 1.15 !important;
     }
 
-    .cash-page th:nth-child(1),
-    .cash-page td:nth-child(1) { width: 9% !important; text-align: center !important; }
-    .cash-page th:nth-child(2),
-    .cash-page td:nth-child(2) { width: 31% !important; text-align: left !important; }
-    .cash-page th:nth-child(3),
-    .cash-page td:nth-child(3),
-    .cash-page th:nth-child(4),
-    .cash-page td:nth-child(4),
-    .cash-page th:nth-child(5),
-    .cash-page td:nth-child(5) { width: 20% !important; text-align: right !important; }
+    .cash-detail-page table:not(.shared-cashflow-table) th:nth-child(1),
+    .cash-detail-page table:not(.shared-cashflow-table) td:nth-child(1) {
+      width: 7% !important;
+      text-align: center !important;
+    }
+    .cash-detail-page table:not(.shared-cashflow-table) th:nth-child(2),
+    .cash-detail-page table:not(.shared-cashflow-table) td:nth-child(2) {
+      width: 14% !important;
+      text-align: center !important;
+    }
+    .cash-detail-page table:not(.shared-cashflow-table) th:nth-child(3),
+    .cash-detail-page table:not(.shared-cashflow-table) td:nth-child(3) {
+      width: 29% !important;
+      text-align: left !important;
+    }
+    .cash-detail-page table:not(.shared-cashflow-table) th:nth-child(n+4),
+    .cash-detail-page table:not(.shared-cashflow-table) td:nth-child(n+4) {
+      width: 16.66% !important;
+      text-align: right !important;
+    }
 
     .cash-page .sale-row td {
       background: #e8f5ec !important;
@@ -2948,18 +3895,149 @@ const styles = `
 
     .cash-detail-page .shared-cashflow-table th:nth-child(1),
     .cash-detail-page .shared-cashflow-table td:nth-child(1) {
-      width: 6% !important;
+      width: 5% !important;
+      text-align: center !important;
     }
 
     .cash-detail-page .shared-cashflow-table th:nth-child(2),
     .cash-detail-page .shared-cashflow-table td:nth-child(2) {
-      width: 24% !important;
-      white-space: normal !important;
+      width: 12% !important;
+      text-align: center !important;
     }
 
-    .cash-detail-page .shared-cashflow-table th:nth-child(n+3),
-    .cash-detail-page .shared-cashflow-table td:nth-child(n+3) {
-      width: 14% !important;
+    .cash-detail-page .shared-cashflow-table th:nth-child(3),
+    .cash-detail-page .shared-cashflow-table td:nth-child(3) {
+      width: 21% !important;
+      white-space: normal !important;
+      text-align: left !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table th:nth-child(n+4),
+    .cash-detail-page .shared-cashflow-table td:nth-child(n+4) {
+      width: auto !important;
+      text-align: right !important;
+    }
+
+    .cash-detail-page .shared-cashflow-table,
+    .shared-financing-page .participant-split-table {
+      min-width: 0 !important;
+      width: 100% !important;
+    }
+
+    .shared-financing-page .participant-split-table th:first-child,
+    .shared-financing-page .participant-split-table td:first-child {
+      width: 23% !important;
+      min-width: 0 !important;
+      text-align: left !important;
+    }
+
+    .shared-financing-page .participant-split-table th:not(:first-child),
+    .shared-financing-page .participant-split-table td:not(:first-child) {
+      width: auto !important;
+      word-break: break-word !important;
+    }
+
+    .shared-financing-page .split-table {
+      font-size: 8pt !important;
+      table-layout: fixed !important;
+    }
+
+    .shared-financing-page .split-table th,
+    .shared-financing-page .split-table td {
+      padding: 2.1mm 1.1mm !important;
+    }
+
+    .shared-financing-page .participant-split-table th {
+      font-size: 5.7pt !important;
+      letter-spacing: .05em !important;
+      line-height: 1.15 !important;
+    }
+
+    .shared-financing-page .participant-split-table td {
+      font-size: 6.8pt !important;
+    }
+
+    .shared-financing-page .participant-table,
+    .shared-financing-page .contribution-schedule-table {
+      font-size: 6.8pt !important;
+      table-layout: fixed !important;
+    }
+
+    .shared-financing-page .participant-table th,
+    .shared-financing-page .participant-table td,
+    .shared-financing-page .contribution-schedule-table th,
+    .shared-financing-page .contribution-schedule-table td {
+      padding: 1.7mm 1mm !important;
+    }
+
+    .shared-financing-page .participant-table th {
+      font-size: 5.4pt !important;
+      letter-spacing: .06em !important;
+    }
+
+    .participant-print-page-grid {
+      display: grid !important;
+      grid-template-columns: 1fr !important;
+      gap: 3mm !important;
+      margin-top: 2.5mm !important;
+    }
+
+    .participant-print-group {
+      margin-top: 0 !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+
+    .shared-financing-page.print-only .section-heading {
+      margin-top: 0 !important;
+      padding-bottom: 3mm !important;
+    }
+
+    .shared-financing-page.print-only .shared-metrics {
+      margin: 3mm 0 2.5mm !important;
+    }
+
+    .shared-financing-page.print-only .metric {
+      padding-top: 2.5mm !important;
+      padding-bottom: 2.5mm !important;
+    }
+
+    .participant-print-group .table-title {
+      margin: 0 0 1.5mm !important;
+      padding-bottom: 1.2mm !important;
+      font-size: 7pt !important;
+    }
+
+    .participant-print-group .participant-split-table th,
+    .participant-print-group .participant-split-table td {
+      padding: 1.05mm .9mm !important;
+    }
+
+    .participant-print-group .participant-split-table th {
+      font-size: 5.8pt !important;
+      line-height: 1.05 !important;
+    }
+
+    .participant-print-group .participant-split-table td {
+      font-size: 6.5pt !important;
+      line-height: 1.08 !important;
+    }
+
+    .participant-print-group .participant-split-table th:first-child,
+    .participant-print-group .participant-split-table td:first-child {
+      width: 28% !important;
+    }
+
+    .participant-print-group .participant-split-table th:not(:first-child),
+    .participant-print-group .participant-split-table td:not(:first-child) {
+      width: 18% !important;
+    }
+
+    .participant-print-note {
+      margin-top: 2mm !important;
+      padding: 2mm 2.5mm !important;
+      font-size: 6.5pt !important;
+      line-height: 1.2 !important;
     }
 
     .sensitivity-block + .sensitivity-block {
@@ -3049,54 +4127,57 @@ const styles = `
 
     .data-block h3,
     .table-title {
-      border-bottom: 1pt solid #66717f !important;
+      border-bottom: 0.25mm solid #d3d8df !important;
     }
 
     .data-row {
-      border-bottom: 0.75pt solid #8a94a1 !important;
+      border-bottom: 0.22mm solid #d7dce3 !important;
     }
 
     .chart-card,
     .cash-page .chart-card,
     .cash-page .cash-table-card,
     .cash-overview-page .cash-summary-card {
-      border: 1pt solid #4f5967 !important;
-      box-shadow: inset 0 0 0 0.25pt #4f5967 !important;
+      border: 0.3mm solid #d8dde4 !important;
+      box-shadow: none !important;
     }
 
     table,
     .cash-page table {
-      border: 1pt solid #596270 !important;
-      border-collapse: separate !important;
+      border: 0 !important;
+      border-collapse: collapse !important;
       border-spacing: 0 !important;
     }
 
     th,
     .cash-page th {
       border: 0 !important;
-      border-bottom: 1pt solid #596270 !important;
-      background: #e7e9ed !important;
+      border-bottom: 0.25mm solid #d3d8df !important;
+      background: #f3f4f6 !important;
     }
 
     td,
     .cash-page td {
       border: 0 !important;
-      border-bottom: 0.75pt solid #8a94a1 !important;
+      border-bottom: 0.22mm solid #d7dce3 !important;
     }
 
     th + th,
     td + td,
     .cash-page th + th,
     .cash-page td + td {
-      border-left: 0.75pt solid #9aa3ae !important;
+      border-left: 0 !important;
     }
 
     tbody tr:last-child td {
       border-bottom: 0 !important;
     }
 
-    .cash-page .sale-row td {
-      border-top: 1pt solid #4f7f60 !important;
+    .cash-page .sale-row td,
+    .sale-row td {
+      background: #eef8f1 !important;
+      border-top: 0 !important;
+      border-bottom: 0.22mm solid #d7dce3 !important;
     }
 
     .chart-card svg line,

@@ -35,11 +35,11 @@ export default function Home() {
 
         {/* Nieuwe conceptpagina */}
         <a
-          href="/los-naranjos-concept"
+          href="/rendements-check-spanje"
           className="flex items-center justify-between rounded-lg border-2 border-dashed border-amber-700 bg-amber-50 p-4 shadow-sm hover:bg-amber-100"
         >
-          <span>Los Naranjos – conceptpagina</span>
-
+          <span>Rendements check Spanje</span>
+        
           <span className="rounded-full bg-amber-700 px-3 py-1 text-xs font-bold uppercase tracking-wider text-white">
             Concept
           </span>
