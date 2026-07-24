@@ -53,6 +53,13 @@ export default function Home() {
         </a>
 
         <a
+          href="/off-plan/choice-of-materials"
+          className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
+        >
+          Choice of materials 
+        </a>
+
+        <a
           href="/investor-residentieel"
           className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
         >
