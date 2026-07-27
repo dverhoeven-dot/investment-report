@@ -27,7 +27,7 @@ export default function LoginPage() {
           Private Access
         </p>
 
-        <h1 className="text-3xl font-bold mt-3">Leovari</h1>
+        <h1 className="text-3xl font-bold mt-3">Leovari & L3 Capital</h1>
 
         <p className="text-gray-500 mt-2">
         Enter the access code to view.
