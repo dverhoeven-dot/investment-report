@@ -33,16 +33,11 @@ export default function Home() {
           Los Naranjos Hill Club Project
         </a>
 
-        {/* Nieuwe conceptpagina */}
         <a
           href="/rendements-check-spanje"
-          className="flex items-center justify-between rounded-lg border-2 border-dashed border-amber-700 bg-amber-50 p-4 shadow-sm hover:bg-amber-100"
+          className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
         >
-          <span>Rendements check Spanje</span>
-        
-          <span className="rounded-full bg-amber-700 px-3 py-1 text-xs font-bold uppercase tracking-wider text-white">
-            Concept
-          </span>
+          Rendements check Spanje
         </a>
 
         <a
@@ -50,13 +45,6 @@ export default function Home() {
           className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
         >
           La Carolina Project
-        </a>
-
-        <a
-          href="/off-plan/choice-of-materials"
-          className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
-        >
-          Choice of materials 
         </a>
 
         <a
