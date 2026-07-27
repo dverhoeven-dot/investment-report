@@ -25,26 +25,11 @@ export default function Home() {
           Complete Portfolio
         </a>
 
-        {/* Bestaande Los Naranjos-pagina */}
-        <a
-          href="/reports/los-naranjos"
-          className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
-        >
-          Los Naranjos Hill Club Project
-        </a>
-
         <a
           href="/rendements-check-spanje"
           className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
         >
           Rendements check Spanje
-        </a>
-
-        <a
-          href="/reports/la-carolina"
-          className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
-        >
-          La Carolina Project
         </a>
 
         <a
