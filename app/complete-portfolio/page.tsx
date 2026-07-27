@@ -16,13 +16,55 @@ const PORTFOLIO_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vSy5ruI_t2bZHex5vWNhI2txiYS6Dph1r5oSvW19omhO6aTbP9H-21qsqjpztO4Rg/pub?gid=1825706612&single=true&output=csv";
 
 const COLORS = {
-  ink: "#0E0E12",
-  ivory: "#FAF7EE",
-  travertine: "#E4D8C2",
-  brass: "#8C6F47",
-  pool: "#7FA8A4",
-  cypress: "#2B3A33",
+  ink: "#202421",
+  ivory: "#F5F2EC",
+  card: "#FCFBF8",
+  soft: "#ECE7DE",
+  travertine: "#D6CEC1",
+  ash: "#817B73",
+  brass: "#A17A46",
+  pool: "#71857A",
+  cypress: "#31443B",
+  white: "#FFFFFF",
 };
+
+const styles = `
+  :root {
+    --ink: ${COLORS.ink};
+    --ivory: ${COLORS.ivory};
+    --card: ${COLORS.card};
+    --soft: ${COLORS.soft};
+    --travertine: ${COLORS.travertine};
+    --ash: ${COLORS.ash};
+    --brass: ${COLORS.brass};
+    --pool: ${COLORS.pool};
+    --cypress: ${COLORS.cypress};
+    --white: ${COLORS.white};
+  }
+
+  .portfolio-photo-frame {
+    position: relative;
+    overflow: hidden;
+    background: var(--soft);
+  }
+
+  .portfolio-photo-frame::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      rgba(49, 68, 59, 0.04) 0%,
+      rgba(161, 122, 70, 0.11) 100%
+    );
+  }
+
+  .portfolio-photo {
+    display: block;
+    filter: saturate(0.78) contrast(1.03) brightness(0.97) sepia(0.05);
+  }
+`;
 
 function clean(value: unknown) {
   return String(value ?? "")
@@ -442,7 +484,7 @@ export default async function PortfolioPage() {
     COLORS.brass,
     COLORS.travertine,
     COLORS.ink,
-    "#B9A98C",
+    COLORS.ash,
   ];
 
   let allocationCursor = 0;
@@ -455,15 +497,17 @@ export default async function PortfolioPage() {
 
         return `${allocationColors[index % allocationColors.length]} ${start}% ${allocationCursor}%`;
       })
-      .join(", ") || `${COLORS.travertine} 0% 100%`;
+      .join(", ") || `${COLORS.soft} 0% 100%`;
 
   const currentPages = current;
   const pipelinePages = chunkArray(pipeline, 2);
   const soldPages = chunkArray(sold, 2);
 
   return (
-    <main className="min-h-screen bg-[#FAF7EE] text-[#0E0E12] overflow-x-auto">
+    <main className="min-h-screen bg-[var(--ivory)] text-[var(--ink)] overflow-x-auto">
       <style>{`
+        ${styles}
+
         @page {
           size: A4 landscape;
           margin: 0;
@@ -556,12 +600,12 @@ export default async function PortfolioPage() {
               title="Portfolio Value by Country"
             />
 
-            <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm] h-[118mm]">
+            <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl p-[5mm] h-[118mm]">
               <div
                 className="w-[58mm] h-[58mm] rounded-full relative mx-auto mt-[4mm]"
                 style={{ background: `conic-gradient(${allocationGradient})` }}
               >
-                <div className="absolute inset-[16mm] rounded-full bg-white" />
+                <div className="absolute inset-[16mm] rounded-full bg-[var(--card)]" />
               </div>
 
               <div className="mt-[8mm] space-y-[3mm]">
@@ -582,7 +626,7 @@ export default async function PortfolioPage() {
                       />
                       <div>
                         <p className="font-bold leading-tight">{item.name}</p>
-                        <p className="text-gray-500 mt-1">{money(item.value)}</p>
+                        <p className="text-[var(--ash)] mt-1">{money(item.value)}</p>
                       </div>
                       <p className="font-bold">{share.toFixed(1)}%</p>
                     </div>
@@ -636,9 +680,9 @@ export default async function PortfolioPage() {
 
 function A4Page({ children }: { children: ReactNode }) {
   return (
-    <section className="a4-page w-[297mm] h-[210mm] bg-[#FAF7EE] p-[9mm] overflow-hidden relative">
+    <section className="a4-page w-[297mm] h-[210mm] bg-[var(--ivory)] p-[9mm] overflow-hidden relative">
       <img
-        src="/leovari-logo.png"
+        src="/leeuw-vastgoed-logo.png"
         alt="Leovari"
         className="absolute top-[7mm] right-[9mm] w-[26mm] h-auto object-contain z-20"
       />
@@ -650,12 +694,12 @@ function A4Page({ children }: { children: ReactNode }) {
 
 function Header() {
   return (
-    <header className="flex justify-between items-start border-b border-[#E4D8C2] pb-[5mm]">
+    <header className="flex justify-between items-start border-b border-[var(--travertine)] pb-[5mm]">
       <div>
-        <p className="text-[10px] uppercase tracking-[0.45em] text-[#2B3A33] font-bold">
+        <p className="text-[10px] uppercase tracking-[0.45em] text-[var(--brass)] font-bold">
           Confidential Portfolio Report
         </p>
-        <h1 className="text-[34px] leading-none font-bold text-[#2B3A33] mt-3">
+        <h1 className="text-[34px] leading-none font-bold text-[var(--cypress)] mt-3">
           Complete Real Estate Portfolio
         </h1>
         <p className="text-[12px] mt-3">
@@ -668,7 +712,7 @@ function Header() {
 
 function Footer() {
   return (
-    <footer className="absolute bottom-[6mm] left-[9mm] right-[9mm] flex justify-between text-[9px] text-gray-500 border-t border-[#E4D8C2] pt-[2mm]">
+    <footer className="absolute bottom-[6mm] left-[9mm] right-[9mm] flex justify-between text-[9px] text-[var(--ash)] border-t border-[var(--travertine)] pt-[2mm]">
       <span>Confidential · Not for distribution</span>
       <span>All values in EUR</span>
     </footer>
@@ -686,7 +730,7 @@ function SectionHeader({
 }) {
   return (
     <>
-      <p className="text-[10px] uppercase tracking-[0.42em] text-[#2B3A33] font-bold">
+      <p className="text-[10px] uppercase tracking-[0.42em] text-[var(--brass)] font-bold">
         {number} · {label}
       </p>
       <h2 className="text-[22px] font-bold mt-1">{title}</h2>
@@ -704,11 +748,11 @@ function MetricCard({
   accent?: boolean;
 }) {
   return (
-    <div className="bg-white border border-[#E4D8C2] rounded-lg p-[4mm] h-[27mm]">
-      <p className="text-[7.5px] uppercase tracking-[0.25em] text-gray-500 font-bold leading-tight">
+    <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-lg p-[4mm] h-[27mm]">
+      <p className="text-[7.5px] uppercase tracking-[0.25em] text-[var(--ash)] font-bold leading-tight">
         {label}
       </p>
-      <p className={`text-[17px] font-bold mt-2 leading-none ${accent ? "text-[#2B3A33]" : ""}`}>
+      <p className={`text-[17px] font-bold mt-2 leading-none ${accent ? "text-[var(--cypress)]" : ""}`}>
         {value}
       </p>
     </div>
@@ -733,28 +777,28 @@ function CapitalStackCard({
   const equityBarPct = Math.min(Math.max(equityPct, 0), 100);
 
   return (
-    <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm]">
+    <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl p-[5mm]">
       <div className="flex items-start justify-between gap-[5mm]">
       <div>
-  <p className="text-[10px] uppercase tracking-[0.25em] text-[#8C6F47] font-bold">
+  <p className="text-[10px] uppercase tracking-[0.25em] text-[var(--brass)] font-bold">
     Net Equity in Portfolio
   </p>
-  <p className="text-[22px] leading-none font-bold text-[#2B3A33] mt-[2mm]">
+  <p className="text-[22px] leading-none font-bold text-[var(--cypress)] mt-[2mm]">
     {money(netEquityValue)}
   </p>
-  <p className="text-[10px] text-gray-500 mt-[1mm]">
+  <p className="text-[10px] text-[var(--ash)] mt-[1mm]">
     Expected End Value - Mortgages
   </p>
 </div>
 
         <div className="text-right">
-          <p className="text-[10px] uppercase tracking-[0.25em] text-gray-400 font-bold">
+          <p className="text-[10px] uppercase tracking-[0.25em] text-[var(--ash)] font-bold">
             Portfolio LTV
           </p>
-          <p className="text-[22px] leading-none font-bold text-[#8C6F47] mt-[2mm]">
+          <p className="text-[22px] leading-none font-bold text-[var(--brass)] mt-[2mm]">
             {mortgagePct.toFixed(1)}%
           </p>
-          <p className="text-[10px] text-gray-500 mt-[1mm]">
+          <p className="text-[10px] text-[var(--ash)] mt-[1mm]">
             Mortgage / End Value
           </p>
         </div>
@@ -762,20 +806,20 @@ function CapitalStackCard({
 
       <div className="mt-[6mm]">
         <div className="flex justify-between text-[10px] font-bold mb-[2mm]">
-          <span className="text-[#8C6F47]">
+          <span className="text-[var(--brass)]">
             Mortgage {mortgagePct.toFixed(1)}%
           </span>
-          <span className="text-[#2B3A33]">
+          <span className="text-[var(--cypress)]">
             Equity {equityPct.toFixed(1)}%
           </span>
         </div>
 
-        <div className="h-[13mm] rounded-full overflow-hidden flex bg-[#E4D8C2]">
+        <div className="h-[13mm] rounded-full overflow-hidden flex bg-[var(--soft)]">
           <div
             className="h-full flex items-center justify-center text-[10px] font-bold text-white"
             style={{
               width: `${mortgageBarPct}%`,
-              backgroundColor: COLORS.cypress,
+              backgroundColor: COLORS.brass,
             }}
           >
             {mortgageBarPct >= 16 ? "Mortgage" : ""}
@@ -785,7 +829,7 @@ function CapitalStackCard({
             className="h-full flex items-center justify-center text-[10px] font-bold text-white"
             style={{
               width: `${equityBarPct}%`,
-              backgroundColor: COLORS.pool,
+              backgroundColor: COLORS.cypress,
             }}
           >
             {equityBarPct >= 16 ? "Equity" : ""}
@@ -815,8 +859,8 @@ function CapitalMetric({
         : COLORS.ink;
 
   return (
-    <div className="bg-[#FAF7EE] border border-[#E4D8C2] rounded-lg p-[3mm]">
-      <p className="text-[8px] uppercase tracking-[0.16em] text-gray-400 font-bold leading-tight">
+    <div className="bg-[var(--ivory)] border border-[var(--travertine)] rounded-lg p-[3mm]">
+      <p className="text-[8px] uppercase tracking-[0.16em] text-[var(--ash)] font-bold leading-tight">
         {label}
       </p>
       <p
@@ -831,8 +875,8 @@ function CapitalMetric({
 
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="bg-white border border-[#E4D8C2] rounded-xl p-[4mm] h-[61mm]">
-      <p className="text-[8px] uppercase tracking-[0.25em] text-gray-500 font-bold mb-3">
+    <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl p-[4mm] h-[61mm]">
+      <p className="text-[8px] uppercase tracking-[0.25em] text-[var(--ash)] font-bold mb-3">
         {title}
       </p>
       {children}
@@ -854,12 +898,12 @@ function MiniBarGroup({
       <div className="space-y-1.5">
         {rows.map((row) => (
           <div key={row.label}>
-            <div className="flex justify-between text-[8px] text-gray-500 mb-1">
+            <div className="flex justify-between text-[8px] text-[var(--ash)] mb-1">
               <span>{row.label}</span>
               <span>{money(row.value)}</span>
             </div>
 
-            <div className="h-[2.5mm] bg-[#FAF7EE] rounded-full overflow-hidden">
+            <div className="h-[2.5mm] bg-[var(--ivory)] rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full"
                 style={{
@@ -914,17 +958,17 @@ function ProjectDetailPage({
 
   return (
     <>
-      <div className="flex justify-between items-end border-b border-[#E4D8C2] pb-[4mm]">
+      <div className="flex justify-between items-end border-b border-[var(--travertine)] pb-[4mm]">
         <div>
           <SectionHeader
             number="04"
             label={`${country || "Complete"} · Current Portfolio`}
             title={name}
           />
-          <p className="text-[11px] text-gray-600 mt-2">{project.address}</p>
+          <p className="text-[11px] text-[var(--ash)] mt-2">{project.address}</p>
         </div>
 
-        <p className="text-[10px] text-gray-500">
+        <p className="text-[10px] text-[var(--ash)]">
           Project {pageIndex} of {totalPages}
         </p>
       </div>
@@ -932,16 +976,18 @@ function ProjectDetailPage({
       <div className="grid grid-cols-[1.05fr_0.95fr] gap-[6mm] mt-[5mm]">
         <div>
           {photo ? (
-            <img
-              src={photo}
-              alt={name}
-              className="w-full h-[98mm] object-cover rounded-xl border border-[#E4D8C2]"
-            />
+            <div className="portfolio-photo-frame rounded-xl border border-[var(--travertine)]">
+              <img
+                src={photo}
+                alt={name}
+                className="portfolio-photo w-full h-[98mm] object-cover"
+              />
+            </div>
           ) : (
-            <div className="w-full h-[98mm] rounded-xl bg-[#E4D8C2] border border-[#E4D8C2] flex items-center justify-center text-center px-[10mm]">
+            <div className="w-full h-[98mm] rounded-xl bg-[var(--soft)] border border-[var(--travertine)] flex items-center justify-center text-center px-[10mm]">
               <div>
                 <p className="text-[15px] font-bold">{name}</p>
-                <p className="text-[10px] text-gray-500 mt-2">
+                <p className="text-[10px] text-[var(--ash)] mt-2">
                   Add this project to PORTFOLIO.photos to display an image.
                 </p>
               </div>
@@ -957,7 +1003,7 @@ function ProjectDetailPage({
           </div>
 
           <div className="mt-[5mm]">
-            <p className="text-[10px] uppercase tracking-[0.28em] text-[#8C6F47] font-bold mb-[2mm]">
+            <p className="text-[10px] uppercase tracking-[0.28em] text-[var(--brass)] font-bold mb-[2mm]">
               Value Creation
             </p>
 
@@ -969,8 +1015,8 @@ function ProjectDetailPage({
             />
           </div>
 
-          <div className="bg-white border border-[#E4D8C2] rounded-xl p-[5mm] mt-[5mm]">
-            <p className="text-[9px] uppercase tracking-[0.25em] text-[#2B3A33] font-bold mb-[4mm]">
+          <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl p-[5mm] mt-[5mm]">
+            <p className="text-[9px] uppercase tracking-[0.25em] text-[var(--cypress)] font-bold mb-[4mm]">
               Project Memorandum
             </p>
 
@@ -1002,7 +1048,7 @@ function ProjectDetailPage({
           </div>
 
           {(hasValue(project.exitstrategy) || hasValue(project.notes)) && (
-            <div className="border-t border-[#0E0E12] mt-[5mm] pt-[3mm] text-[11px] leading-snug">
+            <div className="border-t border-[var(--ink)] mt-[5mm] pt-[3mm] text-[11px] leading-snug">
               {hasValue(project.exitstrategy) && (
                 <p>
                   <strong>Exit Strategy:</strong> {project.exitstrategy}
@@ -1037,15 +1083,17 @@ function PipelineCard({ project }: { project: CsvRow }) {
   const badgeLabel = clean(project.badgelabel || project.type) || "Project";
 
   return (
-    <div className="bg-white border border-[#E4D8C2] rounded-xl overflow-hidden h-[147mm]">
+    <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl overflow-hidden h-[147mm]">
       {hasValue(coverImage) ? (
-        <img
-          src={coverImage}
-          alt={`${name} location`}
-          className="w-full h-[55mm] object-cover"
-        />
+        <div className="portfolio-photo-frame w-full h-[55mm]">
+          <img
+            src={coverImage}
+            alt={`${name} location`}
+            className="portfolio-photo w-full h-[55mm] object-cover"
+          />
+        </div>
       ) : (
-        <div className="w-full h-[55mm] bg-[#E4D8C2] flex items-center justify-center text-[10px] text-gray-500">
+        <div className="w-full h-[55mm] bg-[var(--soft)] flex items-center justify-center text-[10px] text-[var(--ash)]">
           Project image / location
         </div>
       )}
@@ -1053,16 +1101,16 @@ function PipelineCard({ project }: { project: CsvRow }) {
       <div className="p-[5mm]">
         <div className="flex justify-between gap-[5mm]">
           <div>
-            <p className="text-[9px] uppercase tracking-[0.28em] text-gray-400 font-bold">
+            <p className="text-[9px] uppercase tracking-[0.28em] text-[var(--ash)] font-bold">
               {clean(project.country)} · Pipeline Project
             </p>
             <h3 className="text-[19px] font-bold mt-2">{name}</h3>
             {hasValue(location) && (
-              <p className="text-[11px] text-gray-600 mt-2 leading-snug">{location}</p>
+              <p className="text-[11px] text-[var(--ash)] mt-2 leading-snug">{location}</p>
             )}
           </div>
 
-          <span className="h-fit bg-[#8C6F47] text-white rounded-full px-4 py-2 text-[9px] uppercase font-bold">
+          <span className="h-fit bg-[var(--cypress)] text-white rounded-full px-4 py-2 text-[9px] uppercase font-bold">
             {badgeLabel}
           </span>
         </div>
@@ -1110,21 +1158,27 @@ function SoldProjectCard({ project }: { project: CsvRow }) {
   const holdingPeriod = clean(project.holdingperiodmonths || project.holdingperiod);
 
   return (
-    <div className="bg-white border border-[#E4D8C2] rounded-xl overflow-hidden h-[147mm]">
+    <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl overflow-hidden h-[147mm]">
       {photo ? (
-        <img src={photo} alt={name} className="w-full h-[53mm] object-cover" />
+        <div className="portfolio-photo-frame w-full h-[53mm]">
+          <img
+            src={photo}
+            alt={name}
+            className="portfolio-photo w-full h-[53mm] object-cover"
+          />
+        </div>
       ) : (
-        <div className="w-full h-[53mm] bg-[#E4D8C2] flex items-center justify-center text-[10px] text-gray-500">
+        <div className="w-full h-[53mm] bg-[var(--soft)] flex items-center justify-center text-[10px] text-[var(--ash)]">
           Add a Photo URL in Google Sheets
         </div>
       )}
 
       <div className="p-[5mm]">
-        <p className="text-[9px] uppercase tracking-[0.28em] text-gray-400 font-bold">
+        <p className="text-[9px] uppercase tracking-[0.28em] text-[var(--ash)] font-bold">
           {clean(project.country)} · Realized Project
         </p>
         <h3 className="text-[20px] font-bold mt-2">{name}</h3>
-        <p className="text-[11px] text-gray-600 mt-2 leading-snug h-[12mm] overflow-hidden">
+        <p className="text-[11px] text-[var(--ash)] mt-2 leading-snug h-[12mm] overflow-hidden">
           {project.address}
         </p>
 
@@ -1134,8 +1188,8 @@ function SoldProjectCard({ project }: { project: CsvRow }) {
           {roi > 0 && <BigMetric label="ROI" value={`${roi.toFixed(1)}%`} small />}
         </div>
 
-        <div className="bg-white border border-[#E4D8C2] rounded-xl p-[4mm] mt-[5mm]">
-          <p className="text-[8px] uppercase tracking-[0.22em] text-[#2B3A33] font-bold mb-[3mm]">
+        <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl p-[4mm] mt-[5mm]">
+          <p className="text-[8px] uppercase tracking-[0.22em] text-[var(--cypress)] font-bold mb-[3mm]">
             Deal Summary
           </p>
 
@@ -1192,8 +1246,8 @@ function StackBar({
   if (total <= 0) return null;
 
   return (
-    <div className="bg-white border border-[#E4D8C2] rounded-xl p-[4mm]">
-      <div className="h-[10mm] rounded-full overflow-hidden flex bg-[#E4D8C2]">
+    <div className="bg-[var(--card)] border border-[var(--travertine)] rounded-xl p-[4mm]">
+      <div className="h-[10mm] rounded-full overflow-hidden flex bg-[var(--soft)]">
         {segments.map((segment) => (
           <div
             key={segment.label}
@@ -1215,10 +1269,10 @@ function StackBar({
             />
 
             <div>
-              <p className="text-[9px] uppercase tracking-[0.18em] text-gray-400 font-bold">
+              <p className="text-[9px] uppercase tracking-[0.18em] text-[var(--ash)] font-bold">
                 {segment.label}
               </p>
-              <p className="text-[12px] font-bold text-[#0E0E12] mt-1">
+              <p className="text-[12px] font-bold text-[var(--ink)] mt-1">
                 {money(segment.value)}
               </p>
             </div>
@@ -1247,10 +1301,12 @@ function BigMetric({
     <div
       className={`rounded-lg p-[4mm] ${
         dark
-          ? "bg-[#0E0E12] text-white"
+          ? "bg-[var(--ink)] text-white"
           : pool
-          ? "bg-[#7FA8A4] text-white"
-          : "bg-[#FAF7EE]"
+          ? "bg-[var(--pool)] text-white"
+          : travertine
+          ? "bg-[var(--soft)] text-[var(--ink)]"
+          : "bg-[var(--ivory)]"
       }`}
     >
       <p className="text-[7px] uppercase tracking-[0.2em] opacity-75 font-bold leading-tight">
@@ -1266,7 +1322,7 @@ function BigMetric({
 function TinyMetric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[7px] uppercase tracking-[0.18em] text-gray-500 font-bold leading-tight">
+      <p className="text-[7px] uppercase tracking-[0.18em] text-[var(--ash)] font-bold leading-tight">
         {label}
       </p>
       <p className="text-[11px] font-bold mt-1">{value}</p>
@@ -1286,7 +1342,7 @@ function Fact({
   return (
     <div
       className={`grid grid-cols-[1fr_auto] gap-3 leading-tight ${
-        green ? "text-[#2B3A33]" : ""
+        green ? "text-[var(--cypress)]" : ""
       }`}
     >
       <span>{label}</span>
