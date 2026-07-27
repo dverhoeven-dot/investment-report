@@ -1,7 +1,7 @@
 export default function Home() {
   return (
     <main className="min-h-screen bg-[#f4f3ef] p-12">
-      <h1 className="mb-8 text-4xl font-bold">Leovari</h1>
+      <h1 className="mb-8 text-4xl font-bold">Leovari & L3 Capital</h1>
 
       <div className="space-y-4">
         <a
