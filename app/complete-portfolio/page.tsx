@@ -22,13 +22,14 @@ type Asset = {
   plotSize: number;
   purchaseDate: string;
   salesDate: string;
+  purchasePrice: number;
   investedValue: number;
   salesValue: number;
   annualRent: number;
   rentYield: number;
   mortgage: number;
   stillToInvest: number;
-  roi: number;
+  irr: number;
 };
 
 type FinancingRow = {
@@ -50,6 +51,13 @@ const currencyFormatter = new Intl.NumberFormat("nl-NL", {
   style: "currency",
   currency: "EUR",
   maximumFractionDigits: 0,
+});
+
+const currencyFormatterWithCents = new Intl.NumberFormat("nl-NL", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 const numberFormatter = new Intl.NumberFormat("nl-NL", {
@@ -84,6 +92,18 @@ const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
     src: "/portfolio-photos-nl-es/groethofstraat-99.png",
   },
   {
+    match: /zonneveld/,
+    src: "/portfolio-photos-nl-es/zonneveld-7.png",
+  },
+  {
+    match: /magalhaesweg|magelhaesweg/,
+    src: "/portfolio-photos-nl-es/magalhaesweg-4.png",
+  },
+  {
+    match: /steegstraat/,
+    src: "/portfolio-photos-nl-es/steegstraat-21.png",
+  },
+  {
     match: /kazernestraat/,
     src: "/portfolio-photos-nl-es/kazernestraat-10.jpg",
   },
@@ -113,6 +133,10 @@ function normalizeHeader(value: string): string {
 
 function formatCurrency(value: number): string {
   return currencyFormatter.format(Number.isFinite(value) ? value : 0);
+}
+
+function formatCurrencyWithCents(value: number): string {
+  return currencyFormatterWithCents.format(Number.isFinite(value) ? value : 0);
 }
 
 function formatNumber(value: number): string {
@@ -519,6 +543,20 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
       parseNumber(getCell(row, ["Mortgage (€)", "Mortgage", "Mortgages", "Hypotheek", "Loan"])),
     );
 
+    const purchasePrice = Math.abs(
+      parseNumber(
+        getCell(row, [
+          "Purchase Price (€)",
+          "Purchase Price",
+          "Purchase price",
+          "Purchase Value",
+          "Aankoopprijs",
+          "Aankoopwaarde",
+          "Purchase",
+        ]),
+      ),
+    );
+
     const investedValue = Math.abs(
       parseNumber(
         getCell(row, [
@@ -527,11 +565,6 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
           "Invested Value",
           "Investment",
           "Invested",
-          "Purchase Value",
-          "Aankoopwaarde",
-          "Purchase Price (€)",
-          "Purchase Price",
-          "Purchase",
         ]),
       ),
     );
@@ -617,24 +650,18 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
       getCell(row, ["Yield Rent", "Rent Yield", "Rental Yield", "Huurrendement"]),
     );
 
-    const rentYield = explicitRentYield || (investedValue ? annualRent / investedValue : 0);
-    const roi = parsePercentage(
-      getCell(row, [
-        "Expected ROI",
-        "ROI (%)",
-        "ROI",
-        "Expected IRR",
-        "IRR (%)",
-        "IRR",
-        "IRR sale",
-        "Return",
-      ]),
+    const rentYield = explicitRentYield;
+    // Lees uitsluitend een expliciete IRR uit de IRR-/IRR sale-kolom.
+    // Wanneer deze ontbreekt, wordt later een ROI berekend uit de projectwaarden.
+    const irr = parsePercentage(
+      getCell(row, ["IRR sale", "IRR", "IRR (%)", "Expected IRR"]),
     );
 
     const mortgageOnlyRow = projectText.includes("mortgage") || projectText.includes("hypotheek");
 
     if (mortgageOnlyRow) {
-      const mortgageAmount = explicitMortgage || salesValue || investedValue || explicitStillToInvest;
+      const mortgageAmount =
+        explicitMortgage || salesValue || investedValue || purchasePrice || explicitStillToInvest;
       if (mortgageAmount > 0) {
         financingRows.push({
           name: project,
@@ -649,7 +676,8 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
 
     if (projectText.startsWith("still to invest")) {
       const target = projectText.replace(/^still to invest\s*/, "").trim();
-      const value = explicitStillToInvest || salesValue || investedValue || explicitMortgage;
+      const value =
+        explicitStillToInvest || salesValue || investedValue || purchasePrice || explicitMortgage;
       if (target && value > 0) pendingInvestments.push({ target, value });
       continue;
     }
@@ -657,6 +685,7 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
     const isStandaloneLaCarolinaInvestment =
       projectText === "la carolina" &&
       explicitStillToInvest > 0 &&
+      purchasePrice === 0 &&
       investedValue === 0 &&
       salesValue === 0 &&
       builtArea === 0 &&
@@ -692,13 +721,14 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
           "Target Completion",
         ]),
       ),
+      purchasePrice,
       investedValue,
       salesValue,
       annualRent,
       rentYield,
       mortgage: explicitMortgage,
       stillToInvest: explicitStillToInvest,
-      roi,
+      irr,
     });
   }
 
@@ -734,10 +764,21 @@ function getProfit(asset: Asset): number {
   return getEndValue(asset) - getTotalCost(asset);
 }
 
-function getReturn(asset: Asset): number {
-  if (asset.roi) return asset.roi;
+function hasExplicitIrr(asset: Asset): boolean {
+  return Number.isFinite(asset.irr) && asset.irr !== 0;
+}
+
+function getCalculatedRoi(asset: Asset): number {
   const cost = getTotalCost(asset);
   return cost ? getProfit(asset) / cost : 0;
+}
+
+function getReturn(asset: Asset): number {
+  return hasExplicitIrr(asset) ? asset.irr : getCalculatedRoi(asset);
+}
+
+function getReturnType(asset: Asset): "IRR" | "ROI" {
+  return hasExplicitIrr(asset) ? "IRR" : "ROI";
 }
 
 function getImageSource(project: string): string | null {
@@ -871,10 +912,11 @@ export default function CompletePortfolioPage() {
       0,
     );
 
-    const sharedEndValue = sharedAssets.reduce(
-      (sum, asset) => sum + getEndValue(asset) * 0.5,
+    const sharedTotalValue = sharedAssets.reduce(
+      (sum, asset) => sum + getEndValue(asset),
       0,
     );
+    const sharedEndValue = sharedTotalValue * 0.5;
     const sharedInvestment = sharedAssets.reduce(
       (sum, asset) => sum + getTotalCost(asset) * 0.5,
       0,
@@ -930,6 +972,7 @@ export default function CompletePortfolioPage() {
       soldRevenue,
       realizedProfit,
       sharedEndValue,
+      sharedTotalValue,
       sharedInvestment,
       sharedMortgage,
       sharedTotalMortgage,
@@ -1140,7 +1183,7 @@ export default function CompletePortfolioPage() {
             number="02"
             label="Joint portfolio"
             title="D. Leeuw e/o F. Berden Private Real Estate"
-            subtitle="Portfolio metrics shown on a 50% ownership basis"
+            subtitle="Jointly owned investment portfolio"
           />
 
           <div className="mt-5 grid grid-cols-4 gap-3">
@@ -1220,22 +1263,30 @@ export default function CompletePortfolioPage() {
           </div>
 
           <section className="mt-4 rounded-[18px] border border-[#d8d0c1] bg-white/80 px-5 py-4">
-            <div className="grid grid-cols-[0.72fr_1.6fr] items-center gap-6">
+            <div className="grid grid-cols-[1.08fr_0.92fr] items-center gap-5">
               <div>
                 <SectionLabel>Capital structure</SectionLabel>
-                <div className="mt-2 flex items-end justify-between gap-5">
+                <div className="mt-2 grid grid-cols-3 items-end gap-5">
                   <div>
                     <p className="text-[9px] text-[#69736e]">Total mortgage</p>
-                    <p className="mt-1 text-xl font-semibold text-[#243d33]">
+                    <p className="mt-1 whitespace-nowrap text-xl font-semibold text-[#243d33]">
                       {formatCurrency(metrics.sharedTotalMortgage)}
                     </p>
                   </div>
+
+                  <div>
+                    <p className="text-[9px] text-[#69736e]">Total value</p>
+                    <p className="mt-1 whitespace-nowrap text-xl font-semibold text-[#243d33]">
+                      {formatCurrency(metrics.sharedTotalValue)}
+                    </p>
+                  </div>
+
                   <div className="text-right">
                     <p className="text-[9px] text-[#69736e]">Joint portfolio LTV</p>
-                    <p className="mt-1 text-xl font-semibold text-[#b2854b]">
+                    <p className="mt-1 whitespace-nowrap text-xl font-semibold text-[#b2854b]">
                       {formatPercent(
-                        metrics.sharedEndValue
-                          ? metrics.sharedMortgage / metrics.sharedEndValue
+                        metrics.sharedTotalValue
+                          ? metrics.sharedTotalMortgage / metrics.sharedTotalValue
                           : 0,
                       )}
                     </p>
@@ -1245,8 +1296,8 @@ export default function CompletePortfolioPage() {
 
               <CapitalStack
                 mortgage={
-                  metrics.sharedEndValue
-                    ? metrics.sharedMortgage / metrics.sharedEndValue
+                  metrics.sharedTotalValue
+                    ? metrics.sharedTotalMortgage / metrics.sharedTotalValue
                     : 0
                 }
               />
@@ -1285,32 +1336,28 @@ export default function CompletePortfolioPage() {
                 <MetricCard
                   label="Return"
                   value={formatPercent(getReturn(asset))}
-                  description="Expected ROI / IRR"
+                  description={getReturnType(asset)}
                 />
               </div>
 
-              <ValueCreation asset={asset} />
+              <CostStructure asset={asset} />
 
               <section className="rounded-[24px] border border-[#d8d0c1] bg-white/85 p-5">
                 <SectionLabel>Project metrics</SectionLabel>
                 <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-                  <Detail label="Invested value" value={formatCurrency(asset.investedValue)} />
-                  <Detail
-                    label="Still to invest"
-                    value={asset.stillToInvest ? formatCurrency(asset.stillToInvest) : "—"}
-                  />
-                  <Detail
-                    label="Mortgage"
-                    value={asset.mortgage ? formatCurrency(asset.mortgage) : "—"}
-                  />
-                  <Detail
-                    label="Loan to value"
-                    value={
-                      asset.mortgage && getEndValue(asset)
-                        ? formatPercent(asset.mortgage / getEndValue(asset))
-                        : "—"
-                    }
-                  />
+                  {asset.mortgage > 0 && (
+                    <>
+                      <Detail label="Mortgage" value={formatCurrency(asset.mortgage)} />
+                      <Detail
+                        label="Loan to value"
+                        value={
+                          getEndValue(asset) > 0
+                            ? formatPercent(asset.mortgage / getEndValue(asset))
+                            : "—"
+                        }
+                      />
+                    </>
+                  )}
                   <Detail
                     label="Built area"
                     value={asset.builtArea ? `${formatNumber(asset.builtArea)} m²` : "—"}
@@ -1321,14 +1368,18 @@ export default function CompletePortfolioPage() {
                   />
                   <Detail label="Purchase date" value={asset.purchaseDate || "—"} />
                   <Detail label="Expected exit" value={asset.salesDate || "—"} />
-                  <Detail
-                    label="Annual rent"
-                    value={asset.annualRent ? formatCurrency(asset.annualRent) : "—"}
-                  />
-                  <Detail
-                    label="Rent yield"
-                    value={asset.rentYield ? formatPercent(asset.rentYield) : "—"}
-                  />
+                  {asset.rentYield > 0 && (
+                    <>
+                      <Detail
+                        label="Annual rent"
+                        value={formatCurrency(asset.annualRent)}
+                      />
+                      <Detail
+                        label="Rent yield"
+                        value={formatPercent(asset.rentYield)}
+                      />
+                    </>
+                  )}
                 </div>
               </section>
             </div>
@@ -1561,24 +1612,42 @@ function ProjectImage({ project, className = "" }: { project: string; className?
   );
 }
 
-function ValueCreation({ asset }: { asset: Asset }) {
-  const invested = asset.investedValue;
-  const remaining = asset.stillToInvest;
-  const profit = Math.max(0, getProfit(asset));
-  const total = invested + remaining + profit;
+function CostStructure({ asset }: { asset: Asset }) {
+  const purchasePrice = asset.purchasePrice;
+  const developmentCosts = Math.max(0, asset.investedValue - asset.purchasePrice);
+  const stillToInvest = asset.stillToInvest || 0;
+  const totalCosts = purchasePrice + developmentCosts + stillToInvest;
+
+  const purchaseShare = totalCosts ? (purchasePrice / totalCosts) * 100 : 0;
+  const developmentShare = totalCosts ? (developmentCosts / totalCosts) * 100 : 0;
+  const remainingShare = totalCosts ? (stillToInvest / totalCosts) * 100 : 0;
 
   return (
     <section className="rounded-[24px] border border-[#d8d0c1] bg-white/85 p-5">
-      <SectionLabel>Value creation</SectionLabel>
+      <SectionLabel>Cost structure</SectionLabel>
+
       <div className="mt-4 flex h-11 overflow-hidden rounded-full bg-[#e8e4dc]">
-        <div className="bg-[#243d33]" style={{ width: `${total ? (invested / total) * 100 : 0}%` }} />
-        <div className="bg-[#b2854b]" style={{ width: `${total ? (remaining / total) * 100 : 0}%` }} />
-        <div className="bg-[#829b91]" style={{ width: `${total ? (profit / total) * 100 : 0}%` }} />
+        <div
+          className="bg-[#243d33]"
+          style={{ width: `${purchaseShare}%` }}
+          title={`Purchase price: ${formatCurrencyWithCents(purchasePrice)}`}
+        />
+        <div
+          className="bg-[#b2854b]"
+          style={{ width: `${developmentShare}%` }}
+          title={`Development costs: ${formatCurrencyWithCents(developmentCosts)}`}
+        />
+        <div
+          className="bg-[#829b91]"
+          style={{ width: `${remainingShare}%` }}
+          title={`Still to invest: ${formatCurrencyWithCents(stillToInvest)}`}
+        />
       </div>
+
       <div className="mt-4 grid grid-cols-3 gap-4">
-        <ValueLegend color="#243d33" label="Invested" value={invested} />
-        <ValueLegend color="#b2854b" label="Still to invest" value={remaining} />
-        <ValueLegend color="#829b91" label="Expected profit" value={profit} />
+        <ValueLegend color="#243d33" label="Purchase price" value={purchasePrice} />
+        <ValueLegend color="#b2854b" label="Development costs" value={developmentCosts} />
+        <ValueLegend color="#829b91" label="Still to invest" value={stillToInvest} />
       </div>
     </section>
   );
@@ -1591,7 +1660,7 @@ function ValueLegend({ color, label, value }: { color: string; label: string; va
         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
         <p className="text-[8px] uppercase tracking-[0.16em] text-[#777f7b]">{label}</p>
       </div>
-      <p className="mt-2 text-sm font-semibold">{value ? formatCurrency(value) : "—"}</p>
+      <p className="mt-2 text-sm font-semibold">{formatCurrencyWithCents(value)}</p>
     </div>
   );
 }
@@ -1616,7 +1685,7 @@ function SoldProjectCard({ asset }: { asset: Asset }) {
         <div className="mt-5 grid grid-cols-3 gap-3">
           <SmallMetric label="Sale price" value={formatCurrency(getEndValue(asset))} dark />
           <SmallMetric label="Profit" value={formatCurrency(getProfit(asset))} accent />
-          <SmallMetric label="Return" value={formatPercent(getReturn(asset))} />
+          <SmallMetric label={getReturnType(asset)} value={formatPercent(getReturn(asset))} />
         </div>
         <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-3 rounded-[18px] border border-[#ddd6ca] p-4">
           <Detail label="Investment" value={formatCurrency(asset.investedValue)} />
