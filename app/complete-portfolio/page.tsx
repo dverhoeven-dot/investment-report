@@ -25,6 +25,8 @@ type Asset = {
   purchasePrice: number;
   investedValue: number;
   salesValue: number;
+  explicitProfit: number;
+  hasExplicitProfit: boolean;
   annualRent: number;
   rentYield: number;
   mortgage: number;
@@ -40,9 +42,23 @@ type FinancingRow = {
   mortgage: number;
 };
 
+type FinancialRow = {
+  label: string;
+  tag: string;
+  value: number;
+};
+
+type FinancialOverview = {
+  summary: FinancialRow[];
+  capital: FinancialRow[];
+  results: FinancialRow[];
+  currentAccounts: FinancialRow[];
+};
+
 type PortfolioData = {
   assets: Asset[];
   financingRows: FinancingRow[];
+  financialOverview: FinancialOverview;
 };
 
 type NormalizedRow = Record<string, string>;
@@ -139,6 +155,12 @@ function formatCurrencyWithCents(value: number): string {
   return currencyFormatterWithCents.format(Number.isFinite(value) ? value : 0);
 }
 
+function formatFinancialCurrency(value: number): string {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const formatted = formatCurrencyWithCents(Math.abs(safeValue));
+  return safeValue < 0 ? `(${formatted})` : formatted;
+}
+
 function formatNumber(value: number): string {
   return numberFormatter.format(Number.isFinite(value) ? value : 0);
 }
@@ -233,6 +255,155 @@ function parseCsv(csv: string): string[][] {
   return rows;
 }
 
+function createEmptyFinancialOverview(): FinancialOverview {
+  return {
+    summary: [],
+    capital: [],
+    results: [],
+    currentAccounts: [],
+  };
+}
+
+function extractFinancialOverview(csv: string): FinancialOverview {
+  const matrix = parseCsv(csv);
+  const overview = createEmptyFinancialOverview();
+
+  const startIndex = matrix.findIndex((row) =>
+    normalizeText(row[0] ?? "").includes("financieel overzicht organigram"),
+  );
+
+  if (startIndex < 0) return overview;
+
+  let section: keyof FinancialOverview = "summary";
+
+  for (
+    let index = startIndex + 1;
+    index < Math.min(matrix.length, startIndex + 45);
+    index += 1
+  ) {
+    const sourceRow = matrix[index] ?? [];
+    const sourceLabel = (sourceRow[0] ?? "").trim();
+    const tag = (sourceRow[1] ?? "").trim();
+    const sourceValue = (sourceRow[2] ?? "").trim();
+
+    const normalizedLabel = normalizeText(sourceLabel);
+    const normalizedTag = normalizeText(tag);
+
+    if (normalizedLabel.includes("uitsluiten op projectnaam")) break;
+
+    if (normalizedLabel === "identity" && normalizedTag === "liquidity") {
+      section = "results";
+      continue;
+    }
+
+    if (
+      normalizedLabel.startsWith("total invested capital") ||
+      normalizedLabel.startsWith("total borrowed")
+    ) {
+      section = "capital";
+    }
+
+    if (normalizedTag === "rc") {
+      section = "currentAccounts";
+    }
+
+    if (!sourceLabel && !tag && !sourceValue) continue;
+
+    const label =
+      sourceLabel ||
+      (section === "capital" ? "Total capital position" : "Total");
+
+    overview[section].push({
+      label,
+      tag,
+      value: parseNumber(sourceValue),
+    });
+  }
+
+  return overview;
+}
+
+function getFinancialValue(rows: FinancialRow[], labelPart: string): number {
+  const search = normalizeText(labelPart);
+  return (
+    rows.find((row) => normalizeText(row.label).includes(search))?.value ?? 0
+  );
+}
+
+function hasFinancialRows(overview: FinancialOverview): boolean {
+  return (
+    overview.summary.length +
+      overview.capital.length +
+      overview.results.length +
+      overview.currentAccounts.length >
+    0
+  );
+}
+
+const RESERVED_PROJECT_CONTROL_TERMS = new Set([
+  "mortgage",
+  "hypotheek",
+  "to invest",
+  "still to invest",
+  "nog te investeren",
+]);
+
+function extractProjectExclusions(csv: string): string[] {
+  const matrix = parseCsv(csv);
+
+  let headerRowIndex = -1;
+  let headerColumnIndex = -1;
+
+  matrix.some((row, rowIndex) =>
+    row.some((cell, columnIndex) => {
+      if (normalizeText(cell).includes("uitsluiten op projectnaam")) {
+        headerRowIndex = rowIndex;
+        headerColumnIndex = columnIndex;
+        return true;
+      }
+      return false;
+    }),
+  );
+
+  if (headerRowIndex < 0 || headerColumnIndex < 0) return [];
+
+  const exclusions: string[] = [];
+  let consecutiveBlankRows = 0;
+
+  for (
+    let rowIndex = headerRowIndex + 1;
+    rowIndex < Math.min(matrix.length, headerRowIndex + 50);
+    rowIndex += 1
+  ) {
+    const rawValue = (matrix[rowIndex]?.[headerColumnIndex] ?? "").trim();
+
+    if (!rawValue) {
+      consecutiveBlankRows += 1;
+      if (consecutiveBlankRows >= 2 && exclusions.length > 0) break;
+      continue;
+    }
+
+    consecutiveBlankRows = 0;
+
+    const normalizedValue = normalizeText(rawValue);
+
+    // Deze regels worden elders in de code functioneel verwerkt en mogen
+    // daarom niet als algemene uitsluitwoorden worden toegepast.
+    if (
+      !normalizedValue ||
+      RESERVED_PROJECT_CONTROL_TERMS.has(normalizedValue)
+    ) {
+      continue;
+    }
+
+    if (!exclusions.includes(normalizedValue)) {
+      exclusions.push(normalizedValue);
+    }
+  }
+
+  return exclusions;
+}
+
 const HEADER_GROUPS = {
   entity: ["entity", "entiteit", "company", "portfolio", "vennootschap", "owner"],
   project: [
@@ -298,8 +469,16 @@ function csvToRows(csv: string): NormalizedRow[] {
     return count === 1 ? base : `${base}${count}`;
   });
 
-  return matrix
-    .slice(bestIndex + 1)
+  const rowsAfterHeader = matrix.slice(bestIndex + 1);
+  const financialStartIndex = rowsAfterHeader.findIndex((values) =>
+    normalizeText(values[0] ?? "").includes("financieel overzicht organigram"),
+  );
+  const assetRows =
+    financialStartIndex >= 0
+      ? rowsAfterHeader.slice(0, financialStartIndex)
+      : rowsAfterHeader;
+
+  return assetRows
     .filter((values) => values.some((value) => value.trim() !== ""))
     .map((values) => {
       const row: NormalizedRow = {};
@@ -485,14 +664,37 @@ function getOwnership(entity: string, status: string): number {
   return 1;
 }
 
-function isIgnoredProject(project: string): boolean {
+function isIgnoredProject(
+  project: string,
+  exclusionTerms: string[] = [],
+): boolean {
   const text = normalizeText(project);
-  return (
-    !text ||
-    text === "equity" ||
-    text.includes("company inventory") ||
-    text.includes("range rover")
-  );
+
+  if (!text) return true;
+
+  const defaultExclusions = [
+    "equity",
+    "company inventory",
+    "range rover",
+  ];
+
+  return [...defaultExclusions, ...exclusionTerms].some((term) => {
+    const normalizedTerm = normalizeText(term);
+
+    if (
+      !normalizedTerm ||
+      RESERVED_PROJECT_CONTROL_TERMS.has(normalizedTerm)
+    ) {
+      return false;
+    }
+
+    // Een algemeen enkel woord zoals "Project" moet alleen een volledige
+    // celwaarde uitsluiten. Meer specifieke termen mogen als tekstdeel matchen.
+    const isSingleWord = !normalizedTerm.includes(" ");
+    return isSingleWord
+      ? text === normalizedTerm
+      : text.includes(normalizedTerm);
+  });
 }
 
 function getDisplayProject(project: string, address: string): string {
@@ -500,7 +702,10 @@ function getDisplayProject(project: string, address: string): string {
   return address.split(",")[0]?.trim() ?? "";
 }
 
-function transformRows(rows: NormalizedRow[]): PortfolioData {
+function transformRows(
+  rows: NormalizedRow[],
+  exclusionTerms: string[] = [],
+): PortfolioData {
   const assets: Asset[] = [];
   const financingRows: FinancingRow[] = [];
   const pendingInvestments: Array<{ target: string; value: number }> = [];
@@ -596,6 +801,20 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
             ]),
       ),
     );
+
+    const rawProfit = getCell(row, [
+      "Profit",
+      "Profit (€)",
+      "Gross Profit",
+      "Gross profit",
+      "Winst",
+      "Result",
+    ]);
+    const explicitProfit = parseNumber(rawProfit);
+    const hasExplicitProfit =
+      rawProfit.trim() !== "" &&
+      rawProfit.trim() !== "-" &&
+      Number.isFinite(explicitProfit);
 
     const explicitStillToInvest = Math.abs(
       parseNumber(
@@ -696,7 +915,12 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
       continue;
     }
 
-    if (isIgnoredProject(project) || (!project && !address)) continue;
+    if (
+      isIgnoredProject(project, exclusionTerms) ||
+      (!project && !address)
+    ) {
+      continue;
+    }
 
     assets.push({
       entity,
@@ -724,6 +948,8 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
       purchasePrice,
       investedValue,
       salesValue,
+      explicitProfit,
+      hasExplicitProfit,
       annualRent,
       rentYield,
       mortgage: explicitMortgage,
@@ -749,7 +975,7 @@ function transformRows(rows: NormalizedRow[]): PortfolioData {
     if (match) match.stillToInvest += pending.value;
   }
 
-  return { assets, financingRows };
+  return { assets, financingRows, financialOverview: createEmptyFinancialOverview() };
 }
 
 function getEndValue(asset: Asset): number {
@@ -761,7 +987,22 @@ function getTotalCost(asset: Asset): number {
 }
 
 function getProfit(asset: Asset): number {
+  if (asset.hasExplicitProfit) return asset.explicitProfit;
   return getEndValue(asset) - getTotalCost(asset);
+}
+
+function getReturnCost(asset: Asset): number {
+  const investedCost = asset.investedValue + asset.stillToInvest;
+  if (investedCost > 0) return investedCost;
+
+  const purchaseCost = asset.purchasePrice + asset.stillToInvest;
+  if (purchaseCost > 0) return purchaseCost;
+
+  if (asset.hasExplicitProfit && asset.salesValue > asset.explicitProfit) {
+    return asset.salesValue - asset.explicitProfit;
+  }
+
+  return 0;
 }
 
 function hasExplicitIrr(asset: Asset): boolean {
@@ -769,7 +1010,7 @@ function hasExplicitIrr(asset: Asset): boolean {
 }
 
 function getCalculatedRoi(asset: Asset): number {
-  const cost = getTotalCost(asset);
+  const cost = getReturnCost(asset);
   return cost ? getProfit(asset) / cost : 0;
 }
 
@@ -786,6 +1027,41 @@ function getImageSource(project: string): string | null {
   return IMAGE_RULES.find(({ match }) => match.test(normalized))?.src ?? null;
 }
 
+function getSoldInformationScore(asset: Asset): number {
+  let score = 0;
+
+  if (asset.salesValue > 0) score += 4;
+  if (asset.hasExplicitProfit) score += 4;
+  if (hasExplicitIrr(asset)) score += 3;
+  if (getReturnCost(asset) > 0) score += 2;
+
+  if (asset.investedValue > 0) score += 1;
+  if (asset.purchasePrice > 0) score += 1;
+  if (asset.purchaseDate) score += 1;
+  if (asset.salesDate) score += 1;
+  if (asset.builtArea > 0) score += 1;
+  if (asset.plotSize > 0) score += 1;
+  if (asset.annualRent > 0) score += 1;
+  if (asset.rentYield > 0) score += 1;
+  if (asset.mortgage > 0) score += 1;
+
+  return score;
+}
+
+function sortSoldAssetsByInformation(assets: Asset[]): Asset[] {
+  return assets
+    .map((asset, originalIndex) => ({
+      asset,
+      originalIndex,
+      score: getSoldInformationScore(asset),
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.originalIndex - right.originalIndex;
+    })
+    .map(({ asset }) => asset);
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -795,7 +1071,11 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export default function CompletePortfolioPage() {
-  const [data, setData] = useState<PortfolioData>({ assets: [], financingRows: [] });
+  const [data, setData] = useState<PortfolioData>({
+    assets: [],
+    financingRows: [],
+    financialOverview: createEmptyFinancialOverview(),
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -820,7 +1100,9 @@ export default function CompletePortfolioPage() {
 
         const csv = await response.text();
         const rows = csvToRows(csv);
-        const transformed = transformRows(rows);
+        const projectExclusions = extractProjectExclusions(csv);
+        const transformed = transformRows(rows, projectExclusions);
+        const financialOverview = extractFinancialOverview(csv);
 
         if (!transformed.assets.length) {
           throw new Error(
@@ -828,7 +1110,7 @@ export default function CompletePortfolioPage() {
           );
         }
 
-        setData(transformed);
+        setData({ ...transformed, financialOverview });
         setLastUpdated(new Date());
       } catch (caughtError) {
         if (caughtError instanceof DOMException && caughtError.name === "AbortError") return;
@@ -861,7 +1143,9 @@ export default function CompletePortfolioPage() {
     // mogen in de actuele portefeuille terechtkomen. "Niet verkocht" is
     // onvoldoende, omdat Pipeline of een onbekende status dan ook meekomen.
     const currentAssets = data.assets.filter(isCurrentAsset);
-    const soldAssets = data.assets.filter(isSoldAsset);
+    const soldAssets = sortSoldAssetsByInformation(
+      data.assets.filter(isSoldAsset),
+    );
     const sharedAssets = data.assets.filter(isJointPortfolioAsset);
     const whollyOwnedAssets = currentAssets.filter((asset) => asset.ownership === 1);
 
@@ -978,6 +1262,29 @@ export default function CompletePortfolioPage() {
       sharedTotalMortgage,
     };
   }, [data]);
+
+  const financialOverview = data.financialOverview;
+  const showFinancialOverview = hasFinancialRows(financialOverview);
+  const financialPageCount = showFinancialOverview ? 2 : 0;
+  const jointPageOffset = metrics.sharedAssets.length > 0 ? 1 : 0;
+  const whollyOwnedStartNumber = 2 + financialPageCount + jointPageOffset;
+
+  const financialTotalValue = getFinancialValue(
+    financialOverview.summary,
+    "total value real estate and invest",
+  );
+  const financialBankBalance = getFinancialValue(
+    financialOverview.summary,
+    "bank balance",
+  );
+  const financialRentalIncome = getFinancialValue(
+    financialOverview.summary,
+    "net rental income",
+  );
+  const financialEquity = getFinancialValue(
+    financialOverview.summary,
+    "equity",
+  );
 
   if (loading && data.assets.length === 0) {
     return (
@@ -1177,10 +1484,91 @@ export default function CompletePortfolioPage() {
         <ReportFooter updated={lastUpdated} />
       </PageFrame>
 
+      {showFinancialOverview && (
+        <>
+          <PageFrame>
+            <ReportHeader
+              number="02"
+              label="Financial overview"
+              title="Financial Position"
+              subtitle="Automatically loaded from Blad26 · rows 90 onward"
+            />
+
+            <div className="mt-5 grid grid-cols-4 gap-3">
+              <MetricCard
+                label="Total portfolio value"
+                value={formatFinancialCurrency(financialTotalValue)}
+                description="Real estate and investments"
+                compact
+                dark
+              />
+              <MetricCard
+                label="Bank balance"
+                value={formatFinancialCurrency(financialBankBalance)}
+                description="Available cash balance"
+                compact
+              />
+              <MetricCard
+                label="Net rental income"
+                value={formatFinancialCurrency(financialRentalIncome)}
+                description="Own portfolio"
+                compact
+              />
+              <MetricCard
+                label="Equity"
+                value={formatFinancialCurrency(financialEquity)}
+                description="Reported equity position"
+                compact
+                accent
+              />
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-5">
+              <FinancialSection
+                title="Portfolio balance"
+                description="Assets, liquidity, liabilities and equity"
+                rows={financialOverview.summary}
+              />
+              <FinancialSection
+                title="Capital position"
+                description="Spain and the Netherlands"
+                rows={financialOverview.capital}
+              />
+            </div>
+
+            <ReportFooter updated={lastUpdated} />
+          </PageFrame>
+
+          <PageFrame>
+            <ReportHeader
+              number="03"
+              label="Financial overview"
+              title="Forecasts & Current Accounts"
+              subtitle="Reported results, forecasts and intercompany positions"
+            />
+
+            <div className="mt-6 grid grid-cols-[1.08fr_0.92fr] gap-5">
+              <FinancialSection
+                title="Profit and forecasts"
+                description="Reported and forecast results"
+                rows={financialOverview.results}
+              />
+              <FinancialSection
+                title="Current accounts"
+                description="Intercompany RC positions"
+                rows={financialOverview.currentAccounts}
+              />
+            </div>
+
+            <ReportFooter updated={lastUpdated} />
+          </PageFrame>
+        </>
+      )}
+
       {metrics.sharedAssets.length > 0 && (
         <PageFrame>
           <ReportHeader
-            number="02"
+            number={String(2 + financialPageCount).padStart(2, "0")}
             label="Joint portfolio"
             title="D. Leeuw e/o F. Berden Private Real Estate"
             subtitle="Jointly owned investment portfolio"
@@ -1311,7 +1699,7 @@ export default function CompletePortfolioPage() {
       {metrics.whollyOwnedAssets.map((asset, index) => (
         <PageFrame key={`${asset.entity}-${asset.project}`}>
           <ReportHeader
-            number={String(index + 3).padStart(2, "0")}
+            number={String(index + whollyOwnedStartNumber).padStart(2, "0")}
             label="Wholly owned portfolio"
             title={asset.project}
             subtitle={asset.entity}
@@ -1392,7 +1780,9 @@ export default function CompletePortfolioPage() {
       {chunk(metrics.soldAssets, 2).map((pair, pageIndex) => (
         <PageFrame key={`sold-${pageIndex}`}>
           <ReportHeader
-            number={String(metrics.whollyOwnedAssets.length + pageIndex + 3).padStart(2, "0")}
+            number={String(
+              metrics.whollyOwnedAssets.length + pageIndex + whollyOwnedStartNumber,
+            ).padStart(2, "0")}
             label="Sold track record"
             title="Realized Projects"
             subtitle="Two realized assets per page"
@@ -1521,6 +1911,63 @@ function CompactMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function FinancialSection({
+  title,
+  description,
+  rows,
+}: {
+  title: string;
+  description: string;
+  rows: FinancialRow[];
+}) {
+  return (
+    <section className="overflow-hidden rounded-[18px] border border-[#d8d0c1] bg-white/85">
+      <div className="flex items-end justify-between bg-[#243d33] px-4 py-3 text-white">
+        <div>
+          <SectionLabel light>{title}</SectionLabel>
+          <p className="mt-1 text-[9px] text-white/60">{description}</p>
+        </div>
+        <p className="text-[8px] uppercase tracking-[0.2em] text-white/55">
+          Amount
+        </p>
+      </div>
+
+      <div>
+        {rows.length > 0 ? (
+          rows.map((row, index) => (
+            <div
+              key={`${title}-${row.label}-${index}`}
+              className={`grid min-h-[34px] grid-cols-[1fr_58px_132px] items-center gap-3 px-4 py-2 text-[10px] ${
+                index !== rows.length - 1 ? "border-b border-[#e2ddd3]" : ""
+              }`}
+            >
+              <p className="leading-snug text-[#52615b]">{row.label}</p>
+              <div className="text-center">
+                {row.tag ? (
+                  <span className="inline-flex rounded-full bg-[#eee8dd] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#8b6840]">
+                    {row.tag}
+                  </span>
+                ) : null}
+              </div>
+              <p
+                className={`whitespace-nowrap text-right font-semibold ${
+                  row.value < 0 ? "text-[#b42318]" : "text-[#243d33]"
+                }`}
+              >
+                {formatFinancialCurrency(row.value)}
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="px-4 py-5 text-[10px] text-[#7a827e]">
+            No values found in the published table.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function DonutChart({ spain }: { spain: number }) {
   const degrees = Math.max(0, Math.min(360, spain * 360));
   return (
@@ -1530,10 +1977,7 @@ function DonutChart({ spain }: { spain: number }) {
         background: `conic-gradient(#2d473c 0deg ${degrees}deg, #80968d ${degrees}deg 360deg)`,
       }}
     >
-      <div className="absolute inset-[45px] flex flex-col items-center justify-center rounded-full bg-[#f7f4ec]">
-        <p className="text-[9px] uppercase tracking-[0.2em] text-[#8b7461]">Portfolio</p>
-        <p className="mt-1 text-lg font-semibold text-[#243d33]">100%</p>
-      </div>
+      <div className="absolute inset-[45px] rounded-full bg-[#f7f4ec]" />
     </div>
   );
 }
@@ -1675,6 +2119,27 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 function SoldProjectCard({ asset }: { asset: Asset }) {
+  const salePriceAvailable = Number.isFinite(asset.salesValue) && asset.salesValue > 0;
+  const returnCost = getReturnCost(asset);
+  const costAvailable = Number.isFinite(returnCost) && returnCost > 0;
+  const profitAvailable =
+    asset.hasExplicitProfit || (salePriceAvailable && costAvailable);
+  const returnAvailable =
+    hasExplicitIrr(asset) || (profitAvailable && costAvailable);
+  const investmentAvailable = Number.isFinite(asset.investedValue) && asset.investedValue > 0;
+  const saleDateAvailable = asset.salesDate.trim().length > 0;
+
+  const visibleMetricCount = [salePriceAvailable, profitAvailable, returnAvailable].filter(
+    Boolean,
+  ).length;
+
+  const metricGridColumns =
+    visibleMetricCount === 1
+      ? "grid-cols-1"
+      : visibleMetricCount === 2
+        ? "grid-cols-2"
+        : "grid-cols-3";
+
   return (
     <article className="overflow-hidden rounded-[26px] border border-[#d8d0c1] bg-white/85">
       <ProjectImage project={asset.project} className="h-[62mm] rounded-none" />
@@ -1682,14 +2147,30 @@ function SoldProjectCard({ asset }: { asset: Asset }) {
         <SectionLabel>Realized project</SectionLabel>
         <h2 className="mt-3 text-2xl font-semibold text-[#243d33]">{asset.project}</h2>
         <p className="mt-2 text-[10px] text-[#747d78]">{asset.address || asset.entity}</p>
-        <div className="mt-5 grid grid-cols-3 gap-3">
-          <SmallMetric label="Sale price" value={formatCurrency(getEndValue(asset))} dark />
-          <SmallMetric label="Profit" value={formatCurrency(getProfit(asset))} accent />
-          <SmallMetric label={getReturnType(asset)} value={formatPercent(getReturn(asset))} />
-        </div>
+
+        {visibleMetricCount > 0 && (
+          <div className={`mt-5 grid gap-3 ${metricGridColumns}`}>
+            {salePriceAvailable && (
+              <SmallMetric label="Sale price" value={formatCurrency(asset.salesValue)} dark />
+            )}
+            {profitAvailable && (
+              <SmallMetric
+                label="Profit"
+                value={formatCurrency(getProfit(asset))}
+                accent
+              />
+            )}
+            {returnAvailable && (
+              <SmallMetric label={getReturnType(asset)} value={formatPercent(getReturn(asset))} />
+            )}
+          </div>
+        )}
+
         <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-3 rounded-[18px] border border-[#ddd6ca] p-4">
-          <Detail label="Investment" value={formatCurrency(asset.investedValue)} />
-          <Detail label="Sale date" value={asset.salesDate || "—"} />
+          {investmentAvailable && (
+            <Detail label="Investment" value={formatCurrency(asset.investedValue)} />
+          )}
+          {saleDateAvailable && <Detail label="Sale date" value={asset.salesDate} />}
           <Detail
             label="Built area"
             value={asset.builtArea ? `${formatNumber(asset.builtArea)} m²` : "—"}
