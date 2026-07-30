@@ -96,6 +96,10 @@ const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
     src: "/portfolio-photos-nl-es/los-naranjos.jpg",
   },
   {
+    match: /lomas de rio verde/,
+    src: "/portfolio-photos-nl-es/lomas-de-rio-verde.jpeg",
+  },
+  {
     match: /lomas rio verde/,
     src: "/portfolio-photos-nl-es/lomas-rio-verde.jpg",
   },
@@ -104,12 +108,20 @@ const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
     src: "/portfolio-photos-nl-es/calderon-de-la-barca.jpg",
   },
   {
+    match: /groethofstraat 103/,
+    src: "/portfolio-photos-nl-es/groethofstraat-103.jpeg",
+  },
+  {
     match: /groethofstraat/,
     src: "/portfolio-photos-nl-es/groethofstraat-99.png",
   },
   {
+    match: /leeuwerikstraat/,
+    src: "/portfolio-photos-nl-es/leeuwerikstraat-1.jpeg",
+  },
+  {
     match: /zonneveld/,
-    src: "/portfolio-photos-nl-es/zonneveld-7.png",
+    src: "/portfolio-photos-nl-es/zonneveld-7.jpeg",
   },
   {
     match: /magalhaesweg|magelhaesweg/,
@@ -121,7 +133,7 @@ const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
   },
   {
     match: /kazernestraat/,
-    src: "/portfolio-photos-nl-es/kazernestraat-10.jpg",
+    src: "/portfolio-photos-nl-es/kazernestraat-10.jpeg",
   },
   {
     match: /benabola|haven/,
@@ -979,7 +991,7 @@ function transformRows(
 }
 
 function getEndValue(asset: Asset): number {
-  return asset.salesValue || asset.investedValue + asset.stillToInvest;
+  return asset.salesValue;
 }
 
 function getTotalCost(asset: Asset): number {
@@ -1154,8 +1166,8 @@ export default function CompletePortfolioPage() {
       0,
     );
 
-    const totalInvestment = currentAssets.reduce(
-      (sum, asset) => sum + getTotalCost(asset) * asset.ownership,
+    const investedValueToDate = currentAssets.reduce(
+      (sum, asset) => sum + asset.investedValue * asset.ownership,
       0,
     );
 
@@ -1170,7 +1182,6 @@ export default function CompletePortfolioPage() {
     );
 
     const totalMortgages = assetMortgages + separateMortgages;
-    const netEquity = portfolioEndValue - totalMortgages;
     const ltv = portfolioEndValue ? totalMortgages / portfolioEndValue : 0;
 
     const netherlandsValue = currentAssets
@@ -1243,9 +1254,8 @@ export default function CompletePortfolioPage() {
       sharedAssets,
       whollyOwnedAssets,
       portfolioEndValue,
-      totalInvestment,
+      investedValueToDate,
       totalMortgages,
-      netEquity,
       ltv,
       netherlandsValue,
       spainValue,
@@ -1265,7 +1275,7 @@ export default function CompletePortfolioPage() {
 
   const financialOverview = data.financialOverview;
   const showFinancialOverview = hasFinancialRows(financialOverview);
-  const financialPageCount = showFinancialOverview ? 2 : 0;
+  const financialPageCount = showFinancialOverview ? 1 : 0;
   const jointPageOffset = metrics.sharedAssets.length > 0 ? 1 : 0;
   const whollyOwnedStartNumber = 2 + financialPageCount + jointPageOffset;
 
@@ -1285,6 +1295,17 @@ export default function CompletePortfolioPage() {
     financialOverview.summary,
     "equity",
   );
+
+  const removeLtvTag = (row: FinancialRow): FinancialRow => ({
+    ...row,
+    tag: normalizeText(row.tag) === "ltv" ? "" : row.tag,
+  });
+
+  const financialPortfolioBalanceRows = financialOverview.summary
+    .filter((row) => !normalizeText(row.label).includes("net rental income"))
+    .map(removeLtvTag);
+
+  const financialCapitalRows = financialOverview.capital.map(removeLtvTag);
 
   if (loading && data.assets.length === 0) {
     return (
@@ -1411,22 +1432,12 @@ export default function CompletePortfolioPage() {
             </div>
           </section>
 
-          <section className="grid grid-cols-3 gap-4">
+          <section className="grid grid-cols-2 gap-4">
             <MetricCard
-              label="Portfolio end value"
+              label="Current projects end value"
               value={formatCurrency(metrics.portfolioEndValue)}
-              description="Ownership adjusted"
-            />
-            <MetricCard
-              label="Net equity"
-              value={formatCurrency(metrics.netEquity)}
-              description="End value minus mortgages"
-              accent
-            />
-            <MetricCard
-              label="Portfolio LTV"
-              value={formatPercent(metrics.ltv)}
-              description="Mortgage / end value"
+              description="Expected end values · ownership adjusted"
+              dark
             />
             <MetricCard
               label="Current assets"
@@ -1449,120 +1460,100 @@ export default function CompletePortfolioPage() {
         <section className="mt-7 rounded-[24px] border border-[#d8d0c1] bg-white/80 p-6">
           <div className="grid grid-cols-[0.8fr_1.6fr] items-center gap-8">
             <div>
-              <SectionLabel>Capital structure</SectionLabel>
+              <SectionLabel>Projected capital structure</SectionLabel>
               <div className="mt-3 flex items-end justify-between">
                 <div>
-                  <p className="text-[11px] text-[#69736e]">Total mortgages</p>
+                  <p className="text-[11px] text-[#69736e]">Total project mortgages</p>
                   <p className="mt-1 text-2xl font-semibold text-[#243d33]">
                     {formatCurrency(metrics.totalMortgages)}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[11px] text-[#69736e]">Total investment</p>
+                  <p className="text-[11px] text-[#69736e]">Invested value to date</p>
                   <p className="mt-1 text-lg font-semibold">
-                    {formatCurrency(metrics.totalInvestment)}
+                    {formatCurrency(metrics.investedValueToDate)}
                   </p>
                 </div>
               </div>
             </div>
-            <CapitalStack mortgage={metrics.ltv} />
+            <CapitalStack
+              mortgage={metrics.ltv}
+              mortgageLabel="Project mortgages"
+              equityLabel="Projected equity"
+            />
           </div>
         </section>
-
-        <div className="mt-6 grid grid-cols-3 gap-4">
-          <CompactMetric label="Sold revenue" value={formatCurrency(metrics.soldRevenue)} />
-          <CompactMetric
-            label="Realized gross profit"
-            value={formatCurrency(metrics.realizedProfit)}
-          />
-          <CompactMetric
-            label="Total plot size"
-            value={`${formatNumber(metrics.totalPlotSize)} m²`}
-          />
-        </div>
 
         <ReportFooter updated={lastUpdated} />
       </PageFrame>
 
       {showFinancialOverview && (
-        <>
-          <PageFrame>
-            <ReportHeader
-              number="02"
-              label="Financial overview"
-              title="Financial Position"
-              subtitle="Automatically loaded from Blad26 · rows 90 onward"
+        <PageFrame>
+          <ReportHeader
+            number="02"
+            label="Financial overview"
+            title="Financial Position"
+            subtitle="Real estate, investments, liquidity, forecasts and intercompany positions"
+          />
+
+          <div className="mt-4 grid grid-cols-4 gap-3">
+            <MetricCard
+              label="Total real estate & investments"
+              value={formatFinancialCurrency(financialTotalValue)}
+              description="Value from the financial overview"
+              dense
+              dark
             />
-
-            <div className="mt-5 grid grid-cols-4 gap-3">
-              <MetricCard
-                label="Total portfolio value"
-                value={formatFinancialCurrency(financialTotalValue)}
-                description="Real estate and investments"
-                compact
-                dark
-              />
-              <MetricCard
-                label="Bank balance"
-                value={formatFinancialCurrency(financialBankBalance)}
-                description="Available cash balance"
-                compact
-              />
-              <MetricCard
-                label="Net rental income"
-                value={formatFinancialCurrency(financialRentalIncome)}
-                description="Own portfolio"
-                compact
-              />
-              <MetricCard
-                label="Equity"
-                value={formatFinancialCurrency(financialEquity)}
-                description="Reported equity position"
-                compact
-                accent
-              />
-            </div>
-
-            <div className="mt-5 grid grid-cols-2 gap-5">
-              <FinancialSection
-                title="Portfolio balance"
-                description="Assets, liquidity, liabilities and equity"
-                rows={financialOverview.summary}
-              />
-              <FinancialSection
-                title="Capital position"
-                description="Spain and the Netherlands"
-                rows={financialOverview.capital}
-              />
-            </div>
-
-            <ReportFooter updated={lastUpdated} />
-          </PageFrame>
-
-          <PageFrame>
-            <ReportHeader
-              number="03"
-              label="Financial overview"
-              title="Forecasts & Current Accounts"
-              subtitle="Reported results, forecasts and intercompany positions"
+            <MetricCard
+              label="Equity"
+              value={formatFinancialCurrency(financialEquity)}
+              description="Equity position"
+              dense
+              accent
             />
+            <MetricCard
+              label="Net rental income"
+              value={formatFinancialCurrency(financialRentalIncome)}
+              description="Own portfolio"
+              dense
+            />
+            <MetricCard
+              label="Bank balance"
+              value={formatFinancialCurrency(financialBankBalance)}
+              description="Available cash balance"
+              dense
+            />
+          </div>
 
-            <div className="mt-6 grid grid-cols-[1.08fr_0.92fr] gap-5">
-              <FinancialSection
-                title="Profit and forecasts"
-                description="Reported and forecast results"
-                rows={financialOverview.results}
-              />
-              <FinancialSection
-                title="Current accounts"
-                description="Intercompany RC positions"
-                rows={financialOverview.currentAccounts}
-              />
-            </div>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <FinancialSection
+              title="Portfolio balance"
+              description="Assets, liquidity, liabilities and equity"
+              rows={financialPortfolioBalanceRows}
+              compact
+            />
+            <FinancialSection
+              title="Capital position"
+              description="Spain and the Netherlands"
+              rows={financialCapitalRows}
+              compact
+            />
+            <FinancialSection
+              title="Profit and forecasts"
+              description="Results and forecast positions"
+              rows={financialOverview.results}
+              compact
+            />
+            <FinancialSection
+              title="Current accounts"
+              description="Intercompany RC positions"
+              rows={financialOverview.currentAccounts}
+              compact
+            />
+          </div>
 
-            <ReportFooter updated={lastUpdated} />
-          </PageFrame>
-        </>
+          <ReportFooter updated={lastUpdated} />
+        </PageFrame>
       )}
 
       {metrics.sharedAssets.length > 0 && (
@@ -1705,34 +1696,57 @@ export default function CompletePortfolioPage() {
             subtitle={asset.entity}
           />
 
-          <div className="mt-7 grid grid-cols-[1.15fr_1fr] gap-7">
-            <ProjectImage project={asset.project} className="h-[118mm]" />
-            <div className="space-y-5">
+          <div className="mt-5 grid grid-cols-[1.15fr_1fr] gap-5">
+            <ProjectImage project={asset.project} className="h-[114mm]" />
+            <div className="space-y-2.5">
               <div className="grid grid-cols-3 gap-3">
                 <MetricCard
                   label="Expected end value"
                   value={formatCurrency(getEndValue(asset))}
-                  description="100% ownership"
+                  description={`At ${asset.salesDate || "—"}`}
                   dark
+                  compact
+                  dense
                 />
                 <MetricCard
                   label="Expected profit"
                   value={formatCurrency(getProfit(asset))}
                   description="Before tax"
                   accent
+                  compact
+                  dense
                 />
                 <MetricCard
                   label="Return"
                   value={formatPercent(getReturn(asset))}
                   description={getReturnType(asset)}
+                  compact
+                  dense
                 />
               </div>
 
-              <CostStructure asset={asset} />
+              <div className="grid grid-cols-2 gap-3">
+                <MetricCard
+                  label="Invested value to date"
+                  value={formatCurrency(asset.investedValue)}
+                  description="Invested to date"
+                  compact
+                  dense
+                />
+                <MetricCard
+                  label="Still to invest"
+                  value={formatCurrency(asset.stillToInvest)}
+                  description="Remaining investment"
+                  compact
+                  dense
+                />
+              </div>
 
-              <section className="rounded-[24px] border border-[#d8d0c1] bg-white/85 p-5">
+              <ValueCreation asset={asset} />
+
+              <section className="rounded-[20px] border border-[#d8d0c1] bg-white/85 p-4">
                 <SectionLabel>Project metrics</SectionLabel>
-                <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                <div className="mt-3 grid grid-cols-2 gap-x-7 gap-y-2 text-sm">
                   {asset.mortgage > 0 && (
                     <>
                       <Detail label="Mortgage" value={formatCurrency(asset.mortgage)} />
@@ -1867,13 +1881,15 @@ function MetricCard({
   accent = false,
   dark = false,
   compact = false,
+  dense = false,
 }: {
   label: string;
   value: string;
-  description: string;
+  description: ReactNode;
   accent?: boolean;
   dark?: boolean;
   compact?: boolean;
+  dense?: boolean;
 }) {
   const background = dark
     ? "bg-[#1f332b] text-white"
@@ -1883,30 +1899,39 @@ function MetricCard({
 
   return (
     <div
-      className={`${compact ? "rounded-[16px] p-4" : "rounded-[20px] p-5"} ${background}`}
+      className={`${
+        dense
+          ? "rounded-[15px] px-3.5 py-3"
+          : compact
+            ? "rounded-[16px] p-4"
+            : "rounded-[20px] p-5"
+      } ${background}`}
     >
-      <p className={`text-[8px] uppercase tracking-[0.2em] ${dark || accent ? "text-white/70" : "text-[#8a7160]"}`}>
+      <p
+        className={`${dense ? "text-[7px]" : "text-[8px]"} uppercase tracking-[0.2em] ${
+          dark || accent ? "text-white/70" : "text-[#8a7160]"
+        }`}
+      >
         {label}
       </p>
       <p
-        className={`${compact ? "mt-2 text-[18px]" : "mt-3 text-[21px]"} whitespace-nowrap font-semibold leading-none`}
+        className={`${
+          dense
+            ? "mt-1.5 text-[17px]"
+            : compact
+              ? "mt-2 text-[18px]"
+              : "mt-3 text-[21px]"
+        } whitespace-nowrap font-semibold leading-none`}
       >
         {value}
       </p>
-      <p
-        className={`${compact ? "mt-2 text-[8px]" : "mt-3 text-[9px]"} ${dark || accent ? "text-white/70" : "text-[#7a827e]"}`}
+      <div
+        className={`${
+          dense ? "mt-1.5 text-[7px]" : compact ? "mt-2 text-[8px]" : "mt-3 text-[9px]"
+        } ${dark || accent ? "text-white/70" : "text-[#7a827e]"}`}
       >
         {description}
-      </p>
-    </div>
-  );
-}
-
-function CompactMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[18px] bg-[#243d33] px-5 py-4 text-white">
-      <p className="text-[8px] uppercase tracking-[0.22em] text-white/60">{label}</p>
-      <p className="mt-2 text-lg font-semibold">{value}</p>
+      </div>
     </div>
   );
 }
@@ -1915,19 +1940,31 @@ function FinancialSection({
   title,
   description,
   rows,
+  compact = false,
 }: {
   title: string;
   description: string;
   rows: FinancialRow[];
+  compact?: boolean;
 }) {
   return (
     <section className="overflow-hidden rounded-[18px] border border-[#d8d0c1] bg-white/85">
-      <div className="flex items-end justify-between bg-[#243d33] px-4 py-3 text-white">
+      <div
+        className={`flex items-end justify-between bg-[#243d33] text-white ${
+          compact ? "px-3.5 py-2" : "px-4 py-3"
+        }`}
+      >
         <div>
           <SectionLabel light>{title}</SectionLabel>
-          <p className="mt-1 text-[9px] text-white/60">{description}</p>
+          <p className={`${compact ? "mt-0.5 text-[8px]" : "mt-1 text-[9px]"} text-white/60`}>
+            {description}
+          </p>
         </div>
-        <p className="text-[8px] uppercase tracking-[0.2em] text-white/55">
+        <p
+          className={`uppercase tracking-[0.2em] text-white/55 ${
+            compact ? "text-[7px]" : "text-[8px]"
+          }`}
+        >
           Amount
         </p>
       </div>
@@ -1937,14 +1974,20 @@ function FinancialSection({
           rows.map((row, index) => (
             <div
               key={`${title}-${row.label}-${index}`}
-              className={`grid min-h-[34px] grid-cols-[1fr_58px_132px] items-center gap-3 px-4 py-2 text-[10px] ${
-                index !== rows.length - 1 ? "border-b border-[#e2ddd3]" : ""
-              }`}
+              className={`grid items-center ${
+                compact
+                  ? "min-h-[28px] grid-cols-[1fr_48px_118px] gap-2 px-3.5 py-1.5 text-[9px]"
+                  : "min-h-[34px] grid-cols-[1fr_58px_132px] gap-3 px-4 py-2 text-[10px]"
+              } ${index !== rows.length - 1 ? "border-b border-[#e2ddd3]" : ""}`}
             >
               <p className="leading-snug text-[#52615b]">{row.label}</p>
               <div className="text-center">
                 {row.tag ? (
-                  <span className="inline-flex rounded-full bg-[#eee8dd] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#8b6840]">
+                  <span
+                    className={`inline-flex rounded-full bg-[#eee8dd] font-semibold uppercase tracking-[0.12em] text-[#8b6840] ${
+                      compact ? "px-1.5 py-0.5 text-[7px]" : "px-2 py-1 text-[8px]"
+                    }`}
+                  >
                     {row.tag}
                   </span>
                 ) : null}
@@ -1959,7 +2002,7 @@ function FinancialSection({
             </div>
           ))
         ) : (
-          <p className="px-4 py-5 text-[10px] text-[#7a827e]">
+          <p className={`${compact ? "px-3.5 py-3 text-[9px]" : "px-4 py-5 text-[10px]"} text-[#7a827e]`}>
             No values found in the published table.
           </p>
         )}
@@ -2005,23 +2048,36 @@ function AllocationRow({
   );
 }
 
-function CapitalStack({ mortgage }: { mortgage: number }) {
+function CapitalStack({
+  mortgage,
+  mortgageLabel = "Mortgage",
+  equityLabel = "Equity",
+}: {
+  mortgage: number;
+  mortgageLabel?: string;
+  equityLabel?: string;
+}) {
   const share = Math.max(0, Math.min(1, mortgage));
+
   return (
     <div>
       <div className="mb-2 flex justify-between text-[9px] font-semibold">
-        <span className="text-[#9a6f37]">Mortgage {formatPercent(share)}</span>
-        <span className="text-[#243d33]">Equity {formatPercent(1 - share)}</span>
+        <span className="text-[#9a6f37]">
+          {mortgageLabel} {formatPercent(share)}
+        </span>
+        <span className="text-[#243d33]">
+          {equityLabel} {formatPercent(1 - share)}
+        </span>
       </div>
       <div className="flex h-12 overflow-hidden rounded-full bg-[#243d33]">
         <div
-          className="flex items-center justify-center bg-[#b2854b] text-[9px] font-semibold text-white"
-          style={{ width: `${share * 100}%`, minWidth: share > 0 ? "48px" : "0" }}
+          className="flex items-center justify-center bg-[#b2854b] px-3 text-center text-[9px] font-semibold text-white"
+          style={{ width: `${share * 100}%`, minWidth: share > 0 ? "72px" : "0" }}
         >
-          Mortgage
+          {mortgageLabel}
         </div>
-        <div className="flex flex-1 items-center justify-center text-[9px] font-semibold text-white">
-          Equity
+        <div className="flex flex-1 items-center justify-center px-3 text-center text-[9px] font-semibold text-white">
+          {equityLabel}
         </div>
       </div>
     </div>
@@ -2056,42 +2112,52 @@ function ProjectImage({ project, className = "" }: { project: string; className?
   );
 }
 
-function CostStructure({ asset }: { asset: Asset }) {
-  const purchasePrice = asset.purchasePrice;
-  const developmentCosts = Math.max(0, asset.investedValue - asset.purchasePrice);
-  const stillToInvest = asset.stillToInvest || 0;
-  const totalCosts = purchasePrice + developmentCosts + stillToInvest;
+function ValueCreation({ asset }: { asset: Asset }) {
+  const purchase = Math.max(0, asset.purchasePrice || 0);
+  const totalProjectCost = Math.max(
+    0,
+    (asset.investedValue || 0) + (asset.stillToInvest || 0),
+  );
+  const renovation = Math.max(0, totalProjectCost - purchase);
+  const profit = Math.max(0, getProfit(asset));
+  const totalValueCreation = purchase + renovation + profit;
 
-  const purchaseShare = totalCosts ? (purchasePrice / totalCosts) * 100 : 0;
-  const developmentShare = totalCosts ? (developmentCosts / totalCosts) * 100 : 0;
-  const remainingShare = totalCosts ? (stillToInvest / totalCosts) * 100 : 0;
+  const purchaseShare = totalValueCreation
+    ? (purchase / totalValueCreation) * 100
+    : 0;
+  const renovationShare = totalValueCreation
+    ? (renovation / totalValueCreation) * 100
+    : 0;
+  const profitShare = totalValueCreation
+    ? (profit / totalValueCreation) * 100
+    : 0;
 
   return (
-    <section className="rounded-[24px] border border-[#d8d0c1] bg-white/85 p-5">
-      <SectionLabel>Cost structure</SectionLabel>
+    <section className="rounded-[20px] border border-[#d8d0c1] bg-white/85 p-4">
+      <SectionLabel>Value creation</SectionLabel>
 
-      <div className="mt-4 flex h-11 overflow-hidden rounded-full bg-[#e8e4dc]">
+      <div className="mt-3 flex h-9 overflow-hidden rounded-full bg-[#e8e4dc]">
         <div
           className="bg-[#243d33]"
           style={{ width: `${purchaseShare}%` }}
-          title={`Purchase price: ${formatCurrencyWithCents(purchasePrice)}`}
+          title={`Purchase: ${formatCurrency(purchase)}`}
         />
         <div
-          className="bg-[#b2854b]"
-          style={{ width: `${developmentShare}%` }}
-          title={`Development costs: ${formatCurrencyWithCents(developmentCosts)}`}
+          className="bg-[#96784d]"
+          style={{ width: `${renovationShare}%` }}
+          title={`Renovation: ${formatCurrency(renovation)}`}
         />
         <div
-          className="bg-[#829b91]"
-          style={{ width: `${remainingShare}%` }}
-          title={`Still to invest: ${formatCurrencyWithCents(stillToInvest)}`}
+          className="bg-[#86aaa5]"
+          style={{ width: `${profitShare}%` }}
+          title={`Profit: ${formatCurrency(profit)}`}
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-4">
-        <ValueLegend color="#243d33" label="Purchase price" value={purchasePrice} />
-        <ValueLegend color="#b2854b" label="Development costs" value={developmentCosts} />
-        <ValueLegend color="#829b91" label="Still to invest" value={stillToInvest} />
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        <ValueLegend color="#243d33" label="Purchase" value={purchase} />
+        <ValueLegend color="#96784d" label="Renovation" value={renovation} />
+        <ValueLegend color="#86aaa5" label="Profit" value={profit} />
       </div>
     </section>
   );
@@ -2100,18 +2166,18 @@ function CostStructure({ asset }: { asset: Asset }) {
 function ValueLegend({ color, label, value }: { color: string; label: string; value: number }) {
   return (
     <div>
-      <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-        <p className="text-[8px] uppercase tracking-[0.16em] text-[#777f7b]">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+        <p className="text-[7px] uppercase tracking-[0.14em] text-[#777f7b]">{label}</p>
       </div>
-      <p className="mt-2 text-sm font-semibold">{formatCurrencyWithCents(value)}</p>
+      <p className="mt-1.5 text-[13px] font-semibold">{formatCurrencyWithCents(value)}</p>
     </div>
   );
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-[#e2ddd3] pb-2">
+    <div className="flex items-baseline justify-between gap-4 border-b border-[#e2ddd3] pb-1.5">
       <span className="text-[10px] text-[#727b76]">{label}</span>
       <span className="text-right text-[11px] font-semibold text-[#243d33]">{value}</span>
     </div>
