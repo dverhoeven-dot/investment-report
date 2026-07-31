@@ -63,6 +63,41 @@ type PortfolioData = {
 
 type NormalizedRow = Record<string, string>;
 
+type PortfolioId =
+  | "joint-private-real-estate"
+  | "leeuw-vastgoed"
+  | "l3-capital"
+  | "llpi-leovari"
+  | "d-leeuw-private-real-estate"
+  | "d-leeuw-private-real-estate-spain";
+
+const PORTFOLIO_OPTIONS: Array<{ id: PortfolioId; label: string }> = [
+  {
+    id: "joint-private-real-estate",
+    label: "D. Leeuw e/o F. Berden Private Real Estate",
+  },
+  {
+    id: "leeuw-vastgoed",
+    label: "Leeuw Vastgoed B.V. (100%)",
+  },
+  {
+    id: "l3-capital",
+    label: "L3 Capital B.V. (100%)",
+  },
+  {
+    id: "llpi-leovari",
+    label: "LLPI S.L. / Leovari developments",
+  },
+  {
+    id: "d-leeuw-private-real-estate",
+    label: "D. Leeuw Private Real Estate",
+  },
+  {
+    id: "d-leeuw-private-real-estate-spain",
+    label: "D. Leeuw Private Real Estate Spain",
+  },
+];
+
 const currencyFormatter = new Intl.NumberFormat("nl-NL", {
   style: "currency",
   currency: "EUR",
@@ -157,6 +192,49 @@ function normalizeText(value: string): string {
 
 function normalizeHeader(value: string): string {
   return normalizeText(value).replace(/\s+/g, "");
+}
+
+function getPortfolioId(value: string): PortfolioId | null {
+  const text = normalizeText(value);
+
+  if (text.includes("f berden") || text.includes("private real estate 50")) {
+    return "joint-private-real-estate";
+  }
+
+  if (text.includes("leeuw vastgoed")) return "leeuw-vastgoed";
+  if (text.includes("l3 capital")) return "l3-capital";
+
+  if (text.includes("llpi") || text.includes("leovari")) {
+    return "llpi-leovari";
+  }
+
+  if (
+    text.includes("d leeuw private real estate spain") ||
+    text.includes("d leeuw private real estate spanje")
+  ) {
+    return "d-leeuw-private-real-estate-spain";
+  }
+
+  if (text.includes("d leeuw private real estate")) {
+    return "d-leeuw-private-real-estate";
+  }
+
+  return null;
+}
+
+function matchesPortfolioSelection(
+  value: string,
+  selectedPortfolioIds: Set<PortfolioId>,
+): boolean {
+  const portfolioId = getPortfolioId(value);
+
+  // Onbekende entiteitsnamen blijven zichtbaar wanneer alle zes portfolio's
+  // geselecteerd zijn. Bij een actieve selectie worden ze niet meegenomen.
+  if (!portfolioId) {
+    return selectedPortfolioIds.size === PORTFOLIO_OPTIONS.length;
+  }
+
+  return selectedPortfolioIds.has(portfolioId);
 }
 
 function formatCurrency(value: number): string {
@@ -1092,6 +1170,23 @@ export default function CompletePortfolioPage() {
   const [error, setError] = useState("");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [portfolioSelectorOpen, setPortfolioSelectorOpen] = useState(false);
+  const [selectedPortfolioIds, setSelectedPortfolioIds] = useState<PortfolioId[]>(
+    () => PORTFOLIO_OPTIONS.map((option) => option.id),
+  );
+
+  const selectedPortfolioSet = useMemo(
+    () => new Set<PortfolioId>(selectedPortfolioIds),
+    [selectedPortfolioIds],
+  );
+
+  const togglePortfolio = (portfolioId: PortfolioId) => {
+    setSelectedPortfolioIds((current) =>
+      current.includes(portfolioId)
+        ? current.filter((id) => id !== portfolioId)
+        : [...current, portfolioId],
+    );
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1154,12 +1249,23 @@ export default function CompletePortfolioPage() {
     // Alleen regels die expliciet als Current/Portefeuille zijn gemarkeerd
     // mogen in de actuele portefeuille terechtkomen. "Niet verkocht" is
     // onvoldoende, omdat Pipeline of een onbekende status dan ook meekomen.
-    const currentAssets = data.assets.filter(isCurrentAsset);
+    const currentAssets = data.assets.filter(
+      (asset) =>
+        isCurrentAsset(asset) &&
+        matchesPortfolioSelection(asset.entity, selectedPortfolioSet),
+    );
+
+    // Het volledige trackrecord blijft altijd zichtbaar, onafhankelijk van
+    // de gekozen huidige portfolio's.
     const soldAssets = sortSoldAssetsByInformation(
       data.assets.filter(isSoldAsset),
     );
-    const sharedAssets = data.assets.filter(isJointPortfolioAsset);
+
+    const sharedAssets = currentAssets.filter(isJointPortfolioAsset);
     const whollyOwnedAssets = currentAssets.filter((asset) => asset.ownership === 1);
+    const selectedFinancingRows = data.financingRows.filter((row) =>
+      matchesPortfolioSelection(`${row.entity} ${row.name}`, selectedPortfolioSet),
+    );
 
     const portfolioEndValue = currentAssets.reduce(
       (sum, asset) => sum + getEndValue(asset) * asset.ownership,
@@ -1176,7 +1282,7 @@ export default function CompletePortfolioPage() {
       0,
     );
 
-    const separateMortgages = data.financingRows.reduce(
+    const separateMortgages = selectedFinancingRows.reduce(
       (sum, row) => sum + row.mortgage * row.ownership,
       0,
     );
@@ -1196,8 +1302,15 @@ export default function CompletePortfolioPage() {
     const netherlandsShare = geographicTotal ? netherlandsValue / geographicTotal : 0;
     const spainShare = geographicTotal ? spainValue / geographicTotal : 0;
 
-    const totalBuiltArea = data.assets.reduce((sum, asset) => sum + asset.builtArea, 0);
-    const totalPlotSize = data.assets.reduce((sum, asset) => sum + asset.plotSize, 0);
+    const visibleAreaAssets = [...currentAssets, ...soldAssets];
+    const totalBuiltArea = visibleAreaAssets.reduce(
+      (sum, asset) => sum + asset.builtArea,
+      0,
+    );
+    const totalPlotSize = visibleAreaAssets.reduce(
+      (sum, asset) => sum + asset.plotSize,
+      0,
+    );
     const soldRevenue = soldAssets.reduce(
       (sum, asset) => sum + getEndValue(asset) * asset.ownership,
       0,
@@ -1224,7 +1337,7 @@ export default function CompletePortfolioPage() {
     // De totale hypotheek staat als losse financieringsregel in de CSV:
     // “D. Leeuw e/o F. Berden mortgage / financing”.
     // Voor de adjusted metrics en LTV telt deze voor 50% mee.
-    const sharedTotalMortgageFromFinancingRow = data.financingRows
+    const sharedTotalMortgageFromFinancingRow = selectedFinancingRows
       .filter((row) => {
         const rowText = normalizeText(`${row.name} ${row.entity}`);
         return (
@@ -1235,7 +1348,7 @@ export default function CompletePortfolioPage() {
       .reduce((sum, row) => sum + row.mortgage, 0);
 
     // Fallback voor het geval de naam van de financieringsregel later wijzigt.
-    const sharedMortgageFromRowsFallback = data.financingRows
+    const sharedMortgageFromRowsFallback = selectedFinancingRows
       .filter((row) => row.ownership === 0.5)
       .reduce((sum, row) => sum + row.mortgage * 0.5, 0);
 
@@ -1271,7 +1384,7 @@ export default function CompletePortfolioPage() {
       sharedMortgage,
       sharedTotalMortgage,
     };
-  }, [data]);
+  }, [data, selectedPortfolioSet]);
 
   const financialOverview = data.financialOverview;
   const showFinancialOverview = hasFinancialRows(financialOverview);
@@ -1374,7 +1487,91 @@ export default function CompletePortfolioPage() {
         }
       `}</style>
 
-      <div className="no-print sticky top-4 z-50 mx-auto mb-6 flex w-fit items-center gap-3 rounded-full bg-[#20382f] px-5 py-3 text-white shadow-xl">
+      <div className="no-print sticky top-4 z-50 mx-auto mb-6 flex w-fit items-center gap-3 rounded-[24px] bg-[#20382f] px-4 py-3 text-white shadow-xl">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setPortfolioSelectorOpen((open) => !open)}
+            aria-expanded={portfolioSelectorOpen}
+            className="flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-xs font-semibold hover:bg-white/25"
+          >
+            <span>Portefeuilles</span>
+            <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px]">
+              {selectedPortfolioIds.length}/{PORTFOLIO_OPTIONS.length}
+            </span>
+            <span aria-hidden="true" className="text-[10px]">
+              {portfolioSelectorOpen ? "▲" : "▼"}
+            </span>
+          </button>
+
+          {portfolioSelectorOpen && (
+            <div className="absolute left-0 top-full mt-2 w-[390px] rounded-[20px] border border-[#d8d0c1] bg-[#f7f4ec] p-4 text-[#20382f] shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-[#d8d0c1] pb-3">
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.24em] text-[#9a6f37]">
+                    Selecteer portefeuilles
+                  </p>
+                  <p className="mt-1 text-[10px] text-[#68736d]">
+                    Alleen de geselecteerde huidige panden worden opgenomen.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPortfolioSelectorOpen(false)}
+                  className="rounded-full border border-[#d8d0c1] px-2.5 py-1 text-[10px] font-semibold"
+                >
+                  Sluiten
+                </button>
+              </div>
+
+              <div className="mt-3 space-y-1.5">
+                {PORTFOLIO_OPTIONS.map((option) => (
+                  <label
+                    key={option.id}
+                    className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-2 hover:bg-[#ece6da]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedPortfolioSet.has(option.id)}
+                      onChange={() => togglePortfolio(option.id)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[#ae8148]"
+                    />
+                    <span className="text-[11px] font-medium leading-4">
+                      {option.label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-3 flex items-center justify-between border-t border-[#d8d0c1] pt-3">
+                <p className="text-[9px] text-[#68736d]">
+                  Het volledige trackrecord blijft zichtbaar.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedPortfolioIds(
+                        PORTFOLIO_OPTIONS.map((option) => option.id),
+                      )
+                    }
+                    className="rounded-full bg-[#20382f] px-3 py-1.5 text-[9px] font-semibold text-white"
+                  >
+                    Alles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPortfolioIds([])}
+                    className="rounded-full border border-[#cfc5b4] px-3 py-1.5 text-[9px] font-semibold"
+                  >
+                    Geen
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         <span className="text-xs">
           {error
             ? error
