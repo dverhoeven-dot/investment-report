@@ -10,6 +10,13 @@ export type LosNaranjosConfig = {
 
 type ProjectOwnership = "own" | "shared";
 type ProjectType = "New Build" | "Renovation";
+type BankFinancingChoice = "no" | "yes";
+type BankRepaymentFrequency = "monthly" | "yearly";
+type BankScheduleMode = "standard" | "custom";
+type BankScheduledPayment = {
+  month: string;
+  amount: string;
+};
 type Downpayment = {
   month: string;
   amount: string;
@@ -20,7 +27,7 @@ type CoInvestor = {
   monthlyTotalAmount: string;
 };
 
-type CashflowCategory = "acquisition" | "project" | "sale";
+type CashflowCategory = "acquisition" | "project" | "financing" | "sale";
 
 type RawCashflowItem = {
   paymentId?: string;
@@ -29,6 +36,8 @@ type RawCashflowItem = {
   outflow: number;
   inflow: number;
   category: CashflowCategory;
+  sortOrder?: number;
+  bankEventType?: "draw" | "interest" | "principal";
 };
 
 export type LosNaranjosInitialData = {
@@ -100,6 +109,20 @@ type FormState = {
   looseFurniturePaymentMonths: string;
   projectManagementPercentage: string;
 
+  bankFinancingEnabled: BankFinancingChoice;
+  bankDrawScheduleMode: BankScheduleMode;
+  bankFinancingStartMonth: string;
+  bankFinancingDrawMonths: string[];
+  bankFinancingDrawAmounts: string[];
+  bankFinancingAmount: string;
+  bankFinancingTranches: string;
+  bankInterestPercentage: string;
+  bankRepaymentScheduleMode: BankScheduleMode;
+  bankRepaymentAmount: string;
+  bankRepaymentFrequency: BankRepaymentFrequency;
+  bankRepaymentCount: string;
+  bankRepaymentSchedule: BankScheduledPayment[];
+
   salePrice: string;
   agentCommissionPercentage: string;
 
@@ -115,6 +138,7 @@ type CashflowItem = RawCashflowItem & {
   runningCapital: number;
   ourInvestment: number;
   coInvestorInvestments: number[];
+  bankFundingUsed: number;
 };
 
 type ParticipantSummary = {
@@ -266,6 +290,20 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     looseFurniturePaymentMonths: "1",
     projectManagementPercentage: "0",
 
+    bankFinancingEnabled: "no",
+    bankDrawScheduleMode: "standard",
+    bankFinancingStartMonth: "",
+    bankFinancingDrawMonths: [""],
+    bankFinancingDrawAmounts: [""],
+    bankFinancingAmount: "",
+    bankFinancingTranches: "1",
+    bankInterestPercentage: "",
+    bankRepaymentScheduleMode: "standard",
+    bankRepaymentAmount: "",
+    bankRepaymentFrequency: "monthly",
+    bankRepaymentCount: "1",
+    bankRepaymentSchedule: [{ month: "", amount: "" }],
+
     salePrice: "0",
     agentCommissionPercentage: "0",
 
@@ -409,6 +447,63 @@ function normalizeStoredForm(
     coInvestors.push(createInvestor(coInvestors.length));
   }
 
+  const requestedBankTrancheCount = clampInteger(
+    parseNumber(String(stored.bankFinancingTranches ?? base.bankFinancingTranches)),
+    1,
+    24
+  );
+  const storedBankDrawMonths = Array.isArray(stored.bankFinancingDrawMonths)
+    ? stored.bankFinancingDrawMonths.map((month) => String(month ?? ""))
+    : [];
+  const legacyBankStartMonth = Math.max(
+    0,
+    Math.round(parseNumber(String(stored.bankFinancingStartMonth ?? "")))
+  );
+  const bankFinancingDrawMonths = Array.from(
+    { length: requestedBankTrancheCount },
+    (_, index) =>
+      storedBankDrawMonths[index] ??
+      (String(stored.bankFinancingStartMonth ?? "").trim()
+        ? String(legacyBankStartMonth + index)
+        : "")
+  );
+  const storedBankDrawAmounts = Array.isArray(stored.bankFinancingDrawAmounts)
+    ? stored.bankFinancingDrawAmounts.map((amount) => emptyIfZeroString(amount))
+    : [];
+  const bankFinancingDrawAmounts = Array.from(
+    { length: requestedBankTrancheCount },
+    (_, index) => storedBankDrawAmounts[index] ?? ""
+  );
+
+  const sourceBankRepaymentSchedule = Array.isArray(stored.bankRepaymentSchedule)
+    ? stored.bankRepaymentSchedule
+        .filter(
+          (payment): payment is BankScheduledPayment =>
+            Boolean(payment && typeof payment === "object")
+        )
+        .map((payment) => ({
+          month: emptyIfZeroString(payment.month),
+          amount: emptyIfZeroString(payment.amount),
+        }))
+    : [];
+  const requestedBankRepaymentCount = clampInteger(
+    parseNumber(
+      String(
+        stored.bankRepaymentCount ??
+          (sourceBankRepaymentSchedule.length || base.bankRepaymentCount)
+      )
+    ),
+    1,
+    36
+  );
+  const bankRepaymentSchedule = sourceBankRepaymentSchedule.slice(
+    0,
+    requestedBankRepaymentCount
+  );
+  while (bankRepaymentSchedule.length < requestedBankRepaymentCount) {
+    bankRepaymentSchedule.push({ month: "", amount: "" });
+  }
+
   return {
     ...base,
     ...stored,
@@ -429,6 +524,31 @@ function normalizeStoredForm(
     looseFurniturePaymentMonths: String(
       stored.looseFurniturePaymentMonths ?? base.looseFurniturePaymentMonths
     ),
+    bankFinancingEnabled:
+      stored.bankFinancingEnabled === "yes" ? "yes" : "no",
+    bankDrawScheduleMode:
+      stored.bankDrawScheduleMode === "custom" ? "custom" : "standard",
+    bankFinancingStartMonth: emptyIfZeroString(
+      stored.bankFinancingStartMonth ?? base.bankFinancingStartMonth
+    ),
+    bankFinancingDrawMonths,
+    bankFinancingDrawAmounts,
+    bankFinancingAmount: emptyIfZeroString(
+      stored.bankFinancingAmount ?? base.bankFinancingAmount
+    ),
+    bankFinancingTranches: String(requestedBankTrancheCount),
+    bankInterestPercentage: emptyIfZeroString(
+      stored.bankInterestPercentage ?? base.bankInterestPercentage
+    ),
+    bankRepaymentScheduleMode:
+      stored.bankRepaymentScheduleMode === "custom" ? "custom" : "standard",
+    bankRepaymentAmount: emptyIfZeroString(
+      stored.bankRepaymentAmount ?? base.bankRepaymentAmount
+    ),
+    bankRepaymentFrequency:
+      stored.bankRepaymentFrequency === "yearly" ? "yearly" : "monthly",
+    bankRepaymentCount: String(requestedBankRepaymentCount),
+    bankRepaymentSchedule,
     coInvestorCount: String(requestedInvestorCount),
     coInvestors,
     downpaymentCount: String(requestedDownpaymentCount),
@@ -461,6 +581,199 @@ function formatShortDate(date: string) {
     month: "2-digit",
     year: "numeric",
   }).format(parsed);
+}
+
+type BankFinancingSchedule = {
+  rows: RawCashflowItem[];
+  drawnAmount: number;
+  principalRepaid: number;
+  interestPaid: number;
+};
+
+type NumericBankPayment = {
+  month: number;
+  amount: number;
+  index: number;
+};
+
+function buildBankFinancingSchedule({
+  enabled,
+  draws,
+  annualInterestRate,
+  repaymentMode,
+  repaymentAmount,
+  repaymentFrequency,
+  customRepayments,
+  exitMonth,
+}: {
+  enabled: boolean;
+  draws: NumericBankPayment[];
+  annualInterestRate: number;
+  repaymentMode: BankScheduleMode;
+  repaymentAmount: number;
+  repaymentFrequency: BankRepaymentFrequency;
+  customRepayments: NumericBankPayment[];
+  exitMonth: number;
+}): BankFinancingSchedule {
+  const validDraws = draws
+    .filter((draw) => Number.isFinite(draw.amount) && draw.amount > 0)
+    .map((draw) => ({
+      ...draw,
+      month: clampInteger(draw.month, 0, exitMonth),
+      amount: Math.max(0, draw.amount),
+    }))
+    .sort((a, b) => a.month - b.month || a.index - b.index);
+
+  if (!enabled || validDraws.length === 0) {
+    return { rows: [], drawnAmount: 0, principalRepaid: 0, interestPaid: 0 };
+  }
+
+  const validCustomRepayments = customRepayments
+    .filter((payment) => Number.isFinite(payment.amount) && payment.amount > 0)
+    .map((payment) => ({
+      ...payment,
+      month: clampInteger(payment.month, 0, exitMonth),
+      amount: Math.max(0, payment.amount),
+    }))
+    .sort((a, b) => a.month - b.month || a.index - b.index);
+
+  const rows: RawCashflowItem[] = [];
+  const drawsByMonth = new Map<number, NumericBankPayment[]>();
+  validDraws.forEach((draw) => {
+    const existing = drawsByMonth.get(draw.month) ?? [];
+    existing.push(draw);
+    drawsByMonth.set(draw.month, existing);
+  });
+
+  const repaymentsByMonth = new Map<number, NumericBankPayment[]>();
+  validCustomRepayments.forEach((payment) => {
+    const existing = repaymentsByMonth.get(payment.month) ?? [];
+    existing.push(payment);
+    repaymentsByMonth.set(payment.month, existing);
+  });
+
+  const firstDrawMonth = Math.min(...validDraws.map((draw) => draw.month));
+  const lastDrawMonth = Math.max(...validDraws.map((draw) => draw.month));
+  const repaymentInterval = repaymentFrequency === "yearly" ? 12 : 1;
+  const monthlyInterestRate = Math.max(0, annualInterestRate) / 12;
+  let outstandingPrincipal = 0;
+  let accruedInterest = 0;
+  let interestPaid = 0;
+  let principalRepaid = 0;
+
+  for (let month = 0; month <= exitMonth; month += 1) {
+    const monthDraws = drawsByMonth.get(month) ?? [];
+    monthDraws.forEach((draw) => {
+      outstandingPrincipal += draw.amount;
+      rows.push({
+        paymentId: `bank-draw-${draw.index + 1}`,
+        month,
+        event: `Bank financing payment ${draw.index + 1}/${validDraws.length}`,
+        outflow: 0,
+        inflow: draw.amount,
+        category: "financing",
+        sortOrder: 5,
+        bankEventType: "draw",
+      });
+    });
+
+    const isExitMonth = month === exitMonth;
+    const isAnnualInterestDate =
+      month > firstDrawMonth &&
+      (month - firstDrawMonth) % 12 === 0;
+
+    if ((isAnnualInterestDate || isExitMonth) && accruedInterest > 0.005) {
+      rows.push({
+        paymentId: `bank-interest-${month}`,
+        month,
+        event:
+          isExitMonth && !isAnnualInterestDate
+            ? "Bank interest (final accrued interest)"
+            : "Bank interest (annual)",
+        outflow: accruedInterest,
+        inflow: 0,
+        category: "financing",
+        sortOrder: isExitMonth ? 51 : 31,
+        bankEventType: "interest",
+      });
+      interestPaid += accruedInterest;
+      accruedInterest = 0;
+    }
+
+    if (repaymentMode === "custom") {
+      const monthRepayments = repaymentsByMonth.get(month) ?? [];
+      monthRepayments.forEach((payment) => {
+        const principalPayment = Math.min(payment.amount, outstandingPrincipal);
+        if (principalPayment <= 0.005) return;
+
+        rows.push({
+          paymentId: `bank-principal-custom-${payment.index + 1}`,
+          month,
+          event: `Bank principal repayment ${payment.index + 1}/${validCustomRepayments.length}`,
+          outflow: principalPayment,
+          inflow: 0,
+          category: "financing",
+          sortOrder: 32,
+          bankEventType: "principal",
+        });
+        outstandingPrincipal -= principalPayment;
+        principalRepaid += principalPayment;
+      });
+    } else {
+      const scheduledRepayment =
+        month > lastDrawMonth &&
+        (month - lastDrawMonth) % repaymentInterval === 0;
+
+      if (scheduledRepayment && outstandingPrincipal > 0) {
+        const principalPayment = Math.min(
+          Math.max(0, repaymentAmount),
+          outstandingPrincipal
+        );
+
+        if (principalPayment > 0.005) {
+          rows.push({
+            paymentId: `bank-principal-${month}`,
+            month,
+            event: "Bank principal repayment",
+            outflow: principalPayment,
+            inflow: 0,
+            category: "financing",
+            sortOrder: 32,
+            bankEventType: "principal",
+          });
+          outstandingPrincipal -= principalPayment;
+          principalRepaid += principalPayment;
+        }
+      }
+    }
+
+    if (isExitMonth && outstandingPrincipal > 0.005) {
+      rows.push({
+        paymentId: `bank-principal-final-${month}`,
+        month,
+        event: "Bank principal repayment (final)",
+        outflow: outstandingPrincipal,
+        inflow: 0,
+        category: "financing",
+        sortOrder: 52,
+        bankEventType: "principal",
+      });
+      principalRepaid += outstandingPrincipal;
+      outstandingPrincipal = 0;
+    }
+
+    // Rente over de periode van deze maand tot de volgende maand.
+    if (!isExitMonth && outstandingPrincipal > 0) {
+      accruedInterest += outstandingPrincipal * monthlyInterestRate;
+    }
+  }
+
+  return {
+    rows,
+    drawnAmount: validDraws.reduce((sum, draw) => sum + draw.amount, 0),
+    principalRepaid,
+    interestPaid,
+  };
 }
 
 function calculateAnnualizedIrr(
@@ -626,6 +939,73 @@ export default function LosNaranjosClient({
     }));
   }
 
+  function updateBankFinancingTranches(value: string) {
+    const count = clampInteger(parseNumber(value), 1, 24);
+    setForm((current) => {
+      const bankFinancingDrawMonths = current.bankFinancingDrawMonths.slice(0, count);
+      const bankFinancingDrawAmounts = current.bankFinancingDrawAmounts.slice(0, count);
+      while (bankFinancingDrawMonths.length < count) {
+        bankFinancingDrawMonths.push("");
+      }
+      while (bankFinancingDrawAmounts.length < count) {
+        bankFinancingDrawAmounts.push("");
+      }
+      return {
+        ...current,
+        bankFinancingTranches: String(count),
+        bankFinancingDrawMonths,
+        bankFinancingDrawAmounts,
+      };
+    });
+  }
+
+  function updateBankFinancingDrawMonth(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      bankFinancingDrawMonths: current.bankFinancingDrawMonths.map(
+        (month, monthIndex) => (monthIndex === index ? value : month)
+      ),
+    }));
+  }
+
+  function updateBankFinancingDrawAmount(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      bankFinancingDrawAmounts: current.bankFinancingDrawAmounts.map(
+        (amount, amountIndex) => (amountIndex === index ? value : amount)
+      ),
+    }));
+  }
+
+  function updateBankRepaymentCount(value: string) {
+    const count = clampInteger(parseNumber(value), 1, 36);
+    setForm((current) => {
+      const bankRepaymentSchedule = current.bankRepaymentSchedule.slice(0, count);
+      while (bankRepaymentSchedule.length < count) {
+        bankRepaymentSchedule.push({ month: "", amount: "" });
+      }
+      return {
+        ...current,
+        bankRepaymentCount: String(count),
+        bankRepaymentSchedule,
+      };
+    });
+  }
+
+  function updateBankRepaymentSchedule(
+    index: number,
+    field: keyof BankScheduledPayment,
+    value: string
+  ) {
+    setForm((current) => ({
+      ...current,
+      bankRepaymentSchedule: current.bankRepaymentSchedule.map(
+        (payment, paymentIndex) =>
+          paymentIndex === index ? { ...payment, [field]: value } : payment
+      ),
+    }));
+  }
+
   function updateDownpaymentCount(value: string) {
     const count = clampInteger(parseNumber(value), 0, 10);
 
@@ -702,6 +1082,96 @@ export default function LosNaranjosClient({
     const surfaceM2 = Math.max(0, parseNumber(form.surfaceM2));
     const plotM2 = Math.max(0, parseNumber(form.plotM2));
     const durationMonths = Math.max(1, Math.round(parseNumber(form.durationMonths)));
+    const bankFinancingEnabled = form.bankFinancingEnabled === "yes";
+    const bankDrawScheduleMode = form.bankDrawScheduleMode;
+    const bankFinancingStartMonth = Math.max(
+      0,
+      Math.round(parseNumber(form.bankFinancingStartMonth))
+    );
+    const bankFinancingTranches = bankFinancingEnabled
+      ? clampInteger(parseNumber(form.bankFinancingTranches), 1, 24)
+      : 0;
+    const bankFinancingDrawMonthsComplete =
+      bankFinancingEnabled &&
+      form.bankFinancingDrawMonths
+        .slice(0, bankFinancingTranches)
+        .every((month) => month.trim() !== "");
+    const customBankDrawAmountsComplete =
+      bankDrawScheduleMode === "custom" &&
+      form.bankFinancingDrawAmounts
+        .slice(0, bankFinancingTranches)
+        .every((amount) => amount.trim() !== "");
+    const standardBankFinancingAmount = bankFinancingEnabled
+      ? Math.max(0, parseNumber(form.bankFinancingAmount))
+      : 0;
+    const bankFinancingDrawMonths = bankFinancingDrawMonthsComplete
+      ? form.bankFinancingDrawMonths
+          .slice(0, bankFinancingTranches)
+          .map((month) => Math.max(0, Math.round(parseNumber(month))))
+      : [];
+    const bankDrawSchedule: NumericBankPayment[] =
+      bankFinancingDrawMonthsComplete &&
+      (bankDrawScheduleMode === "standard" || customBankDrawAmountsComplete)
+        ? bankFinancingDrawMonths.map((month, index) => {
+            if (bankDrawScheduleMode === "custom") {
+              return {
+                month,
+                amount: Math.max(
+                  0,
+                  parseNumber(form.bankFinancingDrawAmounts[index] ?? "")
+                ),
+                index,
+              };
+            }
+
+            const alreadyAllocated =
+              (standardBankFinancingAmount / bankFinancingTranches) * index;
+            return {
+              month,
+              amount:
+                index === bankFinancingTranches - 1
+                  ? Math.max(0, standardBankFinancingAmount - alreadyAllocated)
+                  : Math.max(
+                      0,
+                      standardBankFinancingAmount / bankFinancingTranches
+                    ),
+              index,
+            };
+          })
+        : [];
+    const bankFinancingAmount = bankDrawSchedule.reduce(
+      (sum, draw) => sum + draw.amount,
+      0
+    );
+    const bankInterestPercentage = bankFinancingEnabled
+      ? Math.max(0, parsePercent(form.bankInterestPercentage))
+      : 0;
+    const bankRepaymentScheduleMode = form.bankRepaymentScheduleMode;
+    const bankRepaymentAmount = bankFinancingEnabled
+      ? Math.max(0, parseNumber(form.bankRepaymentAmount))
+      : 0;
+    const bankRepaymentFrequency = form.bankRepaymentFrequency;
+    const bankRepaymentCount = bankFinancingEnabled
+      ? clampInteger(parseNumber(form.bankRepaymentCount), 1, 36)
+      : 0;
+    const bankRepaymentScheduleComplete =
+      bankRepaymentScheduleMode === "custom" &&
+      form.bankRepaymentSchedule
+        .slice(0, bankRepaymentCount)
+        .every(
+          (payment) =>
+            payment.month.trim() !== "" && payment.amount.trim() !== ""
+        );
+    const bankCustomRepayments: NumericBankPayment[] =
+      bankRepaymentScheduleComplete
+        ? form.bankRepaymentSchedule
+            .slice(0, bankRepaymentCount)
+            .map((payment, index) => ({
+              month: Math.max(0, Math.round(parseNumber(payment.month))),
+              amount: Math.max(0, parseNumber(payment.amount)),
+              index,
+            }))
+        : [];
 
     const coInvestorCount = isSharedProject
       ? clampInteger(parseNumber(form.coInvestorCount), 1, MAX_CO_INVESTORS)
@@ -758,12 +1228,14 @@ export default function LosNaranjosClient({
 
     const baseBuildCost = surfaceM2 * buildCostPerM2;
     const contingency = baseBuildCost * contingencyPercentage;
-    const furnitureBase = fixedInterior + looseFurniture;
-    const furnitureMarkup = furnitureBase * furnitureMarkupPercentage;
-    const fixedFurnitureCost = fixedInterior * (1 + furnitureMarkupPercentage);
-    const looseFurnitureCost = looseFurniture * (1 + furnitureMarkupPercentage);
+    // De meubelopslag geldt uitsluitend voor Furniture en is geen bouwbetaling.
+    // De opslag wordt daarom niet in de projectkosten of construction draws opgenomen,
+    // maar als aanvullende opbrengst bij de verkoop verwerkt.
+    const furnitureMarkup = looseFurniture * furnitureMarkupPercentage;
+    const fixedFurnitureCost = fixedInterior;
+    const looseFurnitureCost = looseFurniture;
     const projectSubtotal =
-      baseBuildCost + contingency + fixedInterior + looseFurniture + furnitureMarkup;
+      baseBuildCost + contingency + fixedInterior + looseFurniture;
     const projectManagement = isSharedProject
       ? projectSubtotal * projectManagementPercentage
       : 0;
@@ -776,10 +1248,9 @@ export default function LosNaranjosClient({
       parsePercent(form.agentCommissionPercentage)
     );
     const agentCommission = salePrice * agentCommissionPercentage;
-    const netProceeds = salePrice - agentCommission;
+    const netProceeds = salePrice - agentCommission + furnitureMarkup;
     const netSaleProceedsBeforeFurniture = netProceeds;
-    const netProfit = netProceeds - capitalDeployed;
-    const roi = capitalDeployed ? netProfit / capitalDeployed : 0;
+    const operatingNetProfit = netProceeds - capitalDeployed;
 
     const downpaymentCount = clampInteger(
       parseNumber(form.downpaymentCount),
@@ -921,13 +1392,35 @@ export default function LosNaranjosClient({
     rawCashflow.push({
       paymentId: "sale-proceeds",
       month: durationMonths,
-      event: "Sales proceeds (after commission)",
+      event: "Sales proceeds (after commission + furniture mark-up)",
       outflow: 0,
       inflow: netProceeds,
       category: "sale",
+      // De verkoopregel wordt altijd als laatste regel van de exitmaand getoond.
+      sortOrder: 99,
     });
 
-    rawCashflow.sort((a, b) => a.month - b.month || a.event.localeCompare(b.event));
+    const bankSchedule = buildBankFinancingSchedule({
+      enabled:
+        bankFinancingEnabled &&
+        bankFinancingDrawMonthsComplete &&
+        (bankDrawScheduleMode === "standard" || customBankDrawAmountsComplete),
+      draws: bankDrawSchedule,
+      annualInterestRate: bankInterestPercentage,
+      repaymentMode: bankRepaymentScheduleMode,
+      repaymentAmount: bankRepaymentAmount,
+      repaymentFrequency: bankRepaymentFrequency,
+      customRepayments: bankCustomRepayments,
+      exitMonth: durationMonths,
+    });
+    rawCashflow.push(...bankSchedule.rows);
+
+    rawCashflow.sort(
+      (a, b) =>
+        a.month - b.month ||
+        (a.sortOrder ?? 20) - (b.sortOrder ?? 20) ||
+        a.event.localeCompare(b.event)
+    );
 
     const requestedMonthlyCapital = coInvestors.reduce(
       (sum, investor) => sum + investor.plannedCapital,
@@ -945,26 +1438,60 @@ export default function LosNaranjosClient({
 
     const investorUsedCapital = coInvestors.map(() => 0);
     let runningCapital = 0;
+    let bankCashAvailable = 0;
 
     const cashflow: CashflowItem[] = rawCashflow.map((item) => {
       const coInvestorInvestments = coInvestors.map(() => 0);
       let ourInvestment = 0;
+      let bankFundingUsed = 0;
 
-      if (item.outflow > 0 && isSharedProject) {
-        let remainingOutflow = item.outflow;
+      if (item.bankEventType === "draw" && item.inflow > 0) {
+        bankCashAvailable += item.inflow;
+      }
 
-        coInvestors.forEach((_, investorIndex) => {
-          const allocation = Math.min(
-            remainingOutflow,
-            item.outflow * monthlyCapitalShares[investorIndex]
-          );
-          coInvestorInvestments[investorIndex] = allocation;
-          investorUsedCapital[investorIndex] += allocation;
-          remainingOutflow -= allocation;
-        });
+      const isProjectPayment =
+        item.outflow > 0 &&
+        (item.category === "acquisition" || item.category === "project");
+      const isPreExitFinancingPayment =
+        item.outflow > 0 &&
+        item.category === "financing" &&
+        item.month < durationMonths;
+
+      if (isProjectPayment) {
+        bankFundingUsed = Math.min(bankCashAvailable, item.outflow);
+        bankCashAvailable -= bankFundingUsed;
+        let remainingOutflow = item.outflow - bankFundingUsed;
+
+        if (isSharedProject) {
+          coInvestors.forEach((_, investorIndex) => {
+            const allocation = Math.min(
+              remainingOutflow,
+              item.outflow * monthlyCapitalShares[investorIndex]
+            );
+            coInvestorInvestments[investorIndex] = allocation;
+            investorUsedCapital[investorIndex] += allocation;
+            remainingOutflow -= allocation;
+          });
+        }
 
         ourInvestment = Math.max(0, remainingOutflow);
-      } else if (item.outflow > 0) {
+      } else if (isPreExitFinancingPayment) {
+        bankFundingUsed = Math.min(bankCashAvailable, item.outflow);
+        bankCashAvailable -= bankFundingUsed;
+        let remainingOutflow = item.outflow - bankFundingUsed;
+        if (isSharedProject) {
+          coInvestors.forEach((_, investorIndex) => {
+            const allocation = Math.min(
+              remainingOutflow,
+              item.outflow * monthlyCapitalShares[investorIndex]
+            );
+            coInvestorInvestments[investorIndex] = allocation;
+            investorUsedCapital[investorIndex] += allocation;
+            remainingOutflow -= allocation;
+          });
+        }
+        ourInvestment = Math.max(0, remainingOutflow);
+      } else if (item.outflow > 0 && item.category !== "financing") {
         ourInvestment = item.outflow;
       }
 
@@ -975,6 +1502,7 @@ export default function LosNaranjosClient({
         runningCapital,
         ourInvestment,
         coInvestorInvestments,
+        bankFundingUsed,
       };
     });
 
@@ -986,11 +1514,22 @@ export default function LosNaranjosClient({
       (sum, value) => sum + value,
       0
     );
-    const ourEquityPercentage = capitalDeployed
-      ? ourInvestment / capitalDeployed
+    const equityCapitalDeployed = ourInvestment + partnerInvestment;
+    const totalBankInterest = bankSchedule.interestPaid;
+    const netProfit = operatingNetProfit - totalBankInterest;
+    const roi = equityCapitalDeployed
+      ? netProfit / equityCapitalDeployed
+      : 0;
+    const distributableNetProceeds = equityCapitalDeployed + netProfit;
+    const bankExitAdjustment = Math.max(
+      0,
+      netProceeds - distributableNetProceeds
+    );
+    const ourEquityPercentage = equityCapitalDeployed
+      ? ourInvestment / equityCapitalDeployed
       : 1;
-    const partnerEquityPercentage = capitalDeployed
-      ? partnerInvestment / capitalDeployed
+    const partnerEquityPercentage = equityCapitalDeployed
+      ? partnerInvestment / equityCapitalDeployed
       : 0;
 
     const ourNetProfit = netProfit * ourEquityPercentage;
@@ -1044,8 +1583,8 @@ export default function LosNaranjosClient({
     const coInvestorSummaries: ParticipantSummary[] = coInvestors.map(
       (investor, investorIndex) => {
         const usedCapital = investorUsedCapital[investorIndex];
-        const capitalShare = capitalDeployed
-          ? usedCapital / capitalDeployed
+        const capitalShare = equityCapitalDeployed
+          ? usedCapital / equityCapitalDeployed
           : 0;
         const investorNetProfit = netProfit * capitalShare;
         const investorNetProceeds = usedCapital + investorNetProfit;
@@ -1138,9 +1677,12 @@ export default function LosNaranjosClient({
     const ourSalesCommission = agentCommission * ourEquityPercentage;
     const partnerSalesCommission = agentCommission * partnerEquityPercentage;
     const irr = calculateAnnualizedIrr(rawCashflow);
-    const cashAtMonth0 = cashflow
-      .filter((item) => item.month === 0)
-      .reduce((sum, item) => sum + item.outflow, 0);
+    const cashAtMonth0 = Math.max(
+      0,
+      cashflow
+        .filter((item) => item.month === 0)
+        .reduce((sum, item) => sum + item.outflow - item.inflow, 0)
+    );
 
     const monthlyCapital = Array.from({ length: durationMonths + 1 }, (_, month) => {
       const matching = cashflow.filter((item) => item.month <= month);
@@ -1174,7 +1716,7 @@ export default function LosNaranjosClient({
           ...investmentCashflow,
           {
             month,
-            event: "Sales proceeds (after commission)",
+            event: "Sales proceeds (after commission + furniture mark-up)",
             outflow: 0,
             inflow: netProceeds,
             category: "sale" as const,
@@ -1185,10 +1727,11 @@ export default function LosNaranjosClient({
     const saleSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map((change) => {
       const scenarioSalePrice = salePrice * (1 + change);
       const scenarioNetProceeds =
-        scenarioSalePrice * (1 - agentCommissionPercentage);
-      const scenarioProfit = scenarioNetProceeds - capitalDeployed;
-      const scenarioRoi = capitalDeployed
-        ? scenarioProfit / capitalDeployed
+        scenarioSalePrice * (1 - agentCommissionPercentage) + furnitureMarkup;
+      const scenarioProfit =
+        scenarioNetProceeds - capitalDeployed - totalBankInterest;
+      const scenarioRoi = equityCapitalDeployed
+        ? scenarioProfit / equityCapitalDeployed
         : 0;
       return {
         change,
@@ -1199,7 +1742,7 @@ export default function LosNaranjosClient({
           ...investmentCashflow,
           {
             month: durationMonths,
-            event: "Sales proceeds (after commission)",
+            event: "Sales proceeds (after commission + furniture mark-up)",
             outflow: 0,
             inflow: scenarioNetProceeds,
             category: "sale" as const,
@@ -1212,8 +1755,15 @@ export default function LosNaranjosClient({
       (change) => {
         const scenarioProjectCost = totalProjectCost * (1 + change);
         const scenarioCapital = totalAcquisition + scenarioProjectCost;
-        const scenarioProfit = netProceeds - scenarioCapital;
-        const scenarioRoi = scenarioCapital ? scenarioProfit / scenarioCapital : 0;
+        const scenarioProfit =
+          netProceeds - scenarioCapital - totalBankInterest;
+        const scenarioEquityCapital = Math.max(
+          0,
+          equityCapitalDeployed + (scenarioCapital - capitalDeployed)
+        );
+        const scenarioRoi = scenarioEquityCapital
+          ? scenarioProfit / scenarioEquityCapital
+          : 0;
         const constructionCostFactor = totalProjectCost
           ? scenarioProjectCost / totalProjectCost
           : 0;
@@ -1232,7 +1782,7 @@ export default function LosNaranjosClient({
             ...scenarioInvestmentCashflow,
             {
               month: durationMonths,
-              event: "Sales proceeds (after commission)",
+              event: "Sales proceeds (after commission + furniture mark-up)",
               outflow: 0,
               inflow: netProceeds,
               category: "sale" as const,
@@ -1298,6 +1848,30 @@ export default function LosNaranjosClient({
       fixedFurnitureCost,
       looseFurnitureCost,
       projectManagementPercentage,
+      bankFinancingEnabled,
+      bankDrawScheduleMode,
+      bankFinancingStartMonth,
+      bankFinancingDrawMonths,
+      bankFinancingDrawMonthsComplete,
+      customBankDrawAmountsComplete,
+      bankFinancingAmount,
+      bankFinancingTranches,
+      bankInterestPercentage,
+      bankRepaymentScheduleMode,
+      bankRepaymentAmount,
+      bankRepaymentFrequency,
+      bankRepaymentCount,
+      bankRepaymentScheduleComplete,
+      bankFinancingDrawn: bankSchedule.drawnAmount,
+      bankPrincipalRepaid: bankSchedule.principalRepaid,
+      totalBankInterest,
+      bankFundingUsed: cashflow.reduce(
+        (sum, item) => sum + item.bankFundingUsed,
+        0
+      ),
+      equityCapitalDeployed,
+      distributableNetProceeds,
+      bankExitAdjustment,
       baseBuildCost,
       contingency,
       projectSubtotal,
@@ -1492,8 +2066,8 @@ export default function LosNaranjosClient({
               ))}
             </tr>
             <tr className="split-total-row">
-              <td><strong>Total investment</strong></td>
-              <td><strong>{euro(data.capitalDeployed)}</strong></td>
+              <td><strong>Total equity investment</strong></td>
+              <td><strong>{euro(data.equityCapitalDeployed)}</strong></td>
               <td><strong>{euro(data.ourInvestment)}</strong></td>
               {entries.map(({ summary, investorIndex }) => (
                 <td key={`investment-${investorIndex}`}>
@@ -1521,9 +2095,21 @@ export default function LosNaranjosClient({
                 </td>
               ))}
             </tr>
+            {data.bankFinancingEnabled && (
+              <tr>
+                <td><strong>Bank financing adjustment at exit</strong></td>
+                <td>-{euro(data.bankExitAdjustment)}</td>
+                <td>-{euro(data.bankExitAdjustment * data.ourEquityPercentage)}</td>
+                {entries.map(({ summary, investorIndex }) => (
+                  <td key={`bank-adjustment-${investorIndex}`}>
+                    -{euro(data.bankExitAdjustment * summary.capitalShare)}
+                  </td>
+                ))}
+              </tr>
+            )}
             <tr className="sale-row">
-              <td><strong>Net sale proceeds</strong></td>
-              <td className="positive"><strong>{euro(data.netProceeds)}</strong></td>
+              <td><strong>Net proceeds to equity</strong></td>
+              <td className="positive"><strong>{euro(data.distributableNetProceeds)}</strong></td>
               <td className="positive"><strong>{euro(data.ourNetProceeds)}</strong></td>
               {entries.map(({ summary, investorIndex }) => (
                 <td className="positive" key={`net-proceeds-${investorIndex}`}>
@@ -1579,7 +2165,10 @@ export default function LosNaranjosClient({
           <table
             className={`shared-cashflow-table${compact ? " print-compact-table" : ""}`}
             style={{
-              minWidth: `${Math.max(980, 650 + entries.length * 105)}px`,
+              minWidth: `${Math.max(
+                980,
+                650 + entries.length * 105
+              )}px`,
             }}
           >
             <thead>
@@ -1600,7 +2189,13 @@ export default function LosNaranjosClient({
               {rows.map((row, rowIndex) => (
                 <tr
                   key={`${row.month}-${row.event}-${rowIndex}`}
-                  className={row.inflow > 0 ? "sale-row" : undefined}
+                  className={
+                    row.category === "sale"
+                      ? "sale-row"
+                      : row.category === "financing"
+                        ? "financing-row"
+                        : undefined
+                  }
                 >
                   <td>{row.month}</td>
                   <td>{formatShortDate(row.date)}</td>
@@ -1871,7 +2466,7 @@ export default function LosNaranjosClient({
             onChange={(value) => updateField("looseFurniture", value)}
           />
           <RangeField
-            label="Meubelopslag"
+            label="Meubelopslag over Furniture"
             value={form.furnitureMarkupPercentage}
             min={0}
             max={100}
@@ -1919,6 +2514,307 @@ export default function LosNaranjosClient({
               updateField("agentCommissionPercentage", value)
             }
           />
+        </InputGroup>
+
+        <InputGroup title="Bankfinanciering">
+          <SelectField
+            label="Financiering via bank"
+            value={form.bankFinancingEnabled}
+            options={[
+              { value: "no", label: "Nee" },
+              { value: "yes", label: "Ja" },
+            ]}
+            onChange={(value) =>
+              updateField("bankFinancingEnabled", value as BankFinancingChoice)
+            }
+          />
+
+          {form.bankFinancingEnabled === "yes" && (
+            <>
+              <SelectField
+                label="Uitbetalingsschema"
+                value={form.bankDrawScheduleMode}
+                options={[
+                  {
+                    value: "standard",
+                    label: "Standaard uitbetaling · gelijk verdeeld",
+                  },
+                  {
+                    value: "custom",
+                    label: "Geen standaard uitbetaling · zelf per maand",
+                  },
+                ]}
+                onChange={(value) =>
+                  updateField("bankDrawScheduleMode", value as BankScheduleMode)
+                }
+              />
+
+              {form.bankDrawScheduleMode === "standard" && (
+                <InputField
+                  label="Totaal financieringsbedrag"
+                  value={form.bankFinancingAmount}
+                  format="amount"
+                  placeholder="Bijv. 750.000"
+                  onChange={(value) => updateField("bankFinancingAmount", value)}
+                />
+              )}
+
+              <InputField
+                label={
+                  form.bankDrawScheduleMode === "custom"
+                    ? "Aantal uitbetalingen"
+                    : "Aantal uitbetalingstermijnen"
+                }
+                value={form.bankFinancingTranches}
+                placeholder="Bijv. 3"
+                onChange={updateBankFinancingTranches}
+              />
+
+              <section className="bank-draw-schedule field-full">
+                <div className="bank-draw-schedule-heading">
+                  <h3>Wanneer komen de bankfinancieringen?</h3>
+                  <p>
+                    {form.bankDrawScheduleMode === "standard"
+                      ? "Vul voor iedere termijn de projectmaand in. Het totale financieringsbedrag wordt gelijk over deze termijnen verdeeld."
+                      : "Vul per uitbetaling zelf de projectmaand en het bedrag in. Deze bedragen worden exact als inflow in de cashflow verwerkt."}
+                  </p>
+                </div>
+                <div
+                  className={`bank-payment-list ${
+                    form.bankDrawScheduleMode === "standard"
+                      ? "bank-payment-list-standard"
+                      : "bank-payment-list-custom"
+                  }`}
+                >
+                  {form.bankFinancingDrawMonths
+                    .slice(
+                      0,
+                      clampInteger(
+                        parseNumber(form.bankFinancingTranches),
+                        1,
+                        24
+                      )
+                    )
+                    .map((month, index) => (
+                      <section
+                        className="bank-payment-row"
+                        key={`bank-draw-month-${index}`}
+                      >
+                        <InputField
+                          label={
+                            form.bankDrawScheduleMode === "standard"
+                              ? `Termijn ${index + 1}`
+                              : `Uitbetaling ${index + 1} · projectmaand`
+                          }
+                          value={month}
+                          placeholder={`Bijv. ${index + 1}`}
+                          helper={
+                            month.trim()
+                              ? `Datum · ${formatShortDate(
+                                  addMonthsToDate(
+                                    form.projectStartDate,
+                                    parseNumber(month)
+                                  )
+                                )}`
+                              : "Datum volgt na invoer"
+                          }
+                          onChange={(value) =>
+                            updateBankFinancingDrawMonth(index, value)
+                          }
+                        />
+                        {form.bankDrawScheduleMode === "custom" && (
+                          <InputField
+                            label={`Uitbetaling ${index + 1} · bedrag`}
+                            value={form.bankFinancingDrawAmounts[index] ?? ""}
+                            format="amount"
+                            placeholder="Bijv. 100.000"
+                            onChange={(value) =>
+                              updateBankFinancingDrawAmount(index, value)
+                            }
+                          />
+                        )}
+                      </section>
+                    ))}
+                </div>
+                {form.bankDrawScheduleMode === "custom" && (
+                  <p className="bank-schedule-total">
+                    Totaal ingepland: {euro(
+                      form.bankFinancingDrawAmounts
+                        .slice(
+                          0,
+                          clampInteger(
+                            parseNumber(form.bankFinancingTranches),
+                            1,
+                            24
+                          )
+                        )
+                        .reduce(
+                          (sum, amount) => sum + Math.max(0, parseNumber(amount)),
+                          0
+                        )
+                    )}
+                  </p>
+                )}
+              </section>
+
+              <InputField
+                label="Rente per jaar %"
+                value={form.bankInterestPercentage}
+                placeholder="Bijv. 5,5"
+                onChange={(value) =>
+                  updateField("bankInterestPercentage", value)
+                }
+              />
+
+              <SelectField
+                label="Aflossingsschema"
+                value={form.bankRepaymentScheduleMode}
+                options={[
+                  {
+                    value: "standard",
+                    label: "Standaard aflossing · vast bedrag",
+                  },
+                  {
+                    value: "custom",
+                    label: "Geen standaard aflossing · zelf per maand",
+                  },
+                ]}
+                onChange={(value) =>
+                  updateField(
+                    "bankRepaymentScheduleMode",
+                    value as BankScheduleMode
+                  )
+                }
+              />
+
+              {form.bankRepaymentScheduleMode === "standard" ? (
+                <>
+                  <InputField
+                    label="Aflossing per termijn"
+                    value={form.bankRepaymentAmount}
+                    format="amount"
+                    placeholder="Bijv. 25.000"
+                    onChange={(value) =>
+                      updateField("bankRepaymentAmount", value)
+                    }
+                  />
+                  <SelectField
+                    label="Aflossingsfrequentie"
+                    value={form.bankRepaymentFrequency}
+                    options={[
+                      { value: "monthly", label: "Per maand" },
+                      { value: "yearly", label: "Per jaar" },
+                    ]}
+                    onChange={(value) =>
+                      updateField(
+                        "bankRepaymentFrequency",
+                        value as BankRepaymentFrequency
+                      )
+                    }
+                  />
+                </>
+              ) : (
+                <>
+                  <InputField
+                    label="Aantal aflossingen"
+                    value={form.bankRepaymentCount}
+                    placeholder="Bijv. 6"
+                    onChange={updateBankRepaymentCount}
+                  />
+                  <section className="bank-draw-schedule field-full">
+                    <div className="bank-draw-schedule-heading">
+                      <h3>Wanneer en hoeveel wordt afgelost?</h3>
+                      <p>
+                        Vul per aflossing zelf de projectmaand en het bedrag in.
+                        Iedere aflossing verschijnt exact als outflow in de cashflow.
+                      </p>
+                    </div>
+                    <div className="bank-payment-list">
+                      {form.bankRepaymentSchedule
+                        .slice(
+                          0,
+                          clampInteger(
+                            parseNumber(form.bankRepaymentCount),
+                            1,
+                            36
+                          )
+                        )
+                        .map((payment, index) => (
+                          <section
+                            className="bank-payment-row"
+                            key={`bank-repayment-${index}`}
+                          >
+                            <InputField
+                              label={`Aflossing ${index + 1} · projectmaand`}
+                              value={payment.month}
+                              placeholder={`Bijv. ${index + 2}`}
+                              helper={
+                                payment.month.trim()
+                                  ? `Datum · ${formatShortDate(
+                                      addMonthsToDate(
+                                        form.projectStartDate,
+                                        parseNumber(payment.month)
+                                      )
+                                    )}`
+                                  : "Datum volgt na invoer"
+                              }
+                              onChange={(value) =>
+                                updateBankRepaymentSchedule(
+                                  index,
+                                  "month",
+                                  value
+                                )
+                              }
+                            />
+                            <InputField
+                              label={`Aflossing ${index + 1} · bedrag`}
+                              value={payment.amount}
+                              format="amount"
+                              placeholder="Bijv. 25.000"
+                              onChange={(value) =>
+                                updateBankRepaymentSchedule(
+                                  index,
+                                  "amount",
+                                  value
+                                )
+                              }
+                            />
+                          </section>
+                        ))}
+                    </div>
+                    <p className="bank-schedule-total">
+                      Totaal ingepland: {euro(
+                        form.bankRepaymentSchedule
+                          .slice(
+                            0,
+                            clampInteger(
+                              parseNumber(form.bankRepaymentCount),
+                              1,
+                              36
+                            )
+                          )
+                          .reduce(
+                            (sum, payment) =>
+                              sum + Math.max(0, parseNumber(payment.amount)),
+                            0
+                          )
+                      )}
+                    </p>
+                  </section>
+                </>
+              )}
+
+              <p className="input-hint field-full">
+                Bij een standaardschema worden uitbetalingen gelijk verdeeld en
+                aflossingen volgens de gekozen maand- of jaarfrequentie verwerkt.
+                Kies je geen standaardschema, dan worden de door jou ingevulde
+                maandbedragen exact gebruikt. Rente wordt maandelijks opgebouwd
+                over het openstaande saldo en iedere 12 maanden vanaf de eerste
+                bankopname betaald. Bij verkoop worden resterende rente en
+                hoofdsom volledig afgerekend.
+              </p>
+            </>
+          )}
         </InputGroup>
 
         <InputGroup title="Betalingsplanning">
@@ -2060,10 +2956,21 @@ export default function LosNaranjosClient({
           <DataRow label="Gross Sale Price" value={euro(data.salePrice)} strong />
           <DataRow label={`Agent Commission (${percent(data.agentCommissionPercentage)})`} value={euro(data.agentCommission)} />
           <DataRow
-            label={`Furniture Mark-up (${percent(data.furnitureMarkupPercentage)})`}
-            value={euro(data.furnitureMarkup)}
+            label={`Furniture Mark-up – added to proceeds (${percent(data.furnitureMarkupPercentage)})`}
+            value={`+${euro(data.furnitureMarkup)}`}
           />
-          <DataRow label="Net Proceeds" value={euro(data.netProceeds)} strong />
+          <DataRow
+            label={data.bankFinancingEnabled ? "Net Proceeds before Bank" : "Net Proceeds"}
+            value={euro(data.netProceeds)}
+            strong={!data.bankFinancingEnabled}
+          />
+          {data.bankFinancingEnabled && (
+            <>
+              <DataRow label="Bank financing adjustment at exit" value={`-${euro(data.bankExitAdjustment)}`} />
+              <DataRow label="Net Proceeds to Equity" value={euro(data.distributableNetProceeds)} strong />
+              <DataRow label="Total Bank Interest" value={`-${euro(data.totalBankInterest)}`} />
+            </>
+          )}
           <DataRow label="Net Profit / (Loss)" value={signedEuro(data.netProfit)} strong positive={data.netProfit >= 0} />
         </DataBlock>
 
@@ -2266,7 +3173,7 @@ export default function LosNaranjosClient({
             )}`}
           />
           <Metric
-            label="Peak Deployed"
+            label={data.bankFinancingEnabled ? "Peak Equity Need" : "Peak Deployed"}
             value={euro(data.peakDeployed)}
             sub={`Before exit · ${formatShortDate(addMonthsToDate(data.projectStartDate, data.durationMonths))}`}
           />
@@ -2296,12 +3203,32 @@ export default function LosNaranjosClient({
                 <td>{euro(data.totalProjectCost)}</td>
               </tr>
               <tr>
-                <td><strong>Total capital deployed</strong></td>
+                <td><strong>Total project capital</strong></td>
                 <td>{euro(data.capitalDeployed)}</td>
               </tr>
+              {data.bankFinancingEnabled && (
+                <>
+                  <tr>
+                    <td><strong>Bank financing received</strong></td>
+                    <td className="positive">{euro(data.bankFinancingDrawn)}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Bank interest</strong></td>
+                    <td className="negative">-{euro(data.totalBankInterest)}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Equity capital used</strong></td>
+                    <td>{euro(data.equityCapitalDeployed)}</td>
+                  </tr>
+                </>
+              )}
               <tr className="sale-row">
-                <td><strong>Net sale proceeds</strong></td>
-                <td className="positive">{euro(data.netProceeds)}</td>
+                <td><strong>{data.bankFinancingEnabled ? "Net proceeds to equity" : "Net sale proceeds"}</strong></td>
+                <td className="positive">{euro(
+                  data.bankFinancingEnabled
+                    ? data.distributableNetProceeds
+                    : data.netProceeds
+                )}</td>
               </tr>
             </tbody>
           </table>
@@ -2362,7 +3289,7 @@ export default function LosNaranjosClient({
                       <th>Date</th>
                       <th>Event</th>
                       <th>Outflow</th>
-                      {data.isSharedProject && (
+                            {data.isSharedProject && (
                         <>
                           <th>Our investment</th>
                           {data.coInvestorSummaries.map((summary, investorIndex) => (
@@ -2378,7 +3305,13 @@ export default function LosNaranjosClient({
                     {rows.map((row, rowIndex) => (
                       <tr
                         key={`${row.month}-${row.event}-${pageIndex}-${rowIndex}`}
-                        className={row.inflow > 0 ? "sale-row" : undefined}
+                        className={
+                          row.category === "sale"
+                            ? "sale-row"
+                            : row.category === "financing"
+                              ? "financing-row"
+                              : undefined
+                        }
                       >
                         <td>{row.month}</td>
                         <td>{formatShortDate(row.date)}</td>
@@ -3255,6 +4188,79 @@ const styles = `
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
+  }
+  .bank-draw-schedule {
+    padding: 12px;
+    border: 1px solid #d8d1c7;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .62);
+  }
+  .bank-draw-schedule-heading {
+    display: grid;
+    gap: 3px;
+    margin-bottom: 9px;
+  }
+  .bank-draw-schedule-heading h3 {
+    margin: 0;
+    color: #5f4930;
+    font-size: 13px;
+  }
+  .bank-draw-schedule-heading p {
+    margin: 0;
+    color: #756d64;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .bank-draw-month-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .bank-payment-list {
+    display: grid;
+    gap: 8px;
+  }
+  .bank-payment-list-standard {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .bank-payment-list-custom {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .bank-payment-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 9px;
+    border: 1px solid #e1dbd2;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .72);
+  }
+  .bank-payment-list-standard .bank-payment-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+  .bank-payment-list-standard .field {
+    gap: 4px;
+  }
+  .bank-payment-list-standard .field input {
+    min-height: 36px;
+    padding: 6px 9px;
+  }
+  .bank-payment-list-standard .field-helper {
+    padding: 3px 7px;
+    font-size: 10px;
+  }
+  .bank-payment-row:has(.field:only-child) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bank-schedule-total {
+    margin: 11px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid #e1dbd2;
+    color: #5f4930;
+    font-size: 12px;
+    font-weight: 800;
+    text-align: right;
   }
   .input-hint {
     margin: 0;
