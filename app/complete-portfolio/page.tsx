@@ -122,6 +122,7 @@ const percentFormatter = new Intl.NumberFormat("nl-NL", {
 });
 
 const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
+  // Spain
   {
     match: /margarita|la carolina|carolina/,
     src: "/portfolio-photos-nl-es/la-carolina.jpg",
@@ -143,11 +144,163 @@ const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
     src: "/portfolio-photos-nl-es/calderon-de-la-barca.jpg",
   },
   {
-    match: /groethofstraat 103/,
+    match: /benabola|haven appartment|haven apartment|haven/,
+    src: "/portfolio-photos-nl-es/haven-appartment.jpg",
+  },
+  {
+    match: /mona lisa/,
+    src: "/portfolio-photos-nl-es/mona-lisa.jpg",
+  },
+
+  // The Netherlands — exact addresses first
+  {
+    match: /bevrijdingsweg 39/,
+    src: "/portfolio-photos-nl-es/bevrijdingsweg-39.jpg",
+  },
+  {
+    match: /buys ballotstraat 9/,
+    src: "/portfolio-photos-nl-es/buys-ballotstraat-9.jpg",
+  },
+  {
+    match: /declarantenweg 29 a|declarantenweg 29a/,
+    src: "/portfolio-photos-nl-es/declarantenweg-29A.jpg",
+  },
+  {
+    match: /declarantenweg 29/,
+    src: "/portfolio-photos-nl-es/declarantenweg-29.jpg",
+  },
+  {
+    match: /declarantenweg 28/,
+    src: "/portfolio-photos-nl-es/declarantenweg-28.jpg",
+  },
+  {
+    match: /dokter blumenkampstraat 3|dr blumenkampstraat 3/,
+    src: "/portfolio-photos-nl-es/dokter-blumenkampstraat-3.jpg",
+  },
+  {
+    match: /(?:groethofstraat|goethofstraat) 103/,
     src: "/portfolio-photos-nl-es/groethofstraat-103.jpeg",
   },
   {
-    match: /groethofstraat/,
+    match: /(?:groethofstraat|goethofstraat) 99/,
+    src: "/portfolio-photos-nl-es/groethofstraat-99.png",
+  },
+  {
+    match: /(?:groethofstraat|goethofstraat) 52/,
+    src: "/portfolio-photos-nl-es/goethofstraat-52.jpg",
+  },
+  {
+    match: /(?:groethofstraat|goethofstraat) 34/,
+    src: "/portfolio-photos-nl-es/groethofstraat-34.jpg",
+  },
+  {
+    match: /horsterweg 180/,
+    src: "/portfolio-photos-nl-es/horsterweg-180.jpg",
+  },
+  {
+    match: /horsterweg 31/,
+    src: "/portfolio-photos-nl-es/horsterweg-31.jpg",
+  },
+  {
+    match: /kaldenkerkerweg 28/,
+    src: "/portfolio-photos-nl-es/kaldenkerkerweg-28.jpg",
+  },
+  {
+    match: /kazernestraat 10/,
+    src: "/portfolio-photos-nl-es/kazernestraat-10.jpeg",
+  },
+  {
+    match: /keizersveld 71/,
+    src: "/portfolio-photos-nl-es/keizersveld-71.jpg",
+  },
+  {
+    match: /leeuwerikstraat 1/,
+    src: "/portfolio-photos-nl-es/leeuwerikstraat-1.jpeg",
+  },
+  {
+    match: /magalhaesweg 4|magelhaesweg 4/,
+    src: "/portfolio-photos-nl-es/magalhaesweg-4.png",
+  },
+  {
+    match: /middelweg 25/,
+    src: "/portfolio-photos-nl-es/middelweg-25.jpg",
+  },
+  {
+    match: /noordhoven 19/,
+    src: "/portfolio-photos-nl-es/noordhoven-19.jpg",
+  },
+  {
+    match: /noordhoven 2/,
+    src: "/portfolio-photos-nl-es/noordhoven-2.jpg",
+  },
+  {
+    match: /nusterweg 63/,
+    src: "/portfolio-photos-nl-es/nusterweg-63.jpg",
+  },
+  {
+    match: /parlevinkerstraat 1/,
+    src: "/portfolio-photos-nl-es/parlevinkerstraat-1.jpg",
+  },
+  {
+    match: /prinsessesingel 30|princessesingel 30/,
+    src: "/portfolio-photos-nl-es/princessesingel-30.jpg",
+  },
+  {
+    match: /prinsessesingel 13|princessesingel 13/,
+    src: "/portfolio-photos-nl-es/Princessesingel-13.jpg",
+  },
+  {
+    match: /rudolf dieselweg 34/,
+    src: "/portfolio-photos-nl-es/rudolf-dieselweg-34.jpg",
+  },
+  {
+    match: /rudolf dieselweg 2 6|rudolf dieselweg 2-6/,
+    src: "/portfolio-photos-nl-es/rudolf-dieselweg-2-6.jpg",
+  },
+  {
+    match: /schoenenstraat 3/,
+    src: "/portfolio-photos-nl-es/schoenenstraat-3.jpg",
+  },
+  {
+    match: /smakterweg 23/,
+    src: "/portfolio-photos-nl-es/smakterweg-23.jpg",
+  },
+  {
+    match: /snelliusweg 1|snellius 1/,
+    src: "/portfolio-photos-nl-es/snellius-1.jpg",
+  },
+  {
+    match: /spoorstraat 52/,
+    src: "/portfolio-photos-nl-es/spoorstraat-52.jpg",
+  },
+  {
+    match: /steegstraat 21/,
+    src: "/portfolio-photos-nl-es/steegstraat-21.png",
+  },
+  {
+    match: /tajikade 10/,
+    src: "/portfolio-photos-nl-es/tajikade-10.jpg",
+  },
+  {
+    match: /transportlaan 1/,
+    src: "/portfolio-photos-nl-es/transportlaan-1.jpg",
+  },
+  {
+    match: /winkelveldstraat 24/,
+    src: "/portfolio-photos-nl-es/winkelveldstraat-24.jpg",
+  },
+  {
+    match: /winkelveldstraat 21/,
+    src: "/portfolio-photos-nl-es/winkelveldstraat-21.jpg",
+  },
+  {
+    match: /zonneveld 7/,
+    src: "/portfolio-photos-nl-es/zonneveld-7.jpeg",
+  },
+
+  // Less specific fallbacks
+  {
+    match: /groethofstraat|goethofstraat/,
     src: "/portfolio-photos-nl-es/groethofstraat-99.png",
   },
   {
@@ -169,14 +322,6 @@ const IMAGE_RULES: Array<{ match: RegExp; src: string }> = [
   {
     match: /kazernestraat/,
     src: "/portfolio-photos-nl-es/kazernestraat-10.jpeg",
-  },
-  {
-    match: /benabola|haven/,
-    src: "/portfolio-photos-nl-es/haven-appartment.jpg",
-  },
-  {
-    match: /mona lisa/,
-    src: "/portfolio-photos-nl-es/mona-lisa.jpg",
   },
 ];
 
@@ -1112,8 +1257,8 @@ function getReturnType(asset: Asset): "IRR" | "ROI" {
   return hasExplicitIrr(asset) ? "IRR" : "ROI";
 }
 
-function getImageSource(project: string): string | null {
-  const normalized = normalizeText(project);
+function getImageSource(project: string, address = ""): string | null {
+  const normalized = normalizeText(`${project} ${address}`);
   return IMAGE_RULES.find(({ match }) => match.test(normalized))?.src ?? null;
 }
 
@@ -1894,7 +2039,11 @@ export default function CompletePortfolioPage() {
           />
 
           <div className="mt-5 grid grid-cols-[1.15fr_1fr] gap-5">
-            <ProjectImage project={asset.project} className="h-[114mm]" />
+            <ProjectImage
+              project={asset.project}
+              address={asset.address}
+              className="h-[114mm]"
+            />
             <div className="space-y-2.5">
               <div className="grid grid-cols-3 gap-3">
                 <MetricCard
@@ -2281,9 +2430,17 @@ function CapitalStack({
   );
 }
 
-function ProjectImage({ project, className = "" }: { project: string; className?: string }) {
+function ProjectImage({
+  project,
+  address = "",
+  className = "",
+}: {
+  project: string;
+  address?: string;
+  className?: string;
+}) {
   const [failed, setFailed] = useState(false);
-  const source = getImageSource(project);
+  const source = getImageSource(project, address);
 
   if (!source || failed) {
     return (
@@ -2405,7 +2562,11 @@ function SoldProjectCard({ asset }: { asset: Asset }) {
 
   return (
     <article className="overflow-hidden rounded-[26px] border border-[#d8d0c1] bg-white/85">
-      <ProjectImage project={asset.project} className="h-[62mm] rounded-none" />
+      <ProjectImage
+        project={asset.project}
+        address={asset.address}
+        className="h-[62mm] rounded-none"
+      />
       <div className="p-5">
         <SectionLabel>Realized project</SectionLabel>
         <h2 className="mt-3 text-2xl font-semibold text-[#243d33]">{asset.project}</h2>
