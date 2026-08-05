@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 export type MaybeNumber = number | null;
 
@@ -29,6 +29,13 @@ export type ReportData = {
   fiscaalPartner?: boolean;
   heffingsvrijVermogenToepassen?: boolean;
 
+  // Optionele BV-beginwaarden. Bestaande page.tsx-bestanden blijven hierdoor werken.
+  bezitsvorm?: Bezitsvorm;
+  bvAfschrijvingPerJaar?: MaybeNumber;
+  bvOverigeKostenPerJaar?: MaybeNumber;
+  bvWinstUitkeren?: boolean;
+  bvDividendUitkeringPercentage?: MaybeNumber;
+
   exploitatiekosten: ExpenseItem[];
   waarschuwingen: string[];
 };
@@ -40,6 +47,7 @@ export type StartpuntConfig = {
 };
 
 type YesNo = "ja" | "nee";
+export type Bezitsvorm = "prive" | "bv";
 
 type FormState = {
   objectNaam: string;
@@ -49,17 +57,31 @@ type FormState = {
   financiering: string;
   huurPerMaand: string;
   rentePercentage: string;
+  bezitsvorm: Bezitsvorm;
   box3WozPercentage: string;
   box3FinancieringPercentage: string;
   box3BelastingPercentage: string;
   gemiddeldeWaardestijging: string;
   fiscaalPartner: YesNo;
   heffingsvrijVermogenToepassen: YesNo;
+  bvAfschrijvingPerJaar: string;
+  bvOverigeKostenPerJaar: string;
+  bvWinstUitkeren: YesNo;
+  bvDividendUitkeringPercentage: string;
   exploitatiekosten: string[];
 };
 
 const SCHULDENDREMPEL_PER_PERSOON = 3_800;
 const HEFFINGSVRIJ_PER_PERSOON = 59_357;
+
+// Nederlandse belastingtarieven 2026.
+const VPB_GRENS = 200_000;
+const VPB_LAAG = 0.19;
+const VPB_HOOG = 0.258;
+const BOX2_GRENS = 68_843;
+const BOX2_LAAG = 0.245;
+const BOX2_HOOG = 0.31;
+const DIVIDENDBELASTING = 0.15;
 
 const money0 = new Intl.NumberFormat("nl-NL", {
   style: "currency",
@@ -79,6 +101,31 @@ const percent1 = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
+
+const amountInputFormatter = new Intl.NumberFormat("nl-NL", {
+  maximumFractionDigits: 0,
+});
+
+function normalizeAmountInput(value: string) {
+  return value.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+}
+
+function formatAmountInput(value: string) {
+  const digits = normalizeAmountInput(value);
+  if (!digits) return "";
+  const parsed = Number(digits);
+  return Number.isFinite(parsed) ? amountInputFormatter.format(parsed) : "";
+}
+
+function caretPositionAfterDigits(formattedValue: string, digitCount: number) {
+  if (digitCount <= 0) return 0;
+  let seenDigits = 0;
+  for (let index = 0; index < formattedValue.length; index += 1) {
+    if (/\d/.test(formattedValue[index])) seenDigits += 1;
+    if (seenDigits >= digitCount) return index + 1;
+  }
+  return formattedValue.length;
+}
 
 function euroValue(value: MaybeNumber) {
   return value === null || !Number.isFinite(value) ? "—" : money0.format(value);
@@ -142,6 +189,22 @@ function parsePercent(value: string, fallback: number) {
   return Math.abs(parsed) > 1 ? parsed / 100 : parsed;
 }
 
+function clampPercentage(value: number) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function progressiveTax(
+  taxableAmount: number,
+  threshold: number,
+  lowerRate: number,
+  upperRate: number
+) {
+  const amount = Math.max(0, taxableAmount);
+  const lowerBand = Math.min(amount, threshold);
+  const upperBand = Math.max(0, amount - threshold);
+  return lowerBand * lowerRate + upperBand * upperRate;
+}
+
 function createInitialForm(initialData: ReportData): FormState {
   return {
     objectNaam: initialData.objectNaam ?? "",
@@ -151,6 +214,7 @@ function createInitialForm(initialData: ReportData): FormState {
     financiering: numberToInput(initialData.financiering),
     huurPerMaand: numberToInput(initialData.huurPerMaand),
     rentePercentage: percentToInput(initialData.rentePercentage, 0.04),
+    bezitsvorm: initialData.bezitsvorm ?? "prive",
     box3WozPercentage: percentToInput(initialData.box3WozPercentage, 0.06),
     box3FinancieringPercentage: percentToInput(
       initialData.box3FinancieringPercentage,
@@ -167,6 +231,17 @@ function createInitialForm(initialData: ReportData): FormState {
     fiscaalPartner: initialData.fiscaalPartner ? "ja" : "nee",
     heffingsvrijVermogenToepassen:
       initialData.heffingsvrijVermogenToepassen ? "ja" : "nee",
+    bvAfschrijvingPerJaar: numberToInput(
+      initialData.bvAfschrijvingPerJaar ?? 0
+    ),
+    bvOverigeKostenPerJaar: numberToInput(
+      initialData.bvOverigeKostenPerJaar ?? 0
+    ),
+    bvWinstUitkeren: initialData.bvWinstUitkeren ? "ja" : "nee",
+    bvDividendUitkeringPercentage: percentToInput(
+      initialData.bvDividendUitkeringPercentage ?? null,
+      1
+    ),
     exploitatiekosten: initialData.exploitatiekosten.map((item) =>
       numberToInput(item.amount)
     ),
@@ -226,6 +301,9 @@ export function StartpuntReport({
   }
 
   const data = useMemo(() => {
+    const bezitsvorm = form.bezitsvorm;
+    const isBv = bezitsvorm === "bv";
+
     const marktwaarde = Math.abs(parseNumber(form.marktwaardeVastgoed) ?? 0);
     const wozwaarde = Math.abs(parseNumber(form.wozWaardeVastgoed) ?? 0);
     const financiering = Math.abs(parseNumber(form.financiering) ?? 0);
@@ -273,6 +351,7 @@ export function StartpuntReport({
     const exploitatiePct =
       huurPerJaar > 0 ? exploitatieTotaal / huurPerJaar : null;
 
+    // Privé / box 3
     const fiscaalPartner = form.fiscaalPartner === "ja";
     const heffingsvrijToepassen =
       form.heffingsvrijVermogenToepassen === "ja";
@@ -309,14 +388,67 @@ export function StartpuntReport({
       belastbaarForfaitairRendement * aandeelBelastbaar;
     const vermogensbelasting =
       -voordeelSparenBeleggen * box3BelastingPercentage;
-
-    const nettoHuur =
+    const nettoHuurPrive =
       huurPerJaar + rentelasten - exploitatieTotaal + vermogensbelasting;
 
+    // BV: afschrijving verlaagt de fiscale winst, maar is geen kasuitgave.
+    const bvAfschrijving = Math.abs(
+      parseNumber(form.bvAfschrijvingPerJaar) ?? 0
+    );
+    const bvOverigeKosten = Math.abs(
+      parseNumber(form.bvOverigeKostenPerJaar) ?? 0
+    );
+    const winstVoorVpb =
+      huurPerJaar +
+      rentelasten -
+      exploitatieTotaal -
+      bvOverigeKosten -
+      bvAfschrijving;
+    const vennootschapsbelasting = progressiveTax(
+      winstVoorVpb,
+      VPB_GRENS,
+      VPB_LAAG,
+      VPB_HOOG
+    );
+    const winstNaVpb = winstVoorVpb - vennootschapsbelasting;
+    const kasstroomNaVpb =
+      huurPerJaar +
+      rentelasten -
+      exploitatieTotaal -
+      bvOverigeKosten -
+      vennootschapsbelasting;
+
+    const dividendUitkeren = form.bvWinstUitkeren === "ja";
+    const dividendPercentage = dividendUitkeren
+      ? clampPercentage(
+          parsePercent(form.bvDividendUitkeringPercentage, 1)
+        )
+      : 0;
+    const uitkeerbareWinstModel = Math.max(0, winstNaVpb);
+    const brutoDividend = uitkeerbareWinstModel * dividendPercentage;
+    const box2Belasting = progressiveTax(
+      brutoDividend,
+      BOX2_GRENS,
+      BOX2_LAAG,
+      BOX2_HOOG
+    );
+    const ingehoudenDividendbelasting = brutoDividend * DIVIDENDBELASTING;
+    const aanvullendeBox2BijAangifte = Math.max(
+      0,
+      box2Belasting - ingehoudenDividendbelasting
+    );
+    const nettoDividendNaarPrive = brutoDividend - box2Belasting;
+    const liquiditeitInBvNaDividend = kasstroomNaVpb - brutoDividend;
+
+    const nettoHuur = isBv ? kasstroomNaVpb : nettoHuurPrive;
     const nettoRendementMarktwaarde =
       marktwaarde > 0 ? nettoHuur / marktwaarde : null;
     const rendementEigenInleg =
       eigenInleg > 0 ? nettoHuur / eigenInleg : null;
+    const rendementNaarPrive =
+      isBv && dividendUitkeren && eigenInleg > 0
+        ? nettoDividendNaarPrive / eigenInleg
+        : null;
     const totaalRendement =
       rendementEigenInleg === null
         ? null
@@ -325,17 +457,17 @@ export function StartpuntReport({
     const totaleKosten =
       Math.abs(rentelasten) +
       exploitatieTotaal +
-      Math.abs(vermogensbelasting);
+      (isBv
+        ? bvOverigeKosten + vennootschapsbelasting
+        : Math.abs(vermogensbelasting));
 
     const nettoPerEuro =
       huurPerJaar > 0 ? nettoHuur / huurPerJaar : null;
-
-    const directeKasstroomTekst =
-      rendementEigenInleg === null
-        ? null
-        : rendementEigenInleg * (marktwaarde - financiering);
+    const directeKasstroomTekst = nettoHuur;
 
     return {
+      bezitsvorm,
+      isBv,
       marktwaarde,
       wozwaarde,
       financiering,
@@ -364,9 +496,25 @@ export function StartpuntReport({
       box3FinancieringPercentage,
       box3BelastingPercentage,
       vermogensbelasting,
+      nettoHuurPrive,
+      bvAfschrijving,
+      bvOverigeKosten,
+      winstVoorVpb,
+      vennootschapsbelasting,
+      winstNaVpb,
+      kasstroomNaVpb,
+      dividendUitkeren,
+      dividendPercentage,
+      brutoDividend,
+      box2Belasting,
+      ingehoudenDividendbelasting,
+      aanvullendeBox2BijAangifte,
+      nettoDividendNaarPrive,
+      liquiditeitInBvNaDividend,
       nettoHuur,
       nettoRendementMarktwaarde,
       rendementEigenInleg,
+      rendementNaarPrive,
       waardestijging,
       totaalRendement,
       totaleKosten,
@@ -375,26 +523,91 @@ export function StartpuntReport({
     };
   }, [form, initialData.exploitatiekosten]);
 
-  const calculationRows: Array<
-    [string, string, "normal" | "soft" | "main"]
-  > = [
-    ["Marktwaarde vastgoed", euroValue(data.marktwaarde), "normal"],
-    ["WOZ-waarde vastgoed", euroValue(data.wozwaarde), "normal"],
-    ["Huur per maand", euroValue(data.huurPerMaand), "normal"],
-    ["Huur per jaar", euroValue(data.huurPerJaar), "normal"],
-    ["Bruto rendement marktwaarde", pctValue(data.brutoRendement), "normal"],
-    ["Financiering", euroValue(data.financiering), "normal"],
-    ["Rente", pctValue(data.rente), "normal"],
-    ["Rentelasten per jaar", costEuroValue(data.rentelasten), "normal"],
-    ["Na rente resteert", euroValue(data.naRente), "soft"],
-    ["Exploitatiekosten per jaar", costEuroValue(data.exploitatieTotaal), "normal"],
-    ["Vermogensbelasting", costEuroValue(data.vermogensbelasting), "normal"],
-    ["Netto huurinkomsten", euroValue(data.nettoHuur), "main"],
-    ["Netto rendement marktwaarde", pctValue(data.nettoRendementMarktwaarde), "normal"],
-    ["Rendement op eigen inleg", pctValue(data.rendementEigenInleg), "normal"],
-    ["Gemiddelde waardestijging", pctValue(data.waardestijging), "normal"],
-    ["Totaal rendement incl. waardestijging", pctValue(data.totaalRendement), "main"],
+  type CalculationRow = [
+    string,
+    string,
+    "normal" | "soft" | "main"
   ];
+
+  const calculationRows: CalculationRow[] = data.isBv
+    ? [
+        ["Bezitsvorm", "BV", "normal"],
+        ["Marktwaarde vastgoed", euroValue(data.marktwaarde), "normal"],
+        ["Huur per jaar", euroValue(data.huurPerJaar), "normal"],
+        ["Financiering", euroValue(data.financiering), "normal"],
+        ["Rentelasten per jaar", costEuroValue(data.rentelasten), "normal"],
+        [
+          "Exploitatiekosten per jaar",
+          costEuroValue(data.exploitatieTotaal),
+          "normal",
+        ],
+        ["Overige BV-kosten", costEuroValue(data.bvOverigeKosten), "normal"],
+        [
+          "Fiscale afschrijving (geen kasuitgave)",
+          costEuroValue(data.bvAfschrijving),
+          "normal",
+        ],
+        ["Belastbare winst", euroValue(data.winstVoorVpb), "soft"],
+        [
+          "Vennootschapsbelasting",
+          costEuroValue(data.vennootschapsbelasting),
+          "normal",
+        ],
+        ["Kasstroom na Vpb", euroValue(data.kasstroomNaVpb), "main"],
+        ...(data.dividendUitkeren
+          ? ([
+              ["Bruto dividend", euroValue(data.brutoDividend), "normal"],
+              ["Box 2-belasting", costEuroValue(data.box2Belasting), "normal"],
+              [
+                "Netto dividend naar privé",
+                euroValue(data.nettoDividendNaarPrive),
+                "main",
+              ],
+            ] as CalculationRow[])
+          : []),
+        [
+          "Rendement op eigen inleg in BV",
+          pctValue(data.rendementEigenInleg),
+          "normal",
+        ],
+        ["Gemiddelde waardestijging", pctValue(data.waardestijging), "normal"],
+        [
+          "Indicatief totaal incl. waardestijging",
+          pctValue(data.totaalRendement),
+          "main",
+        ],
+      ]
+    : [
+        ["Bezitsvorm", "Privé", "normal"],
+        ["Marktwaarde vastgoed", euroValue(data.marktwaarde), "normal"],
+        ["WOZ-waarde vastgoed", euroValue(data.wozwaarde), "normal"],
+        ["Huur per maand", euroValue(data.huurPerMaand), "normal"],
+        ["Huur per jaar", euroValue(data.huurPerJaar), "normal"],
+        ["Bruto rendement marktwaarde", pctValue(data.brutoRendement), "normal"],
+        ["Financiering", euroValue(data.financiering), "normal"],
+        ["Rente", pctValue(data.rente), "normal"],
+        ["Rentelasten per jaar", costEuroValue(data.rentelasten), "normal"],
+        ["Na rente resteert", euroValue(data.naRente), "soft"],
+        [
+          "Exploitatiekosten per jaar",
+          costEuroValue(data.exploitatieTotaal),
+          "normal",
+        ],
+        ["Vermogensbelasting", costEuroValue(data.vermogensbelasting), "normal"],
+        ["Netto huurinkomsten", euroValue(data.nettoHuur), "main"],
+        [
+          "Netto rendement marktwaarde",
+          pctValue(data.nettoRendementMarktwaarde),
+          "normal",
+        ],
+        ["Rendement op eigen inleg", pctValue(data.rendementEigenInleg), "normal"],
+        ["Gemiddelde waardestijging", pctValue(data.waardestijging), "normal"],
+        [
+          "Totaal rendement incl. waardestijging",
+          pctValue(data.totaalRendement),
+          "main",
+        ],
+      ];
 
   const imageSource = uploadedImage ?? initialData.afbeeldingUrl;
 
@@ -434,61 +647,46 @@ export function StartpuntReport({
             />
           </label>
 
+          <ChoiceField
+            label="Investeren vanuit"
+            value={form.bezitsvorm}
+            options={[
+              { value: "prive", label: "Privé" },
+              { value: "bv", label: "BV" },
+            ]}
+            onChange={(value) =>
+              updateField("bezitsvorm", value as Bezitsvorm)
+            }
+          />
+
           <InputField
             label="Marktwaarde"
             value={form.marktwaardeVastgoed}
+            format="amount"
             onChange={(value) => updateField("marktwaardeVastgoed", value)}
           />
           <InputField
             label="WOZ-waarde"
             value={form.wozWaardeVastgoed}
+            format="amount"
             onChange={(value) => updateField("wozWaardeVastgoed", value)}
           />
           <InputField
             label="Financiering"
             value={form.financiering}
+            format="amount"
             onChange={(value) => updateField("financiering", value)}
           />
           <InputField
             label="Huur per maand"
             value={form.huurPerMaand}
+            format="amount"
             onChange={(value) => updateField("huurPerMaand", value)}
           />
           <InputField
             label="Rente %"
             value={form.rentePercentage}
             onChange={(value) => updateField("rentePercentage", value)}
-          />
-          <SelectField
-            label="Fiscaal partner?"
-            value={form.fiscaalPartner}
-            onChange={(value) => updateField("fiscaalPartner", value)}
-          />
-          <SelectField
-            label="Heffingsvrij vermogen toepassen?"
-            value={form.heffingsvrijVermogenToepassen}
-            onChange={(value) =>
-              updateField("heffingsvrijVermogenToepassen", value)
-            }
-          />
-          <InputField
-            label="Box 3 WOZ %"
-            value={form.box3WozPercentage}
-            onChange={(value) => updateField("box3WozPercentage", value)}
-          />
-          <InputField
-            label="Box 3 financiering %"
-            value={form.box3FinancieringPercentage}
-            onChange={(value) =>
-              updateField("box3FinancieringPercentage", value)
-            }
-          />
-          <InputField
-            label="Box-3 tarief %"
-            value={form.box3BelastingPercentage}
-            onChange={(value) =>
-              updateField("box3BelastingPercentage", value)
-            }
           />
           <InputField
             label="Waardestijging %"
@@ -497,6 +695,85 @@ export function StartpuntReport({
               updateField("gemiddeldeWaardestijging", value)
             }
           />
+
+          {form.bezitsvorm === "prive" ? (
+            <>
+              <SelectField
+                label="Fiscaal partner?"
+                value={form.fiscaalPartner}
+                onChange={(value) => updateField("fiscaalPartner", value)}
+              />
+              <SelectField
+                label="Heffingsvrij vermogen toepassen?"
+                value={form.heffingsvrijVermogenToepassen}
+                onChange={(value) =>
+                  updateField("heffingsvrijVermogenToepassen", value)
+                }
+              />
+              <InputField
+                label="Box 3 WOZ %"
+                value={form.box3WozPercentage}
+                onChange={(value) => updateField("box3WozPercentage", value)}
+              />
+              <InputField
+                label="Box 3 financiering %"
+                value={form.box3FinancieringPercentage}
+                onChange={(value) =>
+                  updateField("box3FinancieringPercentage", value)
+                }
+              />
+              <InputField
+                label="Box-3 tarief %"
+                value={form.box3BelastingPercentage}
+                onChange={(value) =>
+                  updateField("box3BelastingPercentage", value)
+                }
+              />
+              <div className="tax-input-note input-full">
+                Privémodel 2026: box 3 met WOZ-waarde, schuldendrempel,
+                heffingsvrij vermogen en forfaitaire rendementspercentages.
+              </div>
+            </>
+          ) : (
+            <>
+              <InputField
+                label="Fiscale afschrijving per jaar"
+                value={form.bvAfschrijvingPerJaar}
+                format="amount"
+                onChange={(value) =>
+                  updateField("bvAfschrijvingPerJaar", value)
+                }
+              />
+              <InputField
+                label="Overige BV-kosten per jaar"
+                value={form.bvOverigeKostenPerJaar}
+                format="amount"
+                onChange={(value) =>
+                  updateField("bvOverigeKostenPerJaar", value)
+                }
+              />
+              <SelectField
+                label="Winst uitkeren naar privé?"
+                value={form.bvWinstUitkeren}
+                onChange={(value) => updateField("bvWinstUitkeren", value)}
+              />
+              {form.bvWinstUitkeren === "ja" && (
+                <InputField
+                  label="Deel winst uitkeren %"
+                  value={form.bvDividendUitkeringPercentage}
+                  onChange={(value) =>
+                    updateField("bvDividendUitkeringPercentage", value)
+                  }
+                />
+              )}
+              <div className="tax-input-note input-full">
+                BV-model 2026: Vpb 19% tot en met € 200.000 en 25,8% over
+                het meerdere. Bij dividend rekent het model aanvullend met
+                box 2: 24,5% tot € 68.843 en 31% over het meerdere.
+                Afschrijving is fiscaal, maar geen directe kasuitgave.
+              </div>
+            </>
+          )}
         </div>
 
         <div className="expense-input-head">
@@ -513,6 +790,7 @@ export function StartpuntReport({
               key={item.name}
               label={item.name}
               value={form.exploitatiekosten[index] ?? ""}
+              format="amount"
               onChange={(value) => updateExpense(index, value)}
             />
           ))}
@@ -534,10 +812,42 @@ export function StartpuntReport({
         </header>
 
         <section className="kpi-grid">
-          <KpiCard label="Bruto rendement" value={pctValue(data.brutoRendement)} text="Huur per jaar gedeeld door marktwaarde." />
-          <KpiCard label="Na rente resteert" value={euroValue(data.naRente)} text="Huurinkomsten na jaarlijkse rentelasten." />
-          <KpiCard label="Netto huurinkomsten" value={euroValue(data.nettoHuur)} text="Na rente, exploitatiekosten en vermogensbelasting." />
-          <KpiCard label="Totaal incl. waardestijging" value={pctValue(data.totaalRendement)} text="Rendement op eigen inleg plus waardestijging." />
+          <KpiCard
+            label="Bruto rendement"
+            value={pctValue(data.brutoRendement)}
+            text="Huur per jaar gedeeld door marktwaarde."
+          />
+          <KpiCard
+            label="Na rente resteert"
+            value={euroValue(data.naRente)}
+            text="Huurinkomsten na jaarlijkse rentelasten."
+          />
+          <KpiCard
+            label={data.isBv ? "Kasstroom na Vpb" : "Netto huurinkomsten"}
+            value={euroValue(data.nettoHuur)}
+            text={
+              data.isBv
+                ? "Na rente, kosten en vennootschapsbelasting."
+                : "Na rente, exploitatiekosten en vermogensbelasting."
+            }
+          />
+          <KpiCard
+            label={
+              data.isBv && data.dividendUitkeren
+                ? "Netto dividend privé"
+                : "Totaal incl. waardestijging"
+            }
+            value={
+              data.isBv && data.dividendUitkeren
+                ? euroValue(data.nettoDividendNaarPrive)
+                : pctValue(data.totaalRendement)
+            }
+            text={
+              data.isBv && data.dividendUitkeren
+                ? "Uitkering na de berekende box 2-belasting."
+                : "Rendement op eigen inleg plus waardestijging."
+            }
+          />
         </section>
 
         <section className="intro-grid">
@@ -553,6 +863,10 @@ export function StartpuntReport({
             <div className="value-list">
               <InfoLine label="Marktwaarde" value={euroValue(data.marktwaarde)} />
               <InfoLine label="WOZ-waarde" value={euroValue(data.wozwaarde)} />
+              <InfoLine
+                label="Bezitsvorm"
+                value={data.isBv ? "BV" : "Privé"}
+              />
               <InfoLine label="Eigen inleg" value={euroValue(data.eigenInleg)} />
             </div>
           </div>
@@ -579,27 +893,78 @@ export function StartpuntReport({
 
         <section className="card text-card kernbeeld">
           <SectionTitle number="02" title="Kernbeeld" />
-          <p>
-            Het bruto rendement van <strong>{pctValue(data.brutoRendement)}</strong> lijkt aantrekkelijk,
-            maar geeft een onvolledig beeld. Van de jaarlijkse huurinkomsten van{" "}
-            <strong>{euroValue(data.huurPerJaar)}</strong> gaan nog{" "}
-            <strong>{euroValue(Math.abs(data.rentelasten))}</strong> aan rente,{" "}
-            <strong>{euroValue(data.exploitatieTotaal)}</strong> aan exploitatiekosten en{" "}
-            <strong>{euroValue(Math.abs(data.vermogensbelasting))}</strong> aan vermogensbelasting af.
-            In totaal verdwijnt daarmee <strong>{euroValue(data.totaleKosten)}</strong>, oftewel{" "}
-            <strong>{pctAbsValue(data.huurPerJaar > 0 ? data.totaleKosten / data.huurPerJaar : null)}</strong>{" "}
-            van de bruto huurinkomsten. Uiteindelijk resteert{" "}
-            <strong>{euroValue(data.nettoHuur)}</strong> aan netto huurinkomsten.
-          </p>
-          <p>
-            Het totale nettorendement inclusief waardestijging bedraagt{" "}
-            <strong>{pctValue(data.totaalRendement)}</strong>. Hiervan bestaat{" "}
-            <strong>{(data.waardestijging * 100).toFixed(1).replace(".", ",")} procentpunt</strong>{" "}
-            uit de verwachte waardestijging van het vastgoed. Dit is geen directe kasstroom en komt pas
-            beschikbaar bij verkoop of herfinanciering. De directe kasstroom uit verhuur bedraagt daarom{" "}
-            <strong>{pctValue(data.rendementEigenInleg)}</strong>, oftewel{" "}
-            <strong>{euroValue(data.directeKasstroomTekst)}</strong> per jaar.
-          </p>
+          {data.isBv ? (
+            <>
+              <p>
+                Het vastgoed wordt in dit rekenmodel vanuit een BV gehouden.
+                Van de jaarlijkse huurinkomsten van{" "}
+                <strong>{euroValue(data.huurPerJaar)}</strong> gaan{" "}
+                <strong>{euroValue(Math.abs(data.rentelasten))}</strong> aan rente,
+                <strong> {euroValue(data.exploitatieTotaal)}</strong> aan
+                exploitatiekosten en{" "}
+                <strong>{euroValue(data.bvOverigeKosten)}</strong> aan overige
+                BV-kosten af. De ingevoerde fiscale afschrijving van{" "}
+                <strong>{euroValue(data.bvAfschrijving)}</strong> verlaagt de
+                belastbare winst, maar is geen directe kasuitgave.
+              </p>
+              <p>
+                De belastbare winst bedraagt{" "}
+                <strong>{euroValue(data.winstVoorVpb)}</strong>. Na{" "}
+                <strong>{euroValue(data.vennootschapsbelasting)}</strong> aan
+                vennootschapsbelasting resteert een jaarlijkse kasstroom in de
+                BV van <strong>{euroValue(data.kasstroomNaVpb)}</strong>, oftewel{" "}
+                <strong>{pctValue(data.rendementEigenInleg)}</strong> op de eigen
+                inleg.
+              </p>
+              {data.dividendUitkeren ? (
+                <p>
+                  Van de winst na Vpb wordt{" "}
+                  <strong>{pctValue(data.dividendPercentage)}</strong> als
+                  dividend uitgekeerd. Na de berekende box 2-belasting van{" "}
+                  <strong>{euroValue(data.box2Belasting)}</strong> ontvangt privé
+                  netto <strong>{euroValue(data.nettoDividendNaarPrive)}</strong>.
+                  De ingehouden dividendbelasting is in dit model een voorheffing
+                  en wordt niet dubbel boven op box 2 gerekend.
+                </p>
+              ) : (
+                <p>
+                  Er wordt geen dividend uitgekeerd. Daardoor is nog geen box
+                  2-belasting opgenomen en blijft de beschikbare liquiditeit in
+                  de BV voor herinvestering aanwezig.
+                </p>
+              )}
+              <p>
+                De waardestijging is geen jaarlijkse kasstroom. Een eventuele
+                fiscale boekwinst bij verkoop, btw-effecten, renteaftrekbeperkingen
+                en een mogelijk DGA-loon vallen buiten deze vereenvoudigde check.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                Het bruto rendement van{" "}
+                <strong>{pctValue(data.brutoRendement)}</strong> lijkt aantrekkelijk,
+                maar geeft een onvolledig beeld. Van de jaarlijkse huurinkomsten
+                van <strong>{euroValue(data.huurPerJaar)}</strong> gaan nog{" "}
+                <strong>{euroValue(Math.abs(data.rentelasten))}</strong> aan rente,
+                <strong> {euroValue(data.exploitatieTotaal)}</strong> aan
+                exploitatiekosten en{" "}
+                <strong>{euroValue(Math.abs(data.vermogensbelasting))}</strong> aan
+                vermogensbelasting af. Uiteindelijk resteert{" "}
+                <strong>{euroValue(data.nettoHuur)}</strong> aan netto
+                huurinkomsten.
+              </p>
+              <p>
+                Het totale nettorendement inclusief waardestijging bedraagt{" "}
+                <strong>{pctValue(data.totaalRendement)}</strong>. De verwachte
+                waardestijging is geen directe kasstroom en komt pas beschikbaar
+                bij verkoop of herfinanciering. De directe kasstroom uit verhuur
+                bedraagt <strong>{pctValue(data.rendementEigenInleg)}</strong>,
+                oftewel <strong>{euroValue(data.directeKasstroomTekst)}</strong> per
+                jaar.
+              </p>
+            </>
+          )}
         </section>
 
         <footer className="footer">
@@ -635,59 +1000,252 @@ export function StartpuntReport({
           </div>
 
           <div className="card tinted">
-            <SectionTitle number="04" title="Box 3-uitgangspunt" />
-            <div className="tax-list">
-              <InfoLine label="Fiscaal partner" value={data.fiscaalPartner ? "Ja" : "Nee"} />
-              <InfoLine label="Heffingsvrij vermogen toegepast" value={data.heffingsvrijToepassen ? "Ja" : "Nee"} />
-              <InfoLine label="Schuldendrempel" value={euroValue(data.schuldendrempel)} />
-              <InfoLine label="Toegepaste vrijstelling" value={euroValue(data.toegepasteVrijstelling)} />
-              <InfoLine label={`WOZ-waarde x ${pctValue(data.box3WozPercentage)}`} value={euroValue(data.fictiefRendementWoz)} />
-              <InfoLine label={`Aftrekbare schuld x ${pctValue(data.box3FinancieringPercentage)}`} value={costEuroValue(data.fictiefRendementSchuld)} />
-              <InfoLine label="Rendementsgrondslag" value={euroValue(data.rendementsgrondslag)} />
-              <InfoLine label="Grondslag na vrijstelling" value={euroValue(data.grondslagNaVrijstelling)} strong />
-              <InfoLine label="Belastbaar forfaitair rendement" value={euroValue(data.voordeelSparenBeleggen)} />
-              <InfoLine label="Box-3 tarief" value={pctValue(data.box3BelastingPercentage)} />
-              <InfoLine label="Vermogensbelasting" value={costEuroValue(data.vermogensbelasting)} strong />
-            </div>
-            <p className="box3-note">
-              Deze Box 3-berekening is gebaseerd op de huidige uitgangspunten. Tarieven,
-              vrijstellingen en de berekeningsmethode kunnen in de toekomst wijzigen.
-            </p>
+            {data.isBv ? (
+              <>
+                <SectionTitle number="04" title="BV-belasting" />
+                <div className="tax-list">
+                  <InfoLine label="Bezitsvorm" value="BV" />
+                  <InfoLine
+                    label="Belastbare winst"
+                    value={euroValue(data.winstVoorVpb)}
+                    strong
+                  />
+                  <InfoLine
+                    label="Vpb-tarief"
+                    value="19% / 25,8%"
+                  />
+                  <InfoLine
+                    label="Vennootschapsbelasting"
+                    value={costEuroValue(data.vennootschapsbelasting)}
+                  />
+                  <InfoLine
+                    label="Winst na Vpb"
+                    value={euroValue(data.winstNaVpb)}
+                  />
+                  <InfoLine
+                    label="Afschrijving terug in kasstroom"
+                    value={euroValue(data.bvAfschrijving)}
+                  />
+                  <InfoLine
+                    label="Kasstroom na Vpb"
+                    value={euroValue(data.kasstroomNaVpb)}
+                    strong
+                  />
+                  <InfoLine
+                    label="Dividenduitkering"
+                    value={data.dividendUitkeren ? "Ja" : "Nee"}
+                  />
+                  {data.dividendUitkeren && (
+                    <>
+                      <InfoLine
+                        label="Uitkeringspercentage"
+                        value={pctValue(data.dividendPercentage)}
+                      />
+                      <InfoLine
+                        label="Bruto dividend"
+                        value={euroValue(data.brutoDividend)}
+                      />
+                      <InfoLine
+                        label="Box 2 (24,5% / 31%)"
+                        value={costEuroValue(data.box2Belasting)}
+                      />
+                      <InfoLine
+                        label="Inhouding dividendbelasting"
+                        value={costEuroValue(data.ingehoudenDividendbelasting)}
+                      />
+                      <InfoLine
+                        label="Aanvullend via aangifte"
+                        value={costEuroValue(data.aanvullendeBox2BijAangifte)}
+                      />
+                      <InfoLine
+                        label="Netto naar privé"
+                        value={euroValue(data.nettoDividendNaarPrive)}
+                        strong
+                      />
+                    </>
+                  )}
+                  <InfoLine
+                    label="Liquiditeit blijft in BV"
+                    value={euroValue(data.liquiditeitInBvNaDividend)}
+                    strong
+                  />
+                </div>
+                <p className="box3-note">
+                  Indicatieve jaarberekening 2026. De fiscale afschrijving moet
+                  afzonderlijk worden beoordeeld en mag de fiscale boekwaarde
+                  niet onder de WOZ-bodemwaarde brengen. Verkoopwinst, btw,
+                  gebruikelijk loon en renteaftrekbeperkingen zijn niet verwerkt.
+                </p>
+              </>
+            ) : (
+              <>
+                <SectionTitle number="04" title="Box 3-uitgangspunt" />
+                <div className="tax-list">
+                  <InfoLine
+                    label="Fiscaal partner"
+                    value={data.fiscaalPartner ? "Ja" : "Nee"}
+                  />
+                  <InfoLine
+                    label="Heffingsvrij vermogen toegepast"
+                    value={data.heffingsvrijToepassen ? "Ja" : "Nee"}
+                  />
+                  <InfoLine
+                    label="Schuldendrempel"
+                    value={euroValue(data.schuldendrempel)}
+                  />
+                  <InfoLine
+                    label="Toegepaste vrijstelling"
+                    value={euroValue(data.toegepasteVrijstelling)}
+                  />
+                  <InfoLine
+                    label={`WOZ-waarde x ${pctValue(data.box3WozPercentage)}`}
+                    value={euroValue(data.fictiefRendementWoz)}
+                  />
+                  <InfoLine
+                    label={`Aftrekbare schuld x ${pctValue(
+                      data.box3FinancieringPercentage
+                    )}`}
+                    value={costEuroValue(data.fictiefRendementSchuld)}
+                  />
+                  <InfoLine
+                    label="Rendementsgrondslag"
+                    value={euroValue(data.rendementsgrondslag)}
+                  />
+                  <InfoLine
+                    label="Grondslag na vrijstelling"
+                    value={euroValue(data.grondslagNaVrijstelling)}
+                    strong
+                  />
+                  <InfoLine
+                    label="Belastbaar forfaitair rendement"
+                    value={euroValue(data.voordeelSparenBeleggen)}
+                  />
+                  <InfoLine
+                    label="Box-3 tarief"
+                    value={pctValue(data.box3BelastingPercentage)}
+                  />
+                  <InfoLine
+                    label="Vermogensbelasting"
+                    value={costEuroValue(data.vermogensbelasting)}
+                    strong
+                  />
+                </div>
+                <p className="box3-note">
+                  Deze Box 3-berekening is gebaseerd op de ingevoerde
+                  uitgangspunten. Tarieven, vrijstellingen en de
+                  berekeningsmethode kunnen wijzigen.
+                </p>
+              </>
+            )}
           </div>
         </section>
 
         <section className="page-two-grid lower">
           <div className="card">
             <SectionTitle number="05" title="Kasstroomopbouw" />
-            <Bar label="Huur per jaar" value={data.huurPerJaar} max={data.huurPerJaar} positive />
-            <Bar label="Rentelasten" value={data.rentelasten} max={data.huurPerJaar} />
-            <Bar label="Exploitatiekosten" value={data.exploitatieTotaal} max={data.huurPerJaar} />
-            <Bar label="Vermogensbelasting" value={data.vermogensbelasting} max={data.huurPerJaar} />
-            <Bar label="Netto huurinkomsten" value={data.nettoHuur} max={data.huurPerJaar} positive />
+            <Bar
+              label="Huur per jaar"
+              value={data.huurPerJaar}
+              max={data.huurPerJaar}
+              positive
+            />
+            <Bar
+              label="Rentelasten"
+              value={data.rentelasten}
+              max={data.huurPerJaar}
+            />
+            <Bar
+              label="Exploitatiekosten"
+              value={data.exploitatieTotaal}
+              max={data.huurPerJaar}
+            />
+            {data.isBv ? (
+              <>
+                <Bar
+                  label="Overige BV-kosten"
+                  value={data.bvOverigeKosten}
+                  max={data.huurPerJaar}
+                />
+                <Bar
+                  label="Vennootschapsbelasting"
+                  value={data.vennootschapsbelasting}
+                  max={data.huurPerJaar}
+                />
+                <Bar
+                  label="Kasstroom na Vpb"
+                  value={data.kasstroomNaVpb}
+                  max={data.huurPerJaar}
+                  positive
+                />
+              </>
+            ) : (
+              <>
+                <Bar
+                  label="Vermogensbelasting"
+                  value={data.vermogensbelasting}
+                  max={data.huurPerJaar}
+                />
+                <Bar
+                  label="Netto huurinkomsten"
+                  value={data.nettoHuur}
+                  max={data.huurPerJaar}
+                  positive
+                />
+              </>
+            )}
           </div>
 
           <div className="card text-card risico">
             <SectionTitle number="06" title="Risico en weerbaarheid" />
-            <p>
-              Van de <strong>{euroValue(data.huurPerJaar)}</strong> bruto jaarhuur gaat in dit rekenvoorbeeld{" "}
-              <strong>{euroValue(data.totaleKosten)}</strong> op aan rente, exploitatiekosten en
-              vermogensbelasting. Daardoor blijft ongeveer{" "}
-              <strong>{pctValue(data.nettoPerEuro)}</strong> van de huur als directe netto kasstroom over.
-              Anders gezegd: van iedere euro aan huurinkomsten resteert circa{" "}
-              <strong>{euroDecimalValue(data.nettoPerEuro)}</strong> netto.
-            </p>
-            <p>
-              Deze uitkomst is een momentopname. Langere leegstand, onverwacht onderhoud,
-              hogere financieringslasten of wijzigingen in fiscale regelgeving kunnen de
-              kasstroom verder verlagen. Een voldoende liquiditeitsbuffer blijft belangrijk.
-            </p>
+            {data.isBv ? (
+              <>
+                <p>
+                  Van de <strong>{euroValue(data.huurPerJaar)}</strong> bruto
+                  jaarhuur gaat in dit rekenvoorbeeld{" "}
+                  <strong>{euroValue(data.totaleKosten)}</strong> op aan rente,
+                  exploitatiekosten, overige BV-kosten en Vpb. Daardoor blijft{" "}
+                  <strong>{pctValue(data.nettoPerEuro)}</strong> van de huur als
+                  kasstroom in de BV over.
+                </p>
+                <p>
+                  Afschrijving verlaagt de fiscale winst, maar niet de liquide
+                  kasstroom. Bij een dividenduitkering volgt box 2. De uitkomst is
+                  een vereenvoudigde indicatie en vervangt geen fiscale beoordeling
+                  van boekwaarde, grond, btw, DGA-loon of renteaftrek.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>
+                  Van de <strong>{euroValue(data.huurPerJaar)}</strong> bruto
+                  jaarhuur gaat in dit rekenvoorbeeld{" "}
+                  <strong>{euroValue(data.totaleKosten)}</strong> op aan rente,
+                  exploitatiekosten en vermogensbelasting. Daardoor blijft ongeveer{" "}
+                  <strong>{pctValue(data.nettoPerEuro)}</strong> van de huur als
+                  directe netto kasstroom over.
+                </p>
+                <p>
+                  Deze uitkomst is een momentopname. Langere leegstand, onverwacht
+                  onderhoud, hogere financieringslasten of wijzigingen in fiscale
+                  regelgeving kunnen de kasstroom verder verlagen.
+                </p>
+              </>
+            )}
             <div className="closing-box">
-              <span>Netto per € 1 huur</span>
+              <span>{data.isBv ? "Kasstroom per € 1 huur" : "Netto per € 1 huur"}</span>
               <strong>{euroDecimalValue(data.nettoPerEuro)}</strong>
             </div>
             <div className="closing-box soft">
-              <span>Kosten en belasting</span>
-              <strong>{euroValue(data.totaleKosten)}</strong>
+              <span>
+                {data.isBv && data.dividendUitkeren
+                  ? "Netto dividend privé"
+                  : "Kosten en belasting"}
+              </span>
+              <strong>
+                {data.isBv && data.dividendUitkeren
+                  ? euroValue(data.nettoDividendNaarPrive)
+                  : euroValue(data.totaleKosten)}
+              </strong>
             </div>
           </div>
         </section>
@@ -712,15 +1270,82 @@ function InputField({
   label,
   value,
   onChange,
+  format = "plain",
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  format?: "plain" | "amount";
 }) {
+  const shownValue = format === "amount" ? formatAmountInput(value) : value;
+  const [draftValue, setDraftValue] = useState(shownValue);
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setDraftValue(format === "amount" ? formatAmountInput(value) : value);
+    }
+  }, [value, format, isFocused]);
+
+  const input = (
+    <input
+      value={draftValue}
+      inputMode={format === "amount" ? "numeric" : undefined}
+      autoComplete="off"
+      onFocus={() => setIsFocused(true)}
+      onBlur={(event) => {
+        setIsFocused(false);
+        const nextValue =
+          format === "amount"
+            ? normalizeAmountInput(event.currentTarget.value)
+            : event.currentTarget.value;
+        setDraftValue(
+          format === "amount" ? formatAmountInput(nextValue) : nextValue
+        );
+        if (nextValue !== value) onChange(nextValue);
+      }}
+      onChange={(event) => {
+        if (format !== "amount") {
+          const nextValue = event.currentTarget.value;
+          setDraftValue(nextValue);
+          onChange(nextValue);
+          return;
+        }
+
+        const inputElement = event.currentTarget;
+        const rawValue = inputElement.value;
+        const cursorPosition = inputElement.selectionStart ?? rawValue.length;
+        const digitsBeforeCursor = rawValue
+          .slice(0, cursorPosition)
+          .replace(/\D/g, "").length;
+        const nextValue = normalizeAmountInput(rawValue);
+        const formattedValue = formatAmountInput(nextValue);
+
+        setDraftValue(formattedValue);
+        onChange(nextValue);
+
+        window.requestAnimationFrame(() => {
+          const nextCursorPosition = caretPositionAfterDigits(
+            formattedValue,
+            digitsBeforeCursor
+          );
+          inputElement.setSelectionRange(nextCursorPosition, nextCursorPosition);
+        });
+      }}
+    />
+  );
+
   return (
-    <label className="input-field">
+    <label className={`input-field${format === "amount" ? " amount-field" : ""}`}>
       <span>{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} />
+      {format === "amount" ? (
+        <div className="amount-input-wrap">
+          <span className="amount-input-prefix" aria-hidden="true">€</span>
+          {input}
+        </div>
+      ) : (
+        input
+      )}
     </label>
   );
 }
@@ -740,6 +1365,31 @@ function SelectField({
       <select value={value} onChange={(event) => onChange(event.target.value as YesNo)}>
         <option value="nee">Nee</option>
         <option value="ja">Ja</option>
+      </select>
+    </label>
+  );
+}
+
+function ChoiceField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="input-field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option value={option.value} key={option.value}>
+            {option.label}
+          </option>
+        ))}
       </select>
     </label>
   );
@@ -885,6 +1535,18 @@ const styles = `
     gap: 12px;
   }
 
+  .input-full { grid-column: 1 / -1; }
+
+  .tax-input-note {
+    padding: 11px 13px;
+    border: 1px dashed rgba(106,93,82,.28);
+    border-radius: 11px;
+    background: rgba(226,226,222,.45);
+    color: var(--walnut);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
   .expense-input-head {
     display: flex;
     justify-content: space-between;
@@ -917,6 +1579,41 @@ const styles = `
     padding: 10px 11px;
     font-size: 14px;
     outline: none;
+  }
+
+  .input-field input:focus,
+  .input-field select:focus,
+  .amount-input-wrap:focus-within {
+    border-color: rgba(106,93,82,.58);
+    box-shadow: 0 0 0 3px rgba(106,93,82,.10);
+  }
+
+  .amount-input-wrap {
+    display: grid;
+    grid-template-columns: 34px minmax(0,1fr);
+    min-height: 42px;
+    overflow: hidden;
+    border: 1px solid rgba(106,93,82,.24);
+    border-radius: 11px;
+    background: var(--white);
+  }
+
+  .amount-input-prefix {
+    display: grid;
+    place-items: center;
+    border-right: 1px solid rgba(106,93,82,.18);
+    background: rgba(232,227,218,.62);
+    color: var(--walnut);
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .amount-input-wrap input {
+    min-height: 40px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none !important;
   }
 
   .image-input-field input[type="file"] { padding: 7px; cursor: pointer; }
@@ -1148,12 +1845,12 @@ const styles = `
 
   .page-two-grid {
     display: grid;
-    grid-template-columns: 1fr 74mm;
+    grid-template-columns: 1fr 82mm;
     gap: 7mm;
   }
 
   .page-two-grid.lower {
-    grid-template-columns: 1fr 78mm;
+    grid-template-columns: 1fr 82mm;
     flex: 1;
   }
 
@@ -1296,5 +1993,12 @@ const styles = `
 
   @media screen and (max-width: 900px) {
     .screen { padding: 16px; overflow-x: auto; }
+    .input-grid, .expense-input-grid {
+      grid-template-columns: repeat(2, minmax(0,1fr));
+    }
+  }
+
+  @media screen and (max-width: 560px) {
+    .input-grid, .expense-input-grid { grid-template-columns: 1fr; }
   }
 `;
