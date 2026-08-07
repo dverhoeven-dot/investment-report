@@ -17,6 +17,9 @@ type Asset = {
   sourceKey?: string;
   sourceProject?: string;
   sourceAddress?: string;
+  reportCategory?: SoldCategoryId;
+  reportStatus?: PortfolioAssetStatus;
+  customPhotoUrl?: string;
   country: Country;
   ownership: number;
   status: string;
@@ -67,6 +70,14 @@ type PortfolioData = {
 type NormalizedRow = Record<string, string>;
 
 type SoldCategoryId = "office" | "residential" | "industrial";
+type PortfolioAssetStatus = "current" | "sold";
+
+type PortfolioAssetSetting = {
+  reportName?: string;
+  category?: SoldCategoryId;
+};
+
+type PortfolioAssetSettings = Record<string, PortfolioAssetSetting>;
 
 type SoldCategoryDefinition = {
   id: SoldCategoryId;
@@ -88,6 +99,15 @@ const SOLD_CATEGORY_STORAGE_KEY =
 
 const SOLD_ASSET_EDITS_STORAGE_KEY =
   "complete-portfolio-report-sold-asset-edits-v1";
+
+const PORTFOLIO_MANAGER_STORAGE_KEY =
+  "complete-portfolio-report-manager-v1";
+const PORTFOLIO_MANAGER_COLLAPSED_STORAGE_KEY =
+  "complete-portfolio-report-manager-collapsed-v1";
+const PORTFOLIO_MANAGER_HIDDEN_STORAGE_KEY =
+  "complete-portfolio-report-manager-hidden-rows-v1";
+const PORTFOLIO_PHOTO_DB_NAME = "complete-portfolio-report-photos";
+const PORTFOLIO_PHOTO_STORE_NAME = "project-photos";
 
 const SOLD_CATEGORY_LABELS: Record<SoldCategoryId, string> = {
   office: "Kantoorpanden",
@@ -536,6 +556,281 @@ function normalizeText(value: string): string {
 
 function normalizeHeader(value: string): string {
   return normalizeText(value).replace(/\s+/g, "");
+}
+
+function getLegacyPortfolioAssetKey(asset: Asset): string {
+  const stableLocation = asset.address.trim() || asset.project.trim();
+
+  return [
+    asset.entity,
+    stableLocation,
+    asset.purchaseDate,
+    asset.country,
+  ]
+    .map(normalizeText)
+    .join("|");
+}
+
+function getPreviousPortfolioAssetKey(asset: Asset): string {
+  const stableLocation = asset.address.trim() || asset.project.trim();
+
+  return [asset.country, stableLocation]
+    .map(normalizeText)
+    .join("|");
+}
+
+function normalizePortfolioLocation(value: string): string {
+  const ignoredTokens = new Set([
+    "current",
+    "sold",
+    "realized",
+    "realised",
+    "project",
+    "projects",
+    "object",
+    "objects",
+  ]);
+
+  const tokens = normalizeText(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !ignoredTokens.has(token));
+
+  // Door unieke tokens alfabetisch/numeriek te sorteren worden bijvoorbeeld
+  // “Venlo Groethofstraat 34” en “Groethofstraat 34, Venlo” dezelfde locatie.
+  return Array.from(new Set(tokens))
+    .sort((left, right) =>
+      left.localeCompare(right, "nl", {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    )
+    .join(" ");
+}
+
+function getAddressFirstPortfolioAssetKey(asset: Asset): string {
+  const candidates = [asset.address, asset.project]
+    .map((value) => normalizePortfolioLocation(value))
+    .filter(Boolean);
+
+  const stableLocation =
+    candidates.find((candidate) => /\d/.test(candidate)) ??
+    candidates[0] ??
+    normalizePortfolioLocation(asset.entity);
+
+  return `${normalizeText(asset.country)}|${stableLocation}`;
+}
+
+function getPortfolioAssetKey(asset: Asset): string {
+  // De projectnaam uit Overview is leidend voor de identiteit van een pand.
+  // Hierdoor worden regels met dezelfde Overview-naam maar een afwijkend of
+  // leeg adresveld niet meer als twee verschillende panden behandeld.
+  const candidates = [asset.project, asset.address]
+    .map((value) => normalizePortfolioLocation(value))
+    .filter(Boolean);
+
+  const stableLocation =
+    candidates.find((candidate) => /\d/.test(candidate)) ??
+    candidates[0] ??
+    normalizePortfolioLocation(asset.entity);
+
+  return `${normalizeText(asset.country)}|${stableLocation}`;
+}
+
+function getPortfolioManagerRowKey(asset: Asset): string {
+  // Deze sleutel is bewust specifieker dan getPortfolioAssetKey().
+  // Daardoor kan één foutieve dubbele bronregel worden verborgen zonder
+  // automatisch de andere versie van hetzelfde fysieke pand te verwijderen.
+  return [
+    asset.entity,
+    asset.project,
+    asset.address,
+    asset.status,
+    asset.purchaseDate,
+    asset.salesDate,
+    asset.country,
+  ]
+    .map(normalizeText)
+    .join("|");
+}
+
+function getPortfolioAssetSourceScore(asset: Asset): number {
+  let score = 0;
+
+  // Wanneer hetzelfde pand zowel als current als sold uit de bron wordt
+  // ingelezen, is de sold-regel leidend.
+  if (isSoldAsset(asset)) score += 10_000;
+  else if (isCurrentAsset(asset)) score += 5_000;
+
+  if (asset.salesValue > 0) score += 100;
+  if (asset.hasExplicitProfit) score += 80;
+  if (asset.investedValue > 0) score += 40;
+  if (asset.purchasePrice > 0) score += 30;
+  if (asset.mortgage > 0) score += 20;
+  if (asset.builtArea > 0) score += 10;
+  if (asset.plotSize > 0) score += 10;
+  if (asset.purchaseDate) score += 5;
+  if (asset.salesDate) score += 5;
+  if (asset.address.trim()) score += 3;
+
+  return score;
+}
+
+function deduplicatePortfolioAssets(assets: Asset[]): Asset[] {
+  const uniqueAssets = new Map<string, Asset>();
+
+  for (const asset of assets) {
+    const key = getPortfolioAssetKey(asset);
+    const existing = uniqueAssets.get(key);
+
+    if (!existing) {
+      uniqueAssets.set(key, asset);
+      continue;
+    }
+
+    if (
+      getPortfolioAssetSourceScore(asset) >
+      getPortfolioAssetSourceScore(existing)
+    ) {
+      uniqueAssets.set(key, asset);
+    }
+  }
+
+  return Array.from(uniqueAssets.values());
+}
+
+function getDefaultPortfolioCategory(asset: Asset): SoldCategoryId {
+  if (asset.country === "Spanje") return "residential";
+  return getSoldCategory(asset);
+}
+
+function getDefaultPortfolioStatus(asset: Asset): PortfolioAssetStatus {
+  return isSoldAsset(asset) ? "sold" : "current";
+}
+
+function getPortfolioAssetSetting(
+  asset: Asset,
+  settings: PortfolioAssetSettings,
+): Required<PortfolioAssetSetting> {
+  const stored =
+    settings[getPortfolioAssetKey(asset)] ??
+    settings[getAddressFirstPortfolioAssetKey(asset)] ??
+    settings[getPreviousPortfolioAssetKey(asset)] ??
+    settings[getLegacyPortfolioAssetKey(asset)] ??
+    {};
+
+  return {
+    reportName: stored.reportName ?? asset.project,
+    category: stored.category ?? getDefaultPortfolioCategory(asset),
+  };
+}
+
+function applyPortfolioAssetSetting(
+  asset: Asset,
+  settings: PortfolioAssetSettings,
+  photoUrls: Record<string, string>,
+): Asset {
+  const key = getPortfolioAssetKey(asset);
+  const setting = getPortfolioAssetSetting(asset, settings);
+
+  return {
+    ...asset,
+    sourceKey: key,
+    sourceProject: asset.sourceProject ?? asset.project,
+    sourceAddress: asset.sourceAddress ?? asset.address,
+    project: setting.reportName.trim() || asset.project,
+    reportCategory: setting.category,
+    // Current/Sold is read-only and always comes from the live Overview data.
+    reportStatus: getDefaultPortfolioStatus(asset),
+    customPhotoUrl:
+      photoUrls[key] ??
+      photoUrls[getAddressFirstPortfolioAssetKey(asset)] ??
+      photoUrls[getPreviousPortfolioAssetKey(asset)] ??
+      photoUrls[getLegacyPortfolioAssetKey(asset)] ??
+      "",
+  };
+}
+
+function hasProjectPhoto(asset: Asset): boolean {
+  return Boolean(
+    asset.customPhotoUrl ||
+      getImageSource(
+        asset.project,
+        asset.address,
+        asset.sourceProject,
+        asset.sourceAddress,
+      ),
+  );
+}
+
+function openPortfolioPhotoDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(PORTFOLIO_PHOTO_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(PORTFOLIO_PHOTO_STORE_NAME)) {
+        database.createObjectStore(PORTFOLIO_PHOTO_STORE_NAME);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function savePortfolioPhoto(
+  assetKey: string,
+  file: File,
+): Promise<void> {
+  const database = await openPortfolioPhotoDatabase();
+
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(
+      PORTFOLIO_PHOTO_STORE_NAME,
+      "readwrite",
+    );
+    transaction.objectStore(PORTFOLIO_PHOTO_STORE_NAME).put(file, assetKey);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+
+  database.close();
+}
+
+async function removePortfolioPhoto(assetKey: string): Promise<void> {
+  const database = await openPortfolioPhotoDatabase();
+
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(
+      PORTFOLIO_PHOTO_STORE_NAME,
+      "readwrite",
+    );
+    transaction.objectStore(PORTFOLIO_PHOTO_STORE_NAME).delete(assetKey);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+
+  database.close();
+}
+
+async function loadPortfolioPhoto(assetKey: string): Promise<Blob | null> {
+  const database = await openPortfolioPhotoDatabase();
+
+  const result = await new Promise<Blob | null>((resolve, reject) => {
+    const transaction = database.transaction(
+      PORTFOLIO_PHOTO_STORE_NAME,
+      "readonly",
+    );
+    const request = transaction.objectStore(PORTFOLIO_PHOTO_STORE_NAME).get(assetKey);
+
+    request.onsuccess = () =>
+      resolve(request.result instanceof Blob ? request.result : null);
+    request.onerror = () => reject(request.error);
+  });
+
+  database.close();
+  return result;
 }
 
 function getPortfolioId(value: string): PortfolioId | null {
@@ -1667,21 +1962,17 @@ function splitCommercialAssetsAcrossPages(
   const sortedAssets = sortSoldAssetsByAddress(assets);
   const pages: [Asset[], Asset[]] = [[], []];
 
-  const hasPhoto = (asset: Asset) =>
-    Boolean(
-      getImageSource(
-        asset.project,
-        asset.address,
-        asset.sourceProject,
-        asset.sourceAddress,
-      ),
-    );
+  const hasPhoto = (asset: Asset) => hasProjectPhoto(asset);
 
   const preferredRules = SOLD_FEATURED_PROJECT_RULES.industrial;
   const preferredPhotoAssets = preferredRules
     .map((rule) =>
       sortedAssets.find((asset) => {
-        const text = normalizeText(`${asset.project} ${asset.address}`);
+        const text = normalizeText(
+          `${asset.project} ${asset.address} ${asset.sourceProject ?? ""} ${
+            asset.sourceAddress ?? ""
+          }`,
+        );
         return rule.test(text) && hasPhoto(asset);
       }),
     )
@@ -1745,18 +2036,12 @@ function getFeaturedSoldAssets(
 
   for (const rule of preferredRules) {
     const preferredAsset = assets.find((asset) => {
-      const text = normalizeText(`${asset.project} ${asset.address}`);
-      return (
-        rule.test(text) &&
-        Boolean(
-          getImageSource(
-            asset.project,
-            asset.address,
-            asset.sourceProject,
-            asset.sourceAddress,
-          ),
-        )
+      const text = normalizeText(
+        `${asset.project} ${asset.address} ${asset.sourceProject ?? ""} ${
+          asset.sourceAddress ?? ""
+        }`,
       );
+      return rule.test(text) && hasProjectPhoto(asset);
     });
 
     if (preferredAsset && !selected.includes(preferredAsset)) {
@@ -1767,15 +2052,7 @@ function getFeaturedSoldAssets(
   const fallbackAssets = [...assets]
     .filter(
       (asset) =>
-        !selected.includes(asset) &&
-        Boolean(
-          getImageSource(
-            asset.project,
-            asset.address,
-            asset.sourceProject,
-            asset.sourceAddress,
-          ),
-        ),
+        !selected.includes(asset) && hasProjectPhoto(asset),
     )
     .sort((left, right) => {
       const areaDifference =
@@ -1901,13 +2178,17 @@ export default function CompletePortfolioPage() {
   const [selectedPortfolioIds, setSelectedPortfolioIds] = useState<PortfolioId[]>(
     () => PORTFOLIO_OPTIONS.map((option) => option.id),
   );
-  const [soldCategoryOverrides, setSoldCategoryOverrides] =
-    useState<SoldCategoryOverrides>({});
-  const [soldCategoryOverridesReady, setSoldCategoryOverridesReady] =
+  const [portfolioAssetSettings, setPortfolioAssetSettings] =
+    useState<PortfolioAssetSettings>({});
+  const [portfolioAssetSettingsReady, setPortfolioAssetSettingsReady] =
     useState(false);
-  const [soldAssetEdits, setSoldAssetEdits] =
-    useState<SoldAssetEdits>({});
-  const [soldAssetEditsReady, setSoldAssetEditsReady] =
+  const [portfolioPhotoUrls, setPortfolioPhotoUrls] = useState<
+    Record<string, string>
+  >({});
+  const [portfolioHiddenAssetKeys, setPortfolioHiddenAssetKeys] = useState<
+    string[]
+  >([]);
+  const [portfolioHiddenAssetKeysReady, setPortfolioHiddenAssetKeysReady] =
     useState(false);
 
   const selectedPortfolioSet = useMemo(
@@ -1923,6 +2204,25 @@ export default function CompletePortfolioPage() {
     [selectedPortfolioIds, selectedPortfolioSet],
   );
 
+  const portfolioAssets = useMemo(
+    () => deduplicatePortfolioAssets(data.assets),
+    [data.assets],
+  );
+
+  const portfolioHiddenAssetKeySet = useMemo(
+    () => new Set(portfolioHiddenAssetKeys),
+    [portfolioHiddenAssetKeys],
+  );
+
+  const visiblePortfolioAssets = useMemo(
+    () =>
+      portfolioAssets.filter(
+        (asset) =>
+          !portfolioHiddenAssetKeySet.has(getPortfolioManagerRowKey(asset)),
+      ),
+    [portfolioAssets, portfolioHiddenAssetKeySet],
+  );
+
   const togglePortfolio = (portfolioId: PortfolioId) => {
     setSelectedPortfolioIds((current) =>
       current.includes(portfolioId)
@@ -1931,153 +2231,210 @@ export default function CompletePortfolioPage() {
     );
   };
 
-  const updateSoldCategory = (
+  const updatePortfolioAssetSetting = (
     asset: Asset,
-    category: SoldCategoryId,
+    patch: Partial<PortfolioAssetSetting>,
   ) => {
-    const assetKey = getSoldAssetKey(asset);
-    const defaultCategory = getSoldCategory(asset);
+    const assetKey = getPortfolioAssetKey(asset);
 
-    setSoldCategoryOverrides((current) => {
-      const next = { ...current };
+    setPortfolioAssetSettings((current) => ({
+      ...current,
+      [assetKey]: {
+        ...(current[assetKey] ?? {}),
+        ...patch,
+      },
+    }));
+  };
 
-      // De categorisering uit de screenshots is de standaard. Wanneer de
-      // gebruiker terugkiest naar die standaard, verdwijnt de handmatige
-      // override en wordt het label weer “Standaard”.
-      if (category === defaultCategory) {
-        delete next[assetKey];
-      } else {
-        next[assetKey] = category;
-      }
+  const removePortfolioManagerAsset = (asset: Asset) => {
+    const rowKey = getPortfolioManagerRowKey(asset);
 
-      return next;
+    setPortfolioHiddenAssetKeys((current) =>
+      current.includes(rowKey) ? current : [...current, rowKey],
+    );
+  };
+
+  const restorePortfolioManagerAssets = () => {
+    setPortfolioHiddenAssetKeys([]);
+  };
+
+  const updatePortfolioAssetPhoto = async (
+    asset: Asset,
+    file: File,
+  ) => {
+    if (!file.type.startsWith("image/")) return;
+
+    const assetKey = getPortfolioAssetKey(asset);
+    await savePortfolioPhoto(assetKey, file);
+
+    const objectUrl = URL.createObjectURL(file);
+    setPortfolioPhotoUrls((current) => {
+      const previousUrl = current[assetKey];
+      if (previousUrl?.startsWith("blob:")) URL.revokeObjectURL(previousUrl);
+
+      return {
+        ...current,
+        [assetKey]: objectUrl,
+      };
     });
   };
 
-  const updateSoldAssetText = (
-    asset: Asset,
-    field: "project" | "address",
-    value: string,
-  ) => {
-    const assetKey = getSoldAssetKey(asset);
-    const originalValue = asset[field];
+  const deletePortfolioAssetPhoto = async (asset: Asset) => {
+    const assetKey = getPortfolioAssetKey(asset);
+    const addressFirstAssetKey = getAddressFirstPortfolioAssetKey(asset);
+    const previousAssetKey = getPreviousPortfolioAssetKey(asset);
+    const legacyAssetKey = getLegacyPortfolioAssetKey(asset);
 
-    setSoldAssetEdits((current) => {
+    const photoKeys = Array.from(
+      new Set([
+        assetKey,
+        addressFirstAssetKey,
+        previousAssetKey,
+        legacyAssetKey,
+      ]),
+    );
+
+    await Promise.all(
+      photoKeys.map((photoKey) => removePortfolioPhoto(photoKey)),
+    );
+
+    setPortfolioPhotoUrls((current) => {
       const next = { ...current };
-      const currentEdit = { ...(next[assetKey] ?? {}) };
-
-      if (value === originalValue) {
-        delete currentEdit[field];
-      } else {
-        currentEdit[field] = value;
-      }
-
-      if (
-        currentEdit.project === undefined &&
-        currentEdit.address === undefined
-      ) {
-        delete next[assetKey];
-      } else {
-        next[assetKey] = currentEdit;
-      }
-
+      const previousUrl = next[assetKey];
+      if (previousUrl?.startsWith("blob:")) URL.revokeObjectURL(previousUrl);
+      delete next[assetKey];
       return next;
     });
-  };
-
-  const resetSoldTrackrecord = () => {
-    setSoldCategoryOverrides({});
-    setSoldAssetEdits({});
   };
 
   useEffect(() => {
     try {
       const storedValue = window.localStorage.getItem(
-        SOLD_CATEGORY_STORAGE_KEY,
+        PORTFOLIO_MANAGER_STORAGE_KEY,
       );
 
-      if (!storedValue) return;
+      if (storedValue) {
+        const parsedValue = JSON.parse(storedValue) as Record<
+          string,
+          PortfolioAssetSetting
+        >;
 
-      const parsedValue = JSON.parse(storedValue) as Record<
-        string,
-        unknown
-      >;
+        const validSettings = Object.fromEntries(
+          Object.entries(parsedValue).map(([key, value]) => {
+            const setting: PortfolioAssetSetting = {};
 
-      const validOverrides = Object.fromEntries(
-        Object.entries(parsedValue).filter(([, value]) =>
-          isSoldCategoryId(value),
-        ),
-      ) as SoldCategoryOverrides;
+            if (typeof value?.reportName === "string") {
+              setting.reportName = value.reportName;
+            }
+            if (isSoldCategoryId(value?.category)) {
+              setting.category = value.category;
+            }
 
-      setSoldCategoryOverrides(validOverrides);
+            // Oude opgeslagen Current/Sold-overrides worden bewust genegeerd.
+            // De status komt uitsluitend uit de live Overview-data.
+            return [key, setting];
+          }),
+        ) as PortfolioAssetSettings;
+
+        setPortfolioAssetSettings(validSettings);
+      }
     } catch {
-      // Een beschadigde lokale instelling mag het rapport niet blokkeren.
-      setSoldCategoryOverrides({});
+      setPortfolioAssetSettings({});
     } finally {
-      setSoldCategoryOverridesReady(true);
+      setPortfolioAssetSettingsReady(true);
     }
   }, []);
 
   useEffect(() => {
-    if (!soldCategoryOverridesReady) return;
+    if (!portfolioAssetSettingsReady) return;
 
     window.localStorage.setItem(
-      SOLD_CATEGORY_STORAGE_KEY,
-      JSON.stringify(soldCategoryOverrides),
+      PORTFOLIO_MANAGER_STORAGE_KEY,
+      JSON.stringify(portfolioAssetSettings),
     );
-  }, [soldCategoryOverrides, soldCategoryOverridesReady]);
+  }, [portfolioAssetSettings, portfolioAssetSettingsReady]);
 
   useEffect(() => {
     try {
       const storedValue = window.localStorage.getItem(
-        SOLD_ASSET_EDITS_STORAGE_KEY,
+        PORTFOLIO_MANAGER_HIDDEN_STORAGE_KEY,
       );
 
-      if (!storedValue) return;
+      if (storedValue) {
+        const parsedValue = JSON.parse(storedValue) as unknown;
+        if (Array.isArray(parsedValue)) {
+          setPortfolioHiddenAssetKeys(
+            parsedValue.filter(
+              (value): value is string => typeof value === "string",
+            ),
+          );
+        }
+      }
+    } catch {
+      setPortfolioHiddenAssetKeys([]);
+    } finally {
+      setPortfolioHiddenAssetKeysReady(true);
+    }
+  }, []);
 
-      const parsedValue = JSON.parse(storedValue) as Record<
-        string,
-        unknown
-      >;
+  useEffect(() => {
+    if (!portfolioHiddenAssetKeysReady) return;
 
-      const validEdits = Object.fromEntries(
-        Object.entries(parsedValue).flatMap(([key, value]) => {
-          if (!value || typeof value !== "object") return [];
+    window.localStorage.setItem(
+      PORTFOLIO_MANAGER_HIDDEN_STORAGE_KEY,
+      JSON.stringify(portfolioHiddenAssetKeys),
+    );
+  }, [portfolioHiddenAssetKeys, portfolioHiddenAssetKeysReady]);
 
-          const candidate = value as Record<string, unknown>;
-          const edit: SoldAssetEdit = {};
+  useEffect(() => {
+    if (portfolioAssets.length === 0) return;
 
-          if (typeof candidate.project === "string") {
-            edit.project = candidate.project;
+    let active = true;
+    const createdUrls: string[] = [];
+
+    async function loadSavedPhotos() {
+      const entries = await Promise.all(
+        portfolioAssets.map(async (asset) => {
+          const assetKey = getPortfolioAssetKey(asset);
+          const addressFirstAssetKey = getAddressFirstPortfolioAssetKey(asset);
+          const previousAssetKey = getPreviousPortfolioAssetKey(asset);
+          const legacyAssetKey = getLegacyPortfolioAssetKey(asset);
+
+          try {
+            const blob =
+              (await loadPortfolioPhoto(assetKey)) ??
+              (await loadPortfolioPhoto(addressFirstAssetKey)) ??
+              (await loadPortfolioPhoto(previousAssetKey)) ??
+              (await loadPortfolioPhoto(legacyAssetKey));
+            if (!blob) return null;
+
+            const url = URL.createObjectURL(blob);
+            createdUrls.push(url);
+            return [assetKey, url] as const;
+          } catch {
+            return null;
           }
-
-          if (typeof candidate.address === "string") {
-            edit.address = candidate.address;
-          }
-
-          return edit.project !== undefined ||
-            edit.address !== undefined
-            ? [[key, edit]]
-            : [];
         }),
-      ) as SoldAssetEdits;
+      );
 
-      setSoldAssetEdits(validEdits);
-    } catch {
-      setSoldAssetEdits({});
-    } finally {
-      setSoldAssetEditsReady(true);
+      if (!active) return;
+
+      setPortfolioPhotoUrls(
+        Object.fromEntries(
+          entries.filter(
+            (entry): entry is readonly [string, string] => Boolean(entry),
+          ),
+        ),
+      );
     }
-  }, []);
 
-  useEffect(() => {
-    if (!soldAssetEditsReady) return;
+    void loadSavedPhotos();
 
-    window.localStorage.setItem(
-      SOLD_ASSET_EDITS_STORAGE_KEY,
-      JSON.stringify(soldAssetEdits),
-    );
-  }, [soldAssetEdits, soldAssetEditsReady]);
+    return () => {
+      active = false;
+      createdUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [portfolioAssets]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2137,26 +2494,24 @@ export default function CompletePortfolioPage() {
   }, []);
 
   const metrics = useMemo(() => {
-    // Alleen regels die expliciet als Current/Portefeuille zijn gemarkeerd
-    // mogen in de actuele portefeuille terechtkomen. "Niet verkocht" is
-    // onvoldoende, omdat Pipeline of een onbekende status dan ook meekomen.
-    const currentAssets = data.assets.filter(
-      (asset) =>
-        matchesPortfolioSelection(asset.entity, selectedPortfolioSet) &&
-        (
-          isCurrentAsset(asset) ||
-          (
-            spanishOnlyMode &&
-            asset.country === "Spanje" &&
-            isCalderonAsset(asset)
-          )
-        ),
+    const managedAssets = visiblePortfolioAssets.map((asset) =>
+      applyPortfolioAssetSetting(
+        asset,
+        portfolioAssetSettings,
+        portfolioPhotoUrls,
+      ),
     );
 
-    // Het volledige trackrecord blijft altijd zichtbaar, onafhankelijk van
-    // de gekozen huidige portfolio's.
+    const currentAssets = managedAssets.filter(
+      (asset) =>
+        asset.reportStatus === "current" &&
+        matchesPortfolioSelection(asset.entity, selectedPortfolioSet),
+    );
+
+    // Sold assets blijven als volledig trackrecord zichtbaar, onafhankelijk
+    // van de current-portfolio selectie bovenaan.
     const soldAssets = sortSoldAssetsByInformation(
-      data.assets.filter(isSoldAsset),
+      managedAssets.filter((asset) => asset.reportStatus === "sold"),
     );
 
     const sharedAssets = currentAssets.filter(isJointPortfolioAsset);
@@ -2282,7 +2637,12 @@ export default function CompletePortfolioPage() {
       sharedMortgage,
       sharedTotalMortgage,
     };
-  }, [data, selectedPortfolioSet, spanishOnlyMode]);
+  }, [
+    data,
+    selectedPortfolioSet,
+    portfolioAssetSettings,
+    portfolioPhotoUrls,
+  ]);
 
   const financialOverview = data.financialOverview;
   const showFinancialOverview = hasFinancialRows(financialOverview);
@@ -2293,18 +2653,12 @@ export default function CompletePortfolioPage() {
   const soldCategoryPages = SOLD_CATEGORY_DEFINITIONS.flatMap(
     (definition) => {
       const assets = sortSoldAssetsByAddress(
-        metrics.soldAssets
-          .filter(
-            (asset) =>
-              asset.country !== "Spanje" &&
-              getEffectiveSoldCategory(
-                asset,
-                soldCategoryOverrides,
-              ) === definition.id,
-          )
-          .map((asset) =>
-            applySoldAssetEdit(asset, soldAssetEdits),
-          ),
+        metrics.soldAssets.filter(
+          (asset) =>
+            asset.country !== "Spanje" &&
+            (asset.reportCategory ?? getDefaultPortfolioCategory(asset)) ===
+              definition.id,
+        ),
       );
 
       if (assets.length === 0) return [];
@@ -2334,11 +2688,7 @@ export default function CompletePortfolioPage() {
   );
 
   const spanishSoldPages = chunk(
-    metrics.soldAssets
-      .filter((asset) => asset.country === "Spanje")
-      .map((asset) =>
-        applySoldAssetEdit(asset, soldAssetEdits),
-      ),
+    metrics.soldAssets.filter((asset) => asset.country === "Spanje"),
     2,
   );
 
@@ -2350,9 +2700,7 @@ export default function CompletePortfolioPage() {
   );
 
   const spanishSoldAssets = sortSpanishSoldAssets(
-    metrics.soldAssets
-      .filter((asset) => asset.country === "Spanje")
-      .map((asset) => applySoldAssetEdit(asset, soldAssetEdits)),
+    metrics.soldAssets.filter((asset) => asset.country === "Spanje"),
   );
 
   const financialTotalValue = getFinancialValue(
@@ -2562,6 +2910,18 @@ export default function CompletePortfolioPage() {
         </button>
       </div>
 
+      <PortfolioManager
+        assets={portfolioAssets}
+        hiddenAssetKeys={portfolioHiddenAssetKeys}
+        settings={portfolioAssetSettings}
+        photoUrls={portfolioPhotoUrls}
+        onSettingChange={updatePortfolioAssetSetting}
+        onPhotoChange={updatePortfolioAssetPhoto}
+        onPhotoRemove={deletePortfolioAssetPhoto}
+        onAssetRemove={removePortfolioManagerAsset}
+        onRestoreRemoved={restorePortfolioManagerAssets}
+      />
+
       {spanishOnlyMode ? (
         <SpanishPortfolioReport
           currentAssets={spanishCurrentAssets}
@@ -2570,15 +2930,6 @@ export default function CompletePortfolioPage() {
         />
       ) : (
         <>
-      <SoldCategoryEditor
-        soldAssets={metrics.soldAssets}
-        overrides={soldCategoryOverrides}
-        edits={soldAssetEdits}
-        onCategoryChange={updateSoldCategory}
-        onTextChange={updateSoldAssetText}
-        onReset={resetSoldTrackrecord}
-      />
-
       <PageFrame>
         <ReportHeader
           number="01"
@@ -2889,6 +3240,7 @@ export default function CompletePortfolioPage() {
             <ProjectImage
               project={asset.project}
               address={asset.address}
+              customSrc={asset.customPhotoUrl}
               className="h-[114mm]"
             />
             <div className="space-y-2.5">
@@ -3612,6 +3964,9 @@ function SpanishCurrentProjectPage({
         <SpanishProjectImage
           project={asset.project}
           address={asset.address}
+          sourceProject={asset.sourceProject}
+          sourceAddress={asset.sourceAddress}
+          customSrc={asset.customPhotoUrl}
           className="h-[114mm] rounded-[20px]"
         />
 
@@ -3797,6 +4152,7 @@ function SpanishSoldCard({ asset }: { asset: Asset }) {
         address={asset.address}
         sourceProject={asset.sourceProject}
         sourceAddress={asset.sourceAddress}
+        customSrc={asset.customPhotoUrl}
         className="h-[54mm] rounded-none"
       />
 
@@ -3967,21 +4323,29 @@ function SpanishProjectImage({
   address = "",
   sourceProject = "",
   sourceAddress = "",
+  customSrc = "",
   className = "",
 }: {
   project: string;
   address?: string;
   sourceProject?: string;
   sourceAddress?: string;
+  customSrc?: string;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
-  const source = getImageSource(
-    project,
-    address,
-    sourceProject,
-    sourceAddress,
-  );
+  const source =
+    customSrc ||
+    getImageSource(
+      project,
+      address,
+      sourceProject,
+      sourceAddress,
+    );
+
+  useEffect(() => {
+    setFailed(false);
+  }, [source]);
 
   if (!source || failed) {
     return (
@@ -4417,21 +4781,29 @@ function ProjectImage({
   address = "",
   sourceProject = "",
   sourceAddress = "",
+  customSrc = "",
   className = "",
 }: {
   project: string;
   address?: string;
   sourceProject?: string;
   sourceAddress?: string;
+  customSrc?: string;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
-  const source = getImageSource(
-    project,
-    address,
-    sourceProject,
-    sourceAddress,
-  );
+  const source =
+    customSrc ||
+    getImageSource(
+      project,
+      address,
+      sourceProject,
+      sourceAddress,
+    );
+
+  useEffect(() => {
+    setFailed(false);
+  }, [source]);
 
   if (!source || failed) {
     return (
@@ -4529,6 +4901,391 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PortfolioManager({
+  assets,
+  hiddenAssetKeys,
+  settings,
+  photoUrls,
+  onSettingChange,
+  onPhotoChange,
+  onPhotoRemove,
+  onAssetRemove,
+  onRestoreRemoved,
+}: {
+  assets: Asset[];
+  hiddenAssetKeys: string[];
+  settings: PortfolioAssetSettings;
+  photoUrls: Record<string, string>;
+  onSettingChange: (
+    asset: Asset,
+    patch: Partial<PortfolioAssetSetting>,
+  ) => void;
+  onPhotoChange: (asset: Asset, file: File) => Promise<void>;
+  onPhotoRemove: (asset: Asset) => Promise<void>;
+  onAssetRemove: (asset: Asset) => void;
+  onRestoreRemoved: () => void;
+}) {
+  const [searchValue, setSearchValue] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const storedValue = window.localStorage.getItem(
+        PORTFOLIO_MANAGER_COLLAPSED_STORAGE_KEY,
+      );
+
+      // Standaard dicht. Alleen openen wanneer de gebruiker hem de vorige
+      // keer expliciet open heeft gelaten.
+      setIsOpen(storedValue === "open");
+    } catch {
+      setIsOpen(false);
+    }
+  }, []);
+
+  const toggleManager = () => {
+    setIsOpen((current) => {
+      const next = !current;
+
+      try {
+        window.localStorage.setItem(
+          PORTFOLIO_MANAGER_COLLAPSED_STORAGE_KEY,
+          next ? "open" : "closed",
+        );
+      } catch {
+        // Een geblokkeerde browseropslag mag de manager niet blokkeren.
+      }
+
+      return next;
+    });
+  };
+
+  const normalizedSearch = normalizeText(searchValue);
+  const hiddenAssetKeySet = useMemo(
+    () => new Set(hiddenAssetKeys),
+    [hiddenAssetKeys],
+  );
+
+  const activeAssets = useMemo(
+    () =>
+      assets.filter(
+        (asset) =>
+          !hiddenAssetKeySet.has(getPortfolioManagerRowKey(asset)),
+      ),
+    [assets, hiddenAssetKeySet],
+  );
+
+  const sortedAssets = useMemo(
+    () =>
+      [...activeAssets].sort((left, right) =>
+        left.project.localeCompare(right.project, "nl", {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      ),
+    [activeAssets],
+  );
+
+  const visibleAssets = normalizedSearch
+    ? sortedAssets.filter((asset) => {
+        const setting = getPortfolioAssetSetting(asset, settings);
+        return normalizeText(
+          `${asset.project} ${setting.reportName} ${asset.address} ${asset.entity} ${asset.country}`,
+        ).includes(normalizedSearch);
+      })
+    : sortedAssets;
+
+  const currentCount = activeAssets.filter(
+    (asset) => getDefaultPortfolioStatus(asset) === "current",
+  ).length;
+  const soldCount = activeAssets.filter(
+    (asset) => getDefaultPortfolioStatus(asset) === "sold",
+  ).length;
+
+  return (
+    <section className="no-print mx-auto mb-8 w-[min(1220px,calc(100%-32px))] border border-[#cbd5e1] bg-[#f5f7fa] shadow-xl">
+      <div className="bg-[#0f172a] px-6 py-4 text-white">
+        <div className="flex items-center justify-between gap-8">
+          <button
+            type="button"
+            onClick={toggleManager}
+            aria-expanded={isOpen}
+            className="flex min-w-0 flex-1 items-center gap-4 text-left"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/20 text-[17px] font-medium leading-none text-white">
+              {isOpen ? "−" : "+"}
+            </span>
+            <div className="min-w-0">
+              <p className="text-[8px] font-semibold uppercase tracking-[0.26em] text-[#94a3b8]">
+                Live invoersheet
+              </p>
+              <h2 className="mt-1 text-[19px] font-semibold leading-none">
+                Portfolio Manager
+              </h2>
+              {isOpen && (
+                <p className="mt-2 max-w-3xl text-[10px] leading-4 text-white/65">
+                  De eerste kolom is de originele naam uit Overview. Alleen de
+                  rapportnaam, categorie en foto zijn bewerkbaar en worden
+                  automatisch in deze browser opgeslagen. Current/Sold wordt
+                  uitsluitend uit de live Overview-data gelezen.
+                </p>
+              )}
+            </div>
+          </button>
+
+          <div className="grid shrink-0 grid-cols-3 border border-white/15 text-center">
+            <div className="min-w-[82px] px-3 py-2">
+              <p className="text-[7px] uppercase tracking-[0.18em] text-white/50">
+                Total
+              </p>
+              <p className="mt-1 text-[15px] font-semibold">{activeAssets.length}</p>
+            </div>
+            <div className="min-w-[82px] border-l border-white/15 px-3 py-2">
+              <p className="text-[7px] uppercase tracking-[0.18em] text-white/50">
+                Current
+              </p>
+              <p className="mt-1 text-[15px] font-semibold">{currentCount}</p>
+            </div>
+            <div className="min-w-[82px] border-l border-white/15 px-3 py-2">
+              <p className="text-[7px] uppercase tracking-[0.18em] text-white/50">
+                Sold
+              </p>
+              <p className="mt-1 text-[15px] font-semibold">{soldCount}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isOpen && (
+        <>
+          <div className="flex items-center justify-between border-b border-[#cbd5e1] px-6 py-4">
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#64748b]">
+                Alle panden
+              </p>
+              <p className="mt-1 text-[10px] text-[#64748b]">
+                {visibleAssets.length} van {activeAssets.length} zichtbaar
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {hiddenAssetKeys.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onRestoreRemoved}
+                  className="border border-[#cbd5e1] bg-white px-3 py-2 text-[9px] font-semibold text-[#475569] hover:bg-[#f8fafc]"
+                >
+                  Verwijderde regels herstellen ({hiddenAssetKeys.length})
+                </button>
+              )}
+
+              <input
+              type="search"
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              placeholder="Zoek op Overview-naam, rapportnaam, adres of entiteit"
+              className="w-[390px] border border-[#cbd5e1] bg-white px-4 py-2.5 text-[11px] text-[#111827] outline-none placeholder:text-[#94a3b8] focus:border-[#64748b]"
+              />
+            </div>
+          </div>
+
+          <div className="mx-6 mb-6 mt-4 max-h-[590px] overflow-auto border border-[#cbd5e1] bg-white">
+            <div className="sticky top-0 z-20 grid grid-cols-[1.25fr_1.25fr_.82fr_1fr_.58fr_.55fr] gap-3 border-b border-[#cbd5e1] bg-[#eef2f6] px-4 py-3 text-[8px] font-semibold uppercase tracking-[0.15em] text-[#475569]">
+              <span>Naam uit Overview</span>
+              <span>Naam in report</span>
+              <span>Categorie</span>
+              <span>Foto</span>
+              <span>Status</span>
+              <span>Actie</span>
+            </div>
+
+            {visibleAssets.map((asset, index) => {
+              const setting = getPortfolioAssetSetting(asset, settings);
+              const assetKey = getPortfolioAssetKey(asset);
+              const uploadedPhoto = photoUrls[assetKey] ?? "";
+              const existingPhoto = getImageSource(
+                asset.project,
+                asset.address,
+                asset.project,
+                asset.address,
+              );
+              const previewPhoto = uploadedPhoto || existingPhoto || "";
+              const status = getDefaultPortfolioStatus(asset);
+
+              return (
+                <div
+                  key={assetKey}
+                  className={`grid min-h-[68px] grid-cols-[1.25fr_1.25fr_.82fr_1fr_.58fr_.55fr] items-center gap-3 px-4 py-2.5 text-[10px] ${
+                    index !== visibleAssets.length - 1
+                      ? "border-b border-[#e4e7ec]"
+                      : ""
+                  }`}
+                >
+                  <p
+                    className="truncate font-semibold text-[#111827]"
+                    title={asset.project || ""}
+                  >
+                    {asset.project || "—"}
+                  </p>
+
+                  <input
+                    type="text"
+                    value={setting.reportName}
+                    onChange={(event) =>
+                      onSettingChange(asset, {
+                        reportName: event.target.value,
+                      })
+                    }
+                    aria-label={`Rapportnaam voor ${asset.project}`}
+                    className="min-w-0 border border-[#cbd5e1] bg-white px-3 py-2 text-[10px] font-medium text-[#111827] outline-none focus:border-[#64748b]"
+                  />
+
+                  <select
+                    value={setting.category}
+                    onChange={(event) =>
+                      onSettingChange(asset, {
+                        category: event.target.value as SoldCategoryId,
+                      })
+                    }
+                    aria-label={`Categorie voor ${asset.project}`}
+                    className="w-full border border-[#cbd5e1] bg-white px-2.5 py-2 text-[9px] font-semibold text-[#111827] outline-none focus:border-[#64748b]"
+                  >
+                    <option value="office">Offices</option>
+                    <option value="residential">Residential</option>
+                    <option value="industrial">Commercial Real Estate</option>
+                  </select>
+
+                  <PortfolioPhotoDropZone
+                    asset={asset}
+                    previewPhoto={previewPhoto}
+                    hasUploadedPhoto={Boolean(uploadedPhoto)}
+                    onPhotoChange={onPhotoChange}
+                    onPhotoRemove={onPhotoRemove}
+                  />
+
+                  <div className="flex items-center">
+                    <span
+                      className={`inline-flex min-w-[68px] items-center justify-center border px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                        status === "sold"
+                          ? "border-[#cbd5e1] bg-[#eef2f6] text-[#475569]"
+                          : "border-[#cbd5e1] bg-white text-[#111827]"
+                      }`}
+                      title="Status wordt rechtstreeks uit Overview gelezen en kan hier niet worden aangepast"
+                    >
+                      {status === "sold" ? "Sold" : "Current"}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onAssetRemove(asset)}
+                    className="border border-[#f0b4b4] bg-white px-2 py-2 text-[9px] font-semibold text-[#b42318] hover:bg-[#fff5f5]"
+                    title="Verberg deze bronregel uit de Portfolio Manager en het rapport"
+                  >
+                    Verwijder
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function PortfolioPhotoDropZone({
+  asset,
+  previewPhoto,
+  hasUploadedPhoto,
+  onPhotoChange,
+  onPhotoRemove,
+}: {
+  asset: Asset;
+  previewPhoto: string;
+  hasUploadedPhoto: boolean;
+  onPhotoChange: (asset: Asset, file: File) => Promise<void>;
+  onPhotoRemove: (asset: Asset) => Promise<void>;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const inputId = `portfolio-photo-${getPortfolioAssetKey(asset).replace(
+    /[^a-z0-9]+/g,
+    "-",
+  )}`;
+
+  const handleFiles = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    void onPhotoChange(asset, file);
+  };
+
+  return (
+    <div
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        event.preventDefault();
+        setDragging(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragging(false);
+        handleFiles(event.dataTransfer.files);
+      }}
+      className={`grid min-h-[52px] grid-cols-[52px_1fr] items-center border ${
+        dragging
+          ? "border-[#475569] bg-[#eef2f6]"
+          : "border-[#cbd5e1] bg-white"
+      }`}
+    >
+      <div className="h-[50px] w-[52px] overflow-hidden border-r border-[#cbd5e1] bg-[#eef2f6]">
+        {previewPhoto ? (
+          <img
+            src={previewPhoto}
+            alt="Project preview"
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[7px] font-semibold uppercase tracking-[0.12em] text-[#94a3b8]">
+            Foto
+          </div>
+        )}
+      </div>
+
+      <div className="min-w-0 px-2 py-1.5">
+        <label
+          htmlFor={inputId}
+          className="block cursor-pointer truncate text-[8px] font-semibold text-[#475569]"
+        >
+          Sleep of kies foto
+        </label>
+        <input
+          id={inputId}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => handleFiles(event.target.files)}
+        />
+
+        {hasUploadedPhoto && (
+          <button
+            type="button"
+            onClick={() => void onPhotoRemove(asset)}
+            className="mt-1 text-[7px] font-medium text-[#b42318] hover:underline"
+          >
+            Verwijder upload
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SoldCategoryEditor({
   soldAssets,
   overrides,
@@ -4614,7 +5371,7 @@ function SoldCategoryEditor({
           <p className="mt-2 max-w-2xl text-[11px] leading-5 text-white/65">
             De indeling uit je screenshots is de standaard. Je kunt
             daarnaast de projectnaam en het adres rechtstreeks aanpassen.
-            Iedere afwijking van de standaard krijgt de status Handmatig en
+            Iedere afwijking van de standaard krijgt de status en
             wordt direct in het rapport verwerkt. Met de resetknop herstel je
             zowel de categorieën als de oorspronkelijke teksten.
           </p>
@@ -4629,7 +5386,7 @@ function SoldCategoryEditor({
             onClick={onReset}
             className="rounded-full border border-white/25 px-4 py-2 text-[10px] font-semibold hover:bg-white/10"
           >
-            Zet alles terug naar standaard
+            Reset
           </button>
         </div>
       </div>
@@ -4896,6 +5653,7 @@ function FeaturedSoldAsset({ asset }: { asset: Asset }) {
         address={asset.address}
         sourceProject={asset.sourceProject}
         sourceAddress={asset.sourceAddress}
+        customSrc={asset.customPhotoUrl}
         className="h-[47mm] rounded-none"
       />
       <div className="flex items-end justify-between gap-4 px-4 py-3">
@@ -4983,6 +5741,7 @@ function SoldProjectCard({ asset }: { asset: Asset }) {
         address={asset.address}
         sourceProject={asset.sourceProject}
         sourceAddress={asset.sourceAddress}
+        customSrc={asset.customPhotoUrl}
         className="h-[62mm] rounded-none"
       />
       <div className="p-5">
