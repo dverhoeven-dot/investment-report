@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Q&A Round Form</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg:#f4f6f8; --paper:#fff; --text:#17202a; --muted:#65727e; --line:#d8dee4;
+      --accent:#2457d6; --accent2:#eaf0ff; --danger:#b42318; --ok:#067647; --locked:#f7f8fa;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+    button,input,textarea,select { font:inherit; }
+    button { cursor:pointer; }
+    .app { max-width:1100px; margin:0 auto; padding:24px; }
+    .topbar { display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-bottom:16px; }
+    .title h1 { margin:0; font-size:28px; }
+    .title p { margin:4px 0 0; color:var(--muted); }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn { border:1px solid var(--line); background:#fff; color:var(--text); border-radius:9px; padding:9px 12px; min-height:40px; }
+    .btn:hover { border-color:#aeb8c2; }
+    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .btn.secondary { background:var(--accent2); color:#173b93; border-color:#cdd9ff; }
+    .btn.danger { color:var(--danger); }
+    .btn:disabled { opacity:.45; cursor:not-allowed; }
+    .panel { background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; box-shadow:0 1px 2px rgba(16,24,40,.04); }
+    .meta-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .field label { display:block; font-weight:650; margin-bottom:6px; }
+    .field input,.field textarea,.field select { width:100%; border:1px solid #cbd3da; border-radius:8px; padding:10px 11px; background:#fff; color:var(--text); }
+    .field textarea { min-height:90px; resize:vertical; overflow:hidden; }
+    .field input:focus,.field textarea:focus,.field select:focus { outline:3px solid rgba(36,87,214,.12); border-color:var(--accent); }
+    .section-head { display:flex; gap:12px; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .section-head h2 { margin:0; font-size:20px; }
+    .status { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:5px 9px; font-size:12px; font-weight:700; background:#eef2f6; }
+    .status.completed { color:var(--ok); background:#ecfdf3; }
+    .status.draft { color:#175cd3; background:#eff8ff; }
+    .round { margin-top:14px; border-top:1px solid var(--line); padding-top:16px; }
+    .round:first-child { border-top:0; padding-top:0; }
+    .round-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .round-title { font-weight:750; font-size:17px; }
+    .round-meta { color:var(--muted); font-size:13px; }
+    .question-card { border:1px solid var(--line); border-radius:11px; padding:14px; margin:10px 0; background:#fff; }
+    .question-card.locked { background:var(--locked); }
+    .qtop { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:8px; }
+    .qnum { font-weight:800; color:#344054; }
+    .ref { font-size:12px; color:#475467; background:#eef2f6; border-radius:6px; padding:3px 6px; display:inline-block; margin-left:6px; }
+    .actions { display:flex; gap:6px; flex-wrap:wrap; }
+    .small { padding:5px 8px; min-height:30px; font-size:12px; }
+    .answer-label { margin-top:10px; font-size:12px; font-weight:800; color:#475467; text-transform:uppercase; letter-spacing:.04em; }
+    .answer-text { white-space:pre-wrap; margin-top:5px; }
+    .closure { margin-top:16px; border-top:1px dashed #cfd6dd; padding-top:14px; }
+    .closure-grid { display:grid; grid-template-columns:2fr 1fr; gap:12px; }
+    .signature-wrap { margin-top:12px; }
+    canvas { width:100%; height:160px; display:block; border:1px solid #cbd3da; border-radius:9px; background:#fff; touch-action:none; }
+    .hint { color:var(--muted); font-size:12px; margin-top:5px; }
+    .notice { border:1px solid #b2ddff; background:#eff8ff; color:#1849a9; padding:11px 13px; border-radius:10px; margin-bottom:14px; }
+    .warning { border-color:#fedf89; background:#fffaeb; color:#93370d; }
+    .success { border-color:#abefc6; background:#ecfdf3; color:#067647; }
+    #fileInput { display:none; }
+    .empty { text-align:center; color:var(--muted); padding:24px; border:1px dashed #cbd3da; border-radius:10px; }
+    .footer-note { color:var(--muted); font-size:12px; padding:4px 2px 24px; }
+    @media (max-width:720px) { .app{padding:14px}.meta-grid,.closure-grid{grid-template-columns:1fr}.toolbar{width:100%}.toolbar .btn{flex:1 1 auto} }
+    @media print { body{background:#fff}.toolbar,.footer-note,.notice{display:none}.app{max-width:none;padding:0}.panel{box-shadow:none;border:none} }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="topbar">
+      <div class="title">
+        <h1>Q&A Round Form</h1>
+        <p>Create, answer, sign, export and re-open questionnaire rounds.</p>
+      </div>
+      <div class="toolbar">
+        <button class="btn" id="newBtn">New dossier</button>
+        <button class="btn secondary" id="uploadBtn">Upload previous PDF</button>
+        <input id="fileInput" type="file" accept="application/pdf,.pdf" />
+        <button class="btn" id="fillableBtn">Download fillable PDF</button>
+        <button class="btn primary" id="finalBtn">Complete & download signed PDF</button>
+      </div>
+    </div>
+
+    <div id="message"></div>
+
+    <section class="panel">
+      <div class="section-head"><h2>Dossier details</h2><span class="status" id="projectStatus">Draft</span></div>
+      <div class="meta-grid">
+        <div class="field"><label for="party1">Party 1</label><input id="party1" placeholder="e.g. Buyer Ltd." /></div>
+        <div class="field"><label for="party2">Party 2</label><input id="party2" placeholder="e.g. Seller Ltd." /></div>
+        <div class="field"><label for="project">Project / dossier</label><input id="project" placeholder="Project name or dossier reference" /></div>
+        <div class="field"><label for="docDate">Document date</label><input id="docDate" type="date" /></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>Question rounds</h2>
+          <div class="hint">Completed rounds are locked. New follow-up questions are placed in a new round.</div>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="startRoundBtn">Start follow-up round</button>
+          <button class="btn primary" id="addQuestionBtn">+ Add question</button>
+        </div>
+      </div>
+      <div id="rounds"></div>
+    </section>
+
+    <div class="footer-note">
+      The PDF contains an embedded <strong>qa-state.json</strong> file so this app can restore the dossier later. The fillable PDF also contains standard PDF text fields for answers.
+    </div>
+  </main>
+
+  <script type="module">
+    import { PDFDocument, StandardFonts, rgb } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+    import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.mjs';
+
+    const A4 = [595.28, 841.89];
+    const MARGIN = 44;
+    const STATE_FILE = 'qa-state.json';
+    const $ = (id) => document.getElementById(id);
+
+    function uuid() {
+      return (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`).replaceAll('-', '');
+    }
+    function isoDate() { return new Date().toISOString().slice(0,10); }
+    function deepClone(v) { return JSON.parse(JSON.stringify(v)); }
+    function blankState() {
+      return {
+        schemaVersion: 1,
+        dossierId: uuid(),
+        party1: '', party2: '', project: '', documentDate: isoDate(),
+        rounds: [{ id: uuid(), number: 1, status: 'draft', answeringParty: 'party2', createdAt: new Date().toISOString(), questions: [], closure: { name:'', date:'', signatureDataUrl:'', signatureText:'' } }]
+      };
+    }
+
+    let state = blankState();
+    let activeCanvas = null;
+    let drawing = false;
+    let lastPoint = null;
+
+    const inputs = { party1:$('party1'), party2:$('party2'), project:$('project'), docDate:$('docDate') };
+    Object.entries(inputs).forEach(([key, el]) => el.addEventListener('input', () => { state[key === 'docDate' ? 'documentDate' : key] = el.value; }));
+
+    function currentRound() { return state.rounds[state.rounds.length - 1]; }
+    function isCurrent(round) { return currentRound().id === round.id; }
+    function isLocked(round) { return round.status === 'completed'; }
+    function isIssued(round) { return round.status === 'issued'; }
+    function qLabel(round, index) { return `R${round.number}-Q${index+1}`; }
+    function answeringPartyName(round) {
+      return round.answeringParty === 'party1' ? (state.party1 || 'Party 1') : (state.party2 || 'Party 2');
+    }
+
+    function showMessage(text, kind='notice') {
+      $('message').innerHTML = `<div class="notice ${kind}">${escapeHtml(text)}</div>`;
+      setTimeout(() => { if ($('message').textContent.includes(text)) $('message').innerHTML=''; }, 6500);
+    }
+    function escapeHtml(s='') { return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+    function autoGrow(el) { el.style.height='auto'; el.style.height = Math.max(90, el.scrollHeight) + 'px'; }
+
+    function render() {
+      inputs.party1.value=state.party1; inputs.party2.value=state.party2; inputs.project.value=state.project; inputs.docDate.value=state.documentDate || '';
+      const completedCount = state.rounds.filter(r=>r.status==='completed').length;
+      $('projectStatus').textContent = completedCount ? `${completedCount} completed round${completedCount===1?'':'s'}` : (currentRound().status==='issued' ? 'Awaiting response' : 'Draft');
+      $('projectStatus').className = `status ${completedCount ? 'completed':'draft'}`;
+
+      const host = $('rounds'); host.innerHTML='';
+      if (!state.rounds.length) { host.innerHTML='<div class="empty">No round yet.</div>'; return; }
+
+      state.rounds.forEach((round) => {
+        const wrap = document.createElement('div'); wrap.className='round';
+        const locked = isLocked(round);
+        wrap.innerHTML = `
+          <div class="round-head">
+            <div>
+              <div class="round-title">Round ${round.number} <span class="status ${locked?'completed':'draft'}">${locked?'Completed':(isIssued(round)?'Issued / awaiting response':'Draft')}</span></div>
+              <div class="round-meta">Responding party: <strong>${escapeHtml(answeringPartyName(round))}</strong></div>
+            </div>
+            ${!locked && !isIssued(round) && isCurrent(round) ? `<div class="field" style="min-width:190px"><select data-answering-party="${round.id}"><option value="party1">${escapeHtml(state.party1 || 'Party 1')}</option><option value="party2">${escapeHtml(state.party2 || 'Party 2')}</option></select></div>` : ''}
+          </div>`;
+
+        const select = wrap.querySelector('[data-answering-party]');
+        if (select) { select.value=round.answeringParty; select.addEventListener('change',e=>{ round.answeringParty=e.target.value; render(); }); }
+
+        if (!round.questions.length) {
+          const empty=document.createElement('div'); empty.className='empty'; empty.textContent='No questions in this round yet.'; wrap.appendChild(empty);
+        }
+
+        round.questions.forEach((q, qi) => {
+          const card=document.createElement('div'); card.className=`question-card ${locked?'locked':''}`;
+          const label=qLabel(round,qi);
+          card.innerHTML=`
+            <div class="qtop">
+              <div><span class="qnum">${label}</span>${q.parentRef ? `<span class="ref">Follow-up to ${escapeHtml(q.parentRef)}</span>`:''}</div>
+              <div class="actions">
+                ${locked && q.answer ? `<button class="btn small secondary" data-followup="${q.id}">Ask follow-up</button>`:''}
+                ${!locked && !isIssued(round) && isCurrent(round) ? `<button class="btn small danger" data-remove="${q.id}">Remove</button>`:''}
+              </div>
+            </div>`;
+
+          if (!locked && isCurrent(round)) {
+            if (isIssued(round)) {
+              const qLocked=document.createElement('div'); qLocked.style.whiteSpace='pre-wrap'; qLocked.textContent=q.question || '(empty question)'; card.appendChild(qLocked);
+              const issueNote=document.createElement('div'); issueNote.className='hint'; issueNote.textContent='Question locked because this round has been issued.'; card.appendChild(issueNote);
+            } else {
+              const qf=document.createElement('div'); qf.className='field';
+              qf.innerHTML=`<label>Question</label><textarea data-qtext="${q.id}" placeholder="Enter the question..."></textarea>`;
+              const ta=qf.querySelector('textarea'); ta.value=q.question; ta.addEventListener('input',e=>{q.question=e.target.value;autoGrow(e.target)}); setTimeout(()=>autoGrow(ta));
+              card.appendChild(qf);
+            }
+            const af=document.createElement('div'); af.className='field'; af.style.marginTop='10px';
+            af.innerHTML=`<label>Answer</label><textarea data-ans="${q.id}" placeholder="The responding party can type an answer of any length here..."></textarea>`;
+            const aa=af.querySelector('textarea'); aa.value=q.answer||''; aa.addEventListener('input',e=>{q.answer=e.target.value;autoGrow(e.target)}); setTimeout(()=>autoGrow(aa));
+            card.appendChild(af);
+          } else {
+            const qt=document.createElement('div'); qt.style.whiteSpace='pre-wrap'; qt.textContent=q.question || '(empty question)'; card.appendChild(qt);
+            const al=document.createElement('div'); al.className='answer-label'; al.textContent='Answer'; card.appendChild(al);
+            const at=document.createElement('div'); at.className='answer-text'; at.textContent=q.answer || '(no answer recorded)'; card.appendChild(at);
+          }
+          wrap.appendChild(card);
+        });
+
+        if (!locked && isCurrent(round)) {
+          const closure=document.createElement('div'); closure.className='closure';
+          closure.innerHTML=`
+            <div class="section-head"><div><strong>Round closure</strong><div class="hint">Required when completing this round.</div></div></div>
+            <div class="closure-grid">
+              <div class="field"><label>Answerer's full name</label><input data-close-name value="${escapeHtml(round.closure.name||'')}" placeholder="Full name" /></div>
+              <div class="field"><label>Date</label><input data-close-date type="date" value="${escapeHtml(round.closure.date||isoDate())}" /></div>
+            </div>
+            <div class="field" style="margin-top:12px"><label>Typed signature (fallback)</label><input data-close-signtext value="${escapeHtml(round.closure.signatureText||'')}" placeholder="Type full name, or draw below" /></div>
+            <div class="signature-wrap"><label style="font-weight:650">Handwritten signature</label><canvas id="sigCanvas" width="900" height="240"></canvas><div class="toolbar" style="margin-top:7px"><button class="btn small" id="clearSig">Clear signature</button></div><div class="hint">Draw with mouse, trackpad or finger. A typed signature can be used as a fallback.</div></div>`;
+          wrap.appendChild(closure);
+          closure.querySelector('[data-close-name]').addEventListener('input',e=>round.closure.name=e.target.value);
+          closure.querySelector('[data-close-date]').addEventListener('input',e=>round.closure.date=e.target.value);
+          closure.querySelector('[data-close-signtext]').addEventListener('input',e=>round.closure.signatureText=e.target.value);
+          setTimeout(()=>setupSignatureCanvas(round));
+        } else if (locked) {
+          const c=document.createElement('div'); c.className='closure';
+          c.innerHTML=`<strong>Closed by:</strong> ${escapeHtml(round.closure.name||'Unknown')} &nbsp; <strong>Date:</strong> ${escapeHtml(round.closure.date||'Unknown')} ${round.closure.signatureDataUrl || round.closure.signatureText ? '&nbsp; ✓ Signature recorded':''}`;
+          wrap.appendChild(c);
+        }
+        host.appendChild(wrap);
+      });
+
+      host.querySelectorAll('[data-remove]').forEach(btn=>btn.addEventListener('click',()=>{
+        const r=currentRound(); r.questions=r.questions.filter(q=>q.id!==btn.dataset.remove); render();
+      }));
+      host.querySelectorAll('[data-followup]').forEach(btn=>btn.addEventListener('click',()=>addFollowup(btn.dataset.followup)));
+    }
+
+    function setupSignatureCanvas(round) {
+      const canvas=$('sigCanvas'); if (!canvas) return; activeCanvas=canvas;
+      const ctx=canvas.getContext('2d'); ctx.lineWidth=3; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#111827';
+      if (round.closure.signatureDataUrl) {
+        const img=new Image(); img.onload=()=>ctx.drawImage(img,0,0,canvas.width,canvas.height); img.src=round.closure.signatureDataUrl;
+      }
+      const point=(e)=>{ const rect=canvas.getBoundingClientRect(); const touch=e.touches?.[0]; const clientX=touch?touch.clientX:e.clientX; const clientY=touch?touch.clientY:e.clientY; return {x:(clientX-rect.left)*(canvas.width/rect.width),y:(clientY-rect.top)*(canvas.height/rect.height)}; };
+      const start=e=>{ drawing=true; lastPoint=point(e); e.preventDefault(); };
+      const move=e=>{ if(!drawing)return; const p=point(e); ctx.beginPath();ctx.moveTo(lastPoint.x,lastPoint.y);ctx.lineTo(p.x,p.y);ctx.stroke();lastPoint=p;round.closure.signatureDataUrl=canvas.toDataURL('image/png');e.preventDefault(); };
+      const end=()=>{ if(drawing){drawing=false;round.closure.signatureDataUrl=canvas.toDataURL('image/png');} };
+      canvas.onpointerdown=start; canvas.onpointermove=move; canvas.onpointerup=end; canvas.onpointerleave=end;
+      $('clearSig').onclick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);round.closure.signatureDataUrl='';};
+    }
+
+    function addQuestion(parentRef='') {
+      const r=currentRound();
+      if (r.status==='completed') return showMessage('Start a follow-up round before adding new questions.','warning');
+      if (r.status==='issued') return showMessage('This round has already been issued. Its questions are locked.','warning');
+      r.questions.push({id:uuid(), question:'', answer:'', parentRef}); render();
+      setTimeout(()=>document.querySelectorAll('[data-qtext]')[document.querySelectorAll('[data-qtext]').length-1]?.focus(),0);
+    }
+    function startFollowupRound() {
+      const r=currentRound();
+      if (r.status!=='completed') return showMessage('Complete the current round before starting a follow-up round.','warning');
+      state.rounds.push({id:uuid(), number:r.number+1, status:'draft', answeringParty:r.answeringParty, createdAt:new Date().toISOString(), questions:[], closure:{name:'',date:isoDate(),signatureDataUrl:'',signatureText:''}}); render();
+    }
+    function findQuestion(qid) {
+      for (const r of state.rounds) { const idx=r.questions.findIndex(q=>q.id===qid); if(idx>=0) return {round:r,index:idx,q:r.questions[idx]}; }
+      return null;
+    }
+    function addFollowup(qid) {
+      const found=findQuestion(qid); if(!found)return;
+      if(currentRound().status==='completed') startFollowupRound();
+      const ref=qLabel(found.round,found.index);
+      currentRound().questions.push({id:uuid(),question:`Follow-up regarding ${ref}: `,answer:'',parentRef:ref}); render();
+    }
+
+    $('addQuestionBtn').onclick=()=>addQuestion();
+    $('startRoundBtn').onclick=startFollowupRound;
+    $('newBtn').onclick=()=>{ if(confirm('Start a new dossier? Unsaved changes in the current screen will be lost.')){state=blankState();render();} };
+    $('uploadBtn').onclick=()=>$('fileInput').click();
+    $('fileInput').onchange=async(e)=>{const file=e.target.files?.[0]; if(file) await importPdf(file); e.target.value='';};
+    $('fillableBtn').onclick=()=>downloadFillable();
+    $('finalBtn').onclick=()=>completeAndDownload();
+
+    async function downloadFillable() {
+      const r=currentRound();
+      if(!state.party1.trim() || !state.party2.trim() || !state.project.trim()) return showMessage('Please complete the dossier details first.','warning');
+      if(!r.questions.length || r.questions.some(q=>!q.question.trim())) return showMessage('Add at least one complete question before issuing the round.','warning');
+      if(r.status==='completed') return showMessage('This round is already completed. Start a follow-up round to issue new questions.','warning');
+      if(r.status==='draft') { r.status='issued'; r.issuedAt=new Date().toISOString(); render(); }
+      await downloadPdf(false);
+    }
+
+    async function completeAndDownload() {
+      const r=currentRound();
+      if (r.status==='completed') return showMessage('This round is already completed. Start a follow-up round to continue.','warning');
+      if (!state.party1.trim() || !state.party2.trim() || !state.project.trim()) return showMessage('Please complete Party 1, Party 2 and Project / dossier first.','warning');
+      if (!r.questions.length || r.questions.some(q=>!q.question.trim())) return showMessage('Add at least one complete question before closing the round.','warning');
+      if (r.questions.some(q=>!q.answer.trim())) return showMessage('Every question needs an answer before the round can be completed.','warning');
+      if (!r.closure.name.trim() || !r.closure.date) return showMessage('Answerer name and date are required.','warning');
+      if (!r.closure.signatureDataUrl && !r.closure.signatureText.trim()) return showMessage('A handwritten or typed signature is required.','warning');
+      r.status='completed'; r.completedAt=new Date().toISOString();
+      await downloadPdf(true); render(); showMessage(`Round ${r.number} completed and locked.`,'success');
+    }
+
+    async function importPdf(file) {
+      try {
+        const bytes=new Uint8Array(await file.arrayBuffer());
+        let restored=await readEmbeddedState(bytes);
+        if (!restored) throw new Error('No embedded Q&A project data was found. Please upload a PDF generated by this app.');
+        restored=normalizeState(restored);
+        await mergePdfFormValues(bytes,restored);
+        state=restored; render();
+        showMessage(`Loaded ${file.name}. Existing completed rounds are locked and the latest open round can be continued.`,'success');
+      } catch(err) { console.error(err); showMessage(err.message || 'Could not read this PDF.','warning'); }
+    }
+
+    function normalizeState(s) {
+      if(!s || s.schemaVersion!==1 || !Array.isArray(s.rounds)) throw new Error('This Q&A file uses an unsupported format.');
+      s.documentDate ||= isoDate(); s.dossierId ||= uuid();
+      s.rounds.forEach((r,i)=>{r.number ||= i+1;r.id ||= uuid();r.questions ||= [];r.closure ||= {name:'',date:'',signatureDataUrl:'',signatureText:''};r.answeringParty ||= 'party2';r.status ||= 'draft';});
+      return s;
+    }
+
+    async function readEmbeddedState(bytes) {
+      const loading=pdfjsLib.getDocument({data:bytes}); const doc=await loading.promise;
+      const attachments=await doc.getAttachments(); if(!attachments) return null;
+      let entries=[];
+      if (attachments instanceof Map) entries=[...attachments.entries()]; else entries=Object.entries(attachments);
+      for (const [key,item] of entries) {
+        const name=item?.filename || item?.name || key;
+        if (name !== STATE_FILE && key !== STATE_FILE) continue;
+        let content=item?.content || item?.data;
+        if (!content && item?.id && doc.getAttachmentContent) {
+          const payload=await doc.getAttachmentContent(item.id); content=payload?.content || payload?.data || payload;
+        }
+        if (!content) continue;
+        const arr=content instanceof Uint8Array ? content : new Uint8Array(content);
+        return JSON.parse(new TextDecoder().decode(arr));
+      }
+      return null;
+    }
+
+    async function mergePdfFormValues(bytes,targetState) {
+      try {
+        const doc=await PDFDocument.load(bytes,{ignoreEncryption:true}); const form=doc.getForm();
+        const fields=form.getFields();
+        const values=new Map();
+        for (const f of fields) { if (typeof f.getText==='function') values.set(f.getName(),f.getText()||''); }
+        for (const r of targetState.rounds) {
+          if(r.status==='completed') continue;
+          r.questions.forEach(q=>{ const v=values.get(`answer.${q.id}`); if(typeof v==='string' && v.trim()) q.answer=v; });
+          const n=values.get(`closure.name.r${r.number}`); const d=values.get(`closure.date.r${r.number}`); const s=values.get(`closure.signature.r${r.number}`);
+          if(n) r.closure.name=n; if(d) r.closure.date=d; if(s) r.closure.signatureText=s;
+          const allAnswered=r.questions.length>0 && r.questions.every(q=>q.answer?.trim());
+          if(allAnswered && r.closure.name?.trim() && r.closure.date && r.closure.signatureText?.trim()) {
+            r.status='completed'; r.completedAt=new Date().toISOString();
+          }
+        }
+      } catch(err) { console.warn('Form values could not be merged',err); }
+    }
+
+    async function downloadPdf(finalized) {
+      try {
+        if(!state.party1.trim() || !state.party2.trim() || !state.project.trim()) return showMessage('Please complete the dossier details first.','warning');
+        const r=currentRound(); if(!r.questions.length) return showMessage('Add at least one question first.','warning');
+        if(r.questions.some(q=>!q.question.trim())) return showMessage('Every question needs question text.','warning');
+        const bytes=await buildPdf(finalized);
+        const roundNo=currentRound().number; const suffix=finalized?'completed':'fillable';
+        const safe=(state.project||'dossier').replace(/[^a-z0-9_-]+/gi,'_').replace(/^_+|_+$/g,'').slice(0,60)||'dossier';
+        downloadBlob(bytes,`${safe}_Round_${roundNo}_${suffix}.pdf`,'application/pdf');
+      } catch(err) { console.error(err); showMessage(`PDF generation failed: ${err.message}`,'warning'); }
+    }
+
+    async function buildPdf(finalized) {
+      const pdf=await PDFDocument.create();
+      pdf.setTitle(`Q&A - ${pdfSafe(state.project)}`);
+      pdf.setSubject('Q&A round dossier generated by Q&A Round Form');
+      pdf.setCreator('Q&A Round Form');
+      const font=await pdf.embedFont(StandardFonts.Helvetica);
+      const bold=await pdf.embedFont(StandardFonts.HelveticaBold);
+      const form=pdf.getForm();
+      const ctx={pdf,font,bold,form,page:null,y:0,pageNo:0,_signatures:[]};
+      newPage(ctx);
+      drawHeader(ctx,finalized);
+
+      for(const round of state.rounds) {
+        ensureSpace(ctx,42);
+        drawRoundHeading(ctx,round);
+        for(let i=0;i<round.questions.length;i++) {
+          const q=round.questions[i];
+          const label=qLabel(round,i);
+          const locked=round.status==='completed' || round!==currentRound() || finalized;
+          drawQuestion(ctx,label,q.question,q.parentRef);
+          if(locked) drawAnswerFlow(ctx,q.answer||'(No answer recorded)');
+          else drawAnswerField(ctx,q);
+          ctx.y-=10;
+        }
+        if(round.status==='completed' || (finalized && round===currentRound())) drawClosureFlow(ctx,round);
+        else if(round===currentRound()) drawClosureFields(ctx,round);
+        ctx.y-=14;
+      }
+
+      for(const s of ctx._signatures) {
+        try {
+          const img=await pdf.embedPng(s.data);
+          const dims=img.scale(1);
+          const ratio=Math.min(s.w/dims.width,s.h/dims.height);
+          s.page.drawImage(img,{x:s.x,y:s.y,width:dims.width*ratio,height:dims.height*ratio});
+        } catch(e) { console.warn('Signature image skipped',e); }
+      }
+
+      addFooters(ctx);
+      const stateBytes=new TextEncoder().encode(JSON.stringify(state));
+      await pdf.attach(stateBytes,STATE_FILE,{
+        mimeType:'application/json',
+        description:'Q&A dossier state for re-opening this PDF in the Q&A Round Form app',
+        creationDate:new Date(),
+        modificationDate:new Date()
+      });
+      return await pdf.save({useObjectStreams:false});
+    }
+
+    function newPage(ctx) { ctx.page=ctx.pdf.addPage(A4); ctx.pageNo++; ctx.y=A4[1]-MARGIN; }
+    function ensureSpace(ctx,h) { if(ctx.y-h < MARGIN+28) newPage(ctx); }
+    function drawHeader(ctx,finalized) {
+      const {page,font,bold}=ctx; page.drawText('Q&A ROUND FORM',{x:MARGIN,y:ctx.y,font:bold,size:17,color:rgb(.08,.13,.2)}); ctx.y-=24;
+      const lines=[['Party 1',state.party1],['Party 2',state.party2],['Project / dossier',state.project],['Document date',state.documentDate||'']];
+      for(const [k,v] of lines){page.drawText(`${k}:`,{x:MARGIN,y:ctx.y,font:bold,size:9,color:rgb(.25,.29,.35)});page.drawText(pdfSafe(v),{x:MARGIN+92,y:ctx.y,font,size:9,color:rgb(.05,.08,.12)});ctx.y-=14;}
+      page.drawText(`Version: ${finalized?'Completed / signed':'Fillable'} | Current round: ${currentRound().number}`,{x:MARGIN,y:ctx.y,font,size:8,color:rgb(.4,.45,.5)});ctx.y-=22;
+      page.drawLine({start:{x:MARGIN,y:ctx.y},end:{x:A4[0]-MARGIN,y:ctx.y},thickness:.7,color:rgb(.82,.85,.88)});ctx.y-=17;
+    }
+    function drawRoundHeading(ctx,round) {
+      const responding=pdfSafe(answeringPartyName(round));
+      ctx.page.drawText(`Round ${round.number}`,{x:MARGIN,y:ctx.y,font:ctx.bold,size:13,color:rgb(.08,.13,.2)});
+      ctx.page.drawText(`${round.status==='completed'?'COMPLETED':(round.status==='issued'?'ISSUED':'DRAFT')} | Responding party: ${responding}`,{x:MARGIN+75,y:ctx.y+1,font:ctx.font,size:8,color:rgb(.35,.4,.46)});ctx.y-=20;
+    }
+    function drawQuestion(ctx,label,text,parentRef) {
+      const prefix=parentRef?`${label} (follow-up to ${parentRef})` : label;
+      ensureSpace(ctx,36); ctx.page.drawText(prefix,{x:MARGIN,y:ctx.y,font:ctx.bold,size:9,color:rgb(.18,.22,.28)});ctx.y-=14;
+      drawWrapped(ctx,pdfSafe(text),MARGIN,9.5,12,A4[0]-2*MARGIN,ctx.font,rgb(.05,.08,.12));ctx.y-=6;
+    }
+    function drawAnswerFlow(ctx,text) {
+      ensureSpace(ctx,28); ctx.page.drawText('Answer',{x:MARGIN,y:ctx.y,font:ctx.bold,size:8,color:rgb(.35,.4,.46)});ctx.y-=13;
+      drawWrapped(ctx,pdfSafe(text),MARGIN,9,12,A4[0]-2*MARGIN,ctx.font,rgb(.08,.1,.13));ctx.y-=5;
+    }
+    function drawAnswerField(ctx,q) {
+      const h=100; ensureSpace(ctx,h+28); ctx.page.drawText('Answer',{x:MARGIN,y:ctx.y,font:ctx.bold,size:8,color:rgb(.35,.4,.46)});ctx.y-=12;
+      const f=ctx.form.createTextField(`answer.${q.id}`); f.enableMultiline(); f.enableScrolling(); if(q.answer)f.setText(pdfSafe(q.answer));
+      f.addToPage(ctx.page,{x:MARGIN,y:ctx.y-h,width:A4[0]-2*MARGIN,height:h,font:ctx.font,fontSize:9,textColor:rgb(.05,.08,.12),borderColor:rgb(.68,.72,.76),backgroundColor:rgb(1,1,1),borderWidth:1});ctx.y-=h+8;
+    }
+    function drawClosureFlow(ctx,round) {
+      ensureSpace(ctx,95);ctx.page.drawLine({start:{x:MARGIN,y:ctx.y},end:{x:A4[0]-MARGIN,y:ctx.y},thickness:.7,color:rgb(.82,.85,.88)});ctx.y-=16;
+      ctx.page.drawText('ROUND CLOSURE',{x:MARGIN,y:ctx.y,font:ctx.bold,size:9,color:rgb(.18,.22,.28)});ctx.y-=15;
+      ctx.page.drawText(`Answerer: ${pdfSafe(round.closure.name||'')}`,{x:MARGIN,y:ctx.y,font:ctx.font,size:9});ctx.page.drawText(`Date: ${pdfSafe(round.closure.date||'')}`,{x:360,y:ctx.y,font:ctx.font,size:9});ctx.y-=18;
+      if(round.closure.signatureDataUrl){ try { /* embedded below */ } catch{} }
+      ctx.page.drawText('Signature:',{x:MARGIN,y:ctx.y,font:ctx.bold,size:8,color:rgb(.35,.4,.46)});
+      if(round.closure.signatureText) ctx.page.drawText(pdfSafe(round.closure.signatureText),{x:MARGIN+58,y:ctx.y,font:ctx.font,size:11});
+      ctx.y-=52;
+      if(round.closure.signatureDataUrl) ctx._signatures=(ctx._signatures||[]).concat([{page:ctx.page,data:round.closure.signatureDataUrl,x:MARGIN+58,y:ctx.y+10,w:180,h:45}]);
+    }
+    function drawClosureFields(ctx,round) {
+      ensureSpace(ctx,125);ctx.page.drawLine({start:{x:MARGIN,y:ctx.y},end:{x:A4[0]-MARGIN,y:ctx.y},thickness:.7,color:rgb(.82,.85,.88)});ctx.y-=16;
+      ctx.page.drawText('ROUND CLOSURE - TO BE COMPLETED BY THE RESPONDING PARTY',{x:MARGIN,y:ctx.y,font:ctx.bold,size:8.5});ctx.y-=18;
+      const name=ctx.form.createTextField(`closure.name.r${round.number}`); name.addToPage(ctx.page,{x:MARGIN+62,y:ctx.y-16,width:250,height:22,font:ctx.font,fontSize:9,borderColor:rgb(.68,.72,.76),borderWidth:1});ctx.page.drawText('Full name',{x:MARGIN,y:ctx.y-9,font:ctx.font,size:8});
+      const date=ctx.form.createTextField(`closure.date.r${round.number}`); date.setText(round.closure.date||isoDate()); date.addToPage(ctx.page,{x:392,y:ctx.y-16,width:110,height:22,font:ctx.font,fontSize:9,borderColor:rgb(.68,.72,.76),borderWidth:1});ctx.page.drawText('Date',{x:355,y:ctx.y-9,font:ctx.font,size:8});ctx.y-=38;
+      const sig=ctx.form.createTextField(`closure.signature.r${round.number}`); sig.addToPage(ctx.page,{x:MARGIN+62,y:ctx.y-16,width:260,height:22,font:ctx.font,fontSize:9,borderColor:rgb(.68,.72,.76),borderWidth:1});ctx.page.drawText('Signature',{x:MARGIN,y:ctx.y-9,font:ctx.font,size:8});ctx.page.drawText('Type your full name here, or use your PDF viewer\'s Fill & Sign tool in this area.',{x:MARGIN+62,y:ctx.y-30,font:ctx.font,size:6.8,color:rgb(.4,.45,.5)});ctx.y-=50;
+    }
+    function drawWrapped(ctx,text,x,size,lineHeight,maxWidth,font,color) {
+      const paragraphs=String(text||'').split(/\n/); for(let p=0;p<paragraphs.length;p++) { const words=paragraphs[p].split(/\s+/); let line='';
+        if(!words[0]){ctx.y-=lineHeight;continue;}
+        for(const word of words){ const test=line?`${line} ${word}`:word; if(font.widthOfTextAtSize(test,size)>maxWidth && line){ensureSpace(ctx,lineHeight+5);ctx.page.drawText(line,{x,y:ctx.y,font,size,color});ctx.y-=lineHeight;line=word;} else line=test; }
+        if(line){ensureSpace(ctx,lineHeight+5);ctx.page.drawText(line,{x,y:ctx.y,font,size,color});ctx.y-=lineHeight;} if(p<paragraphs.length-1)ctx.y-=2;
+      }
+    }
+    function addFooters(ctx) {
+      const pages=ctx.pdf.getPages(); pages.forEach((p,i)=>{p.drawLine({start:{x:MARGIN,y:28},end:{x:A4[0]-MARGIN,y:28},thickness:.5,color:rgb(.86,.88,.9)});p.drawText(pdfSafe(state.project),{x:MARGIN,y:16,font:ctx.font,size:6.5,color:rgb(.45,.48,.52)});p.drawText(`Page ${i+1} of ${pages.length}`,{x:A4[0]-MARGIN-55,y:16,font:ctx.font,size:6.5,color:rgb(.45,.48,.52)});});
+    }
+    function pdfSafe(value) {
+      return String(value??'').replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/[–—]/g,'-').replace(/…/g,'...').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g,'?');
+    }
+    function downloadBlob(bytes,name,type) { const blob=new Blob([bytes],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000); }
+
+    render();
+  </script>
+</body>
+</html>
