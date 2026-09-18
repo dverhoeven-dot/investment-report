@@ -22,9 +22,13 @@ type Downpayment = {
   amount: string;
 };
 
+type InvestorInputMode = "amount" | "percentage";
+
 type CoInvestor = {
   name: string;
+  investmentInputMode: InvestorInputMode;
   monthlyTotalAmount: string;
+  investmentPercentage: string;
 };
 
 type CashflowCategory = "acquisition" | "project" | "financing" | "sale";
@@ -255,7 +259,9 @@ function emptyIfZeroString(value: unknown) {
 function createInvestor(index: number): CoInvestor {
   return {
     name: `Mede-investeerder ${index + 1}`,
+    investmentInputMode: "amount",
     monthlyTotalAmount: "",
+    investmentPercentage: "",
   };
 }
 
@@ -437,10 +443,20 @@ function normalizeStoredForm(
       const migratedTotal =
         storedMonthlyTotal || legacyContributionTotal || legacyMonthlyTotal;
 
+      const storedInputMode: InvestorInputMode =
+        investor.investmentInputMode === "percentage" ? "percentage" : "amount";
+      const storedPercentage = Math.max(
+        0,
+        Math.min(100, parseNumber(String(investor.investmentPercentage ?? "")))
+      );
+
       return {
         name: String(investor.name ?? `Mede-investeerder ${investorIndex + 1}`),
+        investmentInputMode: storedInputMode,
         monthlyTotalAmount:
           migratedTotal > 0 ? String(Math.round(migratedTotal)) : "",
+        investmentPercentage:
+          storedPercentage > 0 ? String(storedPercentage).replace(".", ",") : "",
       };
     });
   while (coInvestors.length < requestedInvestorCount) {
@@ -925,6 +941,20 @@ export default function LosNaranjosClient({
     }));
   }
 
+  function updateInvestorInputMode(
+    investorIndex: number,
+    value: InvestorInputMode
+  ) {
+    setForm((current) => ({
+      ...current,
+      coInvestors: current.coInvestors.map((investor, currentIndex) =>
+        currentIndex === investorIndex
+          ? { ...investor, investmentInputMode: value }
+          : investor
+      ),
+    }));
+  }
+
   function updateInvestorMonthlyTotal(
     investorIndex: number,
     value: string
@@ -934,6 +964,20 @@ export default function LosNaranjosClient({
       coInvestors: current.coInvestors.map((investor, currentIndex) =>
         currentIndex === investorIndex
           ? { ...investor, monthlyTotalAmount: value }
+          : investor
+      ),
+    }));
+  }
+
+  function updateInvestorPercentage(
+    investorIndex: number,
+    value: string
+  ) {
+    setForm((current) => ({
+      ...current,
+      coInvestors: current.coInvestors.map((investor, currentIndex) =>
+        currentIndex === investorIndex
+          ? { ...investor, investmentPercentage: value }
           : investor
       ),
     }));
@@ -1181,10 +1225,13 @@ export default function LosNaranjosClient({
       .map((investor, investorIndex) => ({
         index: investorIndex,
         name: investor.name.trim() || `Mede-investeerder ${investorIndex + 1}`,
-        plannedCapital: Math.max(
-          0,
-          parseNumber(investor.monthlyTotalAmount)
+        investmentInputMode: investor.investmentInputMode,
+        enteredAmount: Math.max(0, parseNumber(investor.monthlyTotalAmount)),
+        enteredPercentage: Math.min(
+          1,
+          Math.max(0, parsePercent(investor.investmentPercentage))
         ),
+        plannedCapital: 0,
       }));
 
     const purchasePrice = Math.max(0, parseNumber(form.purchasePrice));
@@ -1232,6 +1279,10 @@ export default function LosNaranjosClient({
     // De opslag wordt daarom niet in de projectkosten of construction draws opgenomen,
     // maar als aanvullende opbrengst bij de verkoop verwerkt.
     const furnitureMarkup = looseFurniture * furnitureMarkupPercentage;
+    // Furniture wordt los boven op de vastgoedverkoop verkocht. De extra
+    // verkoopopbrengst bestaat daarom uit de kostprijs van Furniture plus
+    // de ingestelde mark-up. Built-in Furniture valt hier niet onder.
+    const furnitureSaleProceeds = looseFurniture + furnitureMarkup;
     const fixedFurnitureCost = fixedInterior;
     const looseFurnitureCost = looseFurniture;
     const projectSubtotal =
@@ -1242,13 +1293,24 @@ export default function LosNaranjosClient({
     const totalProjectCost = projectSubtotal + projectManagement;
     const capitalDeployed = totalAcquisition + totalProjectCost;
 
+    // Een mede-investeerder kan zijn deelname invoeren als vast bedrag of als
+    // percentage van het totale benodigde projectkapitaal. Beide routes worden
+    // hier omgerekend naar hetzelfde plannedCapital, zodat de rest van de
+    // cashflow- en winstverdeling identiek blijft werken.
+    coInvestors.forEach((investor) => {
+      investor.plannedCapital =
+        investor.investmentInputMode === "percentage"
+          ? capitalDeployed * investor.enteredPercentage
+          : investor.enteredAmount;
+    });
+
     const salePrice = Math.max(0, parseNumber(form.salePrice));
     const agentCommissionPercentage = Math.max(
       0,
       parsePercent(form.agentCommissionPercentage)
     );
     const agentCommission = salePrice * agentCommissionPercentage;
-    const netProceeds = salePrice - agentCommission + furnitureMarkup;
+    const netProceeds = salePrice - agentCommission + furnitureSaleProceeds;
     const netSaleProceedsBeforeFurniture = netProceeds;
     const operatingNetProfit = netProceeds - capitalDeployed;
 
@@ -1392,7 +1454,7 @@ export default function LosNaranjosClient({
     rawCashflow.push({
       paymentId: "sale-proceeds",
       month: durationMonths,
-      event: "Sales proceeds (after commission + furniture mark-up)",
+      event: "Sales proceeds (after commission + Furniture incl. mark-up)",
       outflow: 0,
       inflow: netProceeds,
       category: "sale",
@@ -1716,7 +1778,7 @@ export default function LosNaranjosClient({
           ...investmentCashflow,
           {
             month,
-            event: "Sales proceeds (after commission + furniture mark-up)",
+            event: "Sales proceeds (after commission + Furniture incl. mark-up)",
             outflow: 0,
             inflow: netProceeds,
             category: "sale" as const,
@@ -1727,7 +1789,7 @@ export default function LosNaranjosClient({
     const saleSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map((change) => {
       const scenarioSalePrice = salePrice * (1 + change);
       const scenarioNetProceeds =
-        scenarioSalePrice * (1 - agentCommissionPercentage) + furnitureMarkup;
+        scenarioSalePrice * (1 - agentCommissionPercentage) + furnitureSaleProceeds;
       const scenarioProfit =
         scenarioNetProceeds - capitalDeployed - totalBankInterest;
       const scenarioRoi = equityCapitalDeployed
@@ -1742,7 +1804,7 @@ export default function LosNaranjosClient({
           ...investmentCashflow,
           {
             month: durationMonths,
-            event: "Sales proceeds (after commission + furniture mark-up)",
+            event: "Sales proceeds (after commission + Furniture incl. mark-up)",
             outflow: 0,
             inflow: scenarioNetProceeds,
             category: "sale" as const,
@@ -1782,7 +1844,7 @@ export default function LosNaranjosClient({
             ...scenarioInvestmentCashflow,
             {
               month: durationMonths,
-              event: "Sales proceeds (after commission + furniture mark-up)",
+              event: "Sales proceeds (after commission + Furniture incl. mark-up)",
               outflow: 0,
               inflow: netProceeds,
               category: "sale" as const,
@@ -1845,6 +1907,7 @@ export default function LosNaranjosClient({
       looseFurniture,
       furnitureMarkupPercentage,
       furnitureMarkup,
+      furnitureSaleProceeds,
       fixedFurnitureCost,
       looseFurnitureCost,
       projectManagementPercentage,
@@ -2092,6 +2155,16 @@ export default function LosNaranjosClient({
               {entries.map(({ investorIndex }) => (
                 <td key={`commission-${investorIndex}`}>
                   -{euro(data.coInvestorSalesCommission[investorIndex] ?? 0)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td><strong>Furniture incl. mark-up</strong></td>
+              <td>+{euro(data.furnitureSaleProceeds)}</td>
+              <td>+{euro(data.furnitureSaleProceeds * data.ourEquityPercentage)}</td>
+              {entries.map(({ summary, investorIndex }) => (
+                <td key={`furniture-proceeds-${investorIndex}`}>
+                  +{euro(data.furnitureSaleProceeds * summary.capitalShare)}
                 </td>
               ))}
             </tr>
@@ -2351,7 +2424,7 @@ export default function LosNaranjosClient({
                         </span>
                         <h3>{investor.name.trim() || `Mede-investeerder ${investorIndex + 1}`}</h3>
                         <p>
-                          Het totale investeringsbedrag bepaalt het vaste aandeel. Deze mede-investeerder betaalt bij iedere projectbetaling automatisch hetzelfde percentage mee.
+                          Kies een vast investeringsbedrag of een percentage van het totale projectkapitaal. Het model rekent het andere automatisch uit en gebruikt daarna hetzelfde vaste aandeel bij iedere projectbetaling.
                         </p>
                       </div>
 
@@ -2378,20 +2451,50 @@ export default function LosNaranjosClient({
                         numeric={false}
                         onChange={(value) => updateCoInvestorName(investorIndex, value)}
                       />
-                      <InputField
-                        label="Totaal investeringsbedrag"
-                        value={investor.monthlyTotalAmount}
-                        format="amount"
-                        placeholder="Bijv. 500.000"
-                        helper={
-                          parseNumber(investor.monthlyTotalAmount) > 0
-                            ? `${percent(summary?.capitalShare ?? 0)} van iedere projectbetaling`
-                            : "Vul het totale investeringsbedrag in"
-                        }
+                      <SelectField
+                        label="Invoer op basis van"
+                        value={investor.investmentInputMode}
+                        options={[
+                          { value: "amount", label: "Bedrag" },
+                          { value: "percentage", label: "Percentage" },
+                        ]}
                         onChange={(value) =>
-                          updateInvestorMonthlyTotal(investorIndex, value)
+                          updateInvestorInputMode(
+                            investorIndex,
+                            value as InvestorInputMode
+                          )
                         }
                       />
+                      {investor.investmentInputMode === "percentage" ? (
+                        <InputField
+                          label="Investeringspercentage %"
+                          value={investor.investmentPercentage}
+                          placeholder="Bijv. 50"
+                          helper={
+                            parsePercent(investor.investmentPercentage) > 0
+                              ? `${percent(summary?.capitalShare ?? 0)} = ${euro(summary?.plannedCapital ?? 0)}`
+                              : "Bijv. 50 voor 50% van het projectkapitaal"
+                          }
+                          onChange={(value) =>
+                            updateInvestorPercentage(investorIndex, value)
+                          }
+                        />
+                      ) : (
+                        <InputField
+                          label="Totaal investeringsbedrag"
+                          value={investor.monthlyTotalAmount}
+                          format="amount"
+                          placeholder="Bijv. 500.000"
+                          helper={
+                            parseNumber(investor.monthlyTotalAmount) > 0
+                              ? `${percent(summary?.capitalShare ?? 0)} van iedere projectbetaling`
+                              : "Vul het totale investeringsbedrag in"
+                          }
+                          onChange={(value) =>
+                            updateInvestorMonthlyTotal(investorIndex, value)
+                          }
+                        />
+                      )}
                     </div>
                   </section>
                 );
@@ -2399,7 +2502,7 @@ export default function LosNaranjosClient({
             </div>
 
             <p className="input-hint field-full">
-              Iedere mede-investeerder betaalt bij elke projectbetaling zijn vaste aandeel mee. Wij vullen automatisch het resterende bedrag aan. Winst en opbrengst worden per investeerder berekend over het daadwerkelijk gebruikte kapitaal.
+              Iedere mede-investeerder kan worden ingevoerd als bedrag of percentage. Het uiteindelijke aandeel wordt bij elke projectbetaling toegepast; wij vullen automatisch het resterende bedrag aan. Winst en opbrengst worden per investeerder berekend over het daadwerkelijk gebruikte kapitaal.
             </p>
           </InputGroup>
         )}
@@ -2956,8 +3059,8 @@ export default function LosNaranjosClient({
           <DataRow label="Gross Sale Price" value={euro(data.salePrice)} strong />
           <DataRow label={`Agent Commission (${percent(data.agentCommissionPercentage)})`} value={euro(data.agentCommission)} />
           <DataRow
-            label={`Furniture Mark-up – added to proceeds (${percent(data.furnitureMarkupPercentage)})`}
-            value={`+${euro(data.furnitureMarkup)}`}
+            label={`Furniture + Mark-up – added to proceeds (${percent(data.furnitureMarkupPercentage)})`}
+            value={`+${euro(data.furnitureSaleProceeds)}`}
           />
           <DataRow
             label={data.bankFinancingEnabled ? "Net Proceeds before Bank" : "Net Proceeds"}
@@ -2975,7 +3078,7 @@ export default function LosNaranjosClient({
         </DataBlock>
 
         <AllocationBar
-          salePrice={data.salePrice}
+          salePrice={data.salePrice + data.furnitureSaleProceeds}
           acquisition={data.totalAcquisition}
           project={data.totalProjectCost}
           commission={data.agentCommission}
@@ -3732,7 +3835,7 @@ function AllocationBar({ salePrice, acquisition, project, commission, profit }: 
 
   return (
     <section className="allocation">
-      <div className="allocation-title"><TableTitle>Where the sale price goes</TableTitle><span>Gross sale {euro(salePrice)}</span></div>
+      <div className="allocation-title"><TableTitle>Where the sale proceeds go</TableTitle><span>Gross proceeds {euro(salePrice)}</span></div>
       <div className="allocation-bar">
         {items.map((item) => (
           <span key={item.label} className={item.className} style={{ width: `${Math.max(0, item.value / total) * 100}%` }}>
@@ -4165,7 +4268,7 @@ const styles = `
     height: 100%;
   }
   .investor-card-grid-simple {
-    grid-template-columns: minmax(0, .8fr) minmax(320px, 1.2fr);
+    grid-template-columns: minmax(0, .8fr) minmax(180px, .6fr) minmax(260px, 1fr);
   }
 
   .downpayment-list {
