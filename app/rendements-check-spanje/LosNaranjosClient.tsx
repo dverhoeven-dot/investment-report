@@ -159,6 +159,26 @@ type ParticipantSummary = {
   irr: number;
 };
 
+
+type CloudProject = {
+  id: string;
+  name: string;
+  viewToken: string;
+  editToken: string;
+  canEdit: boolean;
+  internalAccess: boolean;
+};
+
+type CloudProjectListItem = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CloudStatus = "idle" | "loading" | "saving" | "saved" | "error";
+type ProjectListStatus = "idle" | "loading" | "ready" | "error";
+
 const STORAGE_KEY = "l3capital.los-naranjos.first-setup.v2";
 const LEGACY_STORAGE_KEY = "l3capital.los-naranjos.first-setup.v1";
 const MAX_CO_INVESTORS = 8;
@@ -889,9 +909,21 @@ export default function LosNaranjosClient({
   const [storageReady, setStorageReady] = useState(false);
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [photoInputKey, setPhotoInputKey] = useState(0);
+  const [cloudProject, setCloudProject] = useState<CloudProject | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>("idle");
+  const [cloudError, setCloudError] = useState("");
+  const [cloudProjects, setCloudProjects] = useState<CloudProjectListItem[]>([]);
+  const [projectListStatus, setProjectListStatus] = useState<ProjectListStatus>("idle");
+  const [projectListError, setProjectListError] = useState("");
 
   useEffect(() => {
     try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("project")) {
+        setStorageReady(true);
+        return;
+      }
+
       const saved =
         localStorage.getItem(STORAGE_KEY) ??
         localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -906,12 +938,137 @@ export default function LosNaranjosClient({
   }, [initialData]);
 
   useEffect(() => {
+    void refreshProjectList();
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("project") ?? "";
+    const viewToken = params.get("view") ?? "";
+    const editToken = params.get("edit") ?? "";
+    const internalAccess = params.get("internal") === "1";
+
+    if (!id || (!internalAccess && !viewToken && !editToken)) return;
+
+    let cancelled = false;
+    const token = editToken || viewToken;
+    const mode = internalAccess ? "internal" : editToken ? "edit" : "view";
+    const projectUrl = internalAccess
+      ? `/api/rendements-projects/${encodeURIComponent(id)}?mode=internal`
+      : `/api/rendements-projects/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}&mode=${mode}`;
+
+    setCloudStatus("loading");
+    setCloudError("");
+
+    fetch(projectUrl, { cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.error || "Project kon niet worden geladen.");
+        }
+        return result;
+      })
+      .then((result) => {
+        if (cancelled) return;
+        setForm(normalizeStoredForm(result.data, initialData));
+        setCloudProject({
+          id: result.id,
+          name: result.name || "Online project",
+          viewToken,
+          editToken,
+          canEdit: Boolean(result.canEdit),
+          internalAccess,
+        });
+        setCloudStatus("saved");
+        setCloudProjects((current) => upsertProjectListItem(current, {
+          id: result.id,
+          name: result.name || "Online project",
+          createdAt: result.createdAt || "",
+          updatedAt: result.updatedAt || new Date().toISOString(),
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.warn("Online project kon niet worden geladen.", error);
+        setCloudError(error instanceof Error ? error.message : "Project kon niet worden geladen.");
+        setCloudStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialData]);
+
+  useEffect(() => {
     if (!storageReady) return;
     const saveHandle = window.setTimeout(() => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
     }, 180);
     return () => window.clearTimeout(saveHandle);
   }, [form, storageReady]);
+
+
+  useEffect(() => {
+    if (
+      !storageReady ||
+      !cloudProject?.id ||
+      !cloudProject.canEdit ||
+      (!cloudProject.editToken && !cloudProject.internalAccess)
+    ) {
+      return;
+    }
+
+    setCloudStatus("saving");
+    setCloudError("");
+
+    const saveHandle = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/rendements-projects/${encodeURIComponent(cloudProject.id)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              editToken: cloudProject.editToken,
+              internal: cloudProject.internalAccess,
+              name: form.projectName.trim() || cloudProject.name || "Naamloos project",
+              data: form,
+            }),
+          }
+        );
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.error || "Opslaan is mislukt.");
+        }
+
+        const nextName = result.name || form.projectName.trim() || cloudProject.name;
+        setCloudProject((current) =>
+          current ? { ...current, name: nextName } : current
+        );
+        setCloudProjects((current) => upsertProjectListItem(current, {
+          id: cloudProject.id,
+          name: nextName,
+          createdAt: "",
+          updatedAt: result.updatedAt || new Date().toISOString(),
+        }));
+        setCloudStatus("saved");
+      } catch (error) {
+        console.warn("Online project kon niet automatisch worden opgeslagen.", error);
+        setCloudError(error instanceof Error ? error.message : "Opslaan is mislukt.");
+        setCloudStatus("error");
+      }
+    }, 900);
+
+    return () => window.clearTimeout(saveHandle);
+  }, [
+    form,
+    storageReady,
+    cloudProject?.id,
+    cloudProject?.canEdit,
+    cloudProject?.editToken,
+    cloudProject?.internalAccess,
+  ]);
 
   function updateField<K extends keyof FormState>(
     field: K,
@@ -1083,11 +1240,328 @@ export default function LosNaranjosClient({
     }));
   }
 
+  function upsertProjectListItem(
+    projects: CloudProjectListItem[],
+    incoming: CloudProjectListItem
+  ) {
+    const existing = projects.find((project) => project.id === incoming.id);
+    const merged = existing
+      ? projects.map((project) =>
+          project.id === incoming.id
+            ? {
+                ...project,
+                ...incoming,
+                createdAt: incoming.createdAt || project.createdAt,
+              }
+            : project
+        )
+      : [incoming, ...projects];
+
+    return [...merged].sort((a, b) =>
+      String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))
+    );
+  }
+
+  async function refreshProjectList() {
+    setProjectListStatus("loading");
+    setProjectListError("");
+    try {
+      const response = await fetch("/api/rendements-projects", {
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "Projecten konden niet worden geladen.");
+      }
+      setCloudProjects(Array.isArray(result.projects) ? result.projects : []);
+      setProjectListStatus("ready");
+    } catch (error) {
+      console.warn("Projectlijst kon niet worden geladen.", error);
+      setProjectListError(
+        error instanceof Error ? error.message : "Projecten konden niet worden geladen."
+      );
+      setProjectListStatus("error");
+    }
+  }
+
+  async function openProjectFromList(id: string) {
+    if (!id) return;
+    setCloudStatus("loading");
+    setCloudError("");
+    try {
+      const response = await fetch(
+        `/api/rendements-projects/${encodeURIComponent(id)}?mode=internal`,
+        { cache: "no-store" }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "Project kon niet worden geopend.");
+      }
+
+      setForm(normalizeStoredForm(result.data, initialData));
+      setCloudProject({
+        id: result.id,
+        name: result.name || "Online project",
+        viewToken: "",
+        editToken: "",
+        canEdit: true,
+        internalAccess: true,
+      });
+      setUploadedPhotos([]);
+      setPhotoInputKey((current) => current + 1);
+      setCloudStatus("saved");
+      setCloudProjects((current) => upsertProjectListItem(current, {
+        id: result.id,
+        name: result.name || "Online project",
+        createdAt: result.createdAt || "",
+        updatedAt: result.updatedAt || new Date().toISOString(),
+      }));
+
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.searchParams.set("project", result.id);
+      url.searchParams.set("internal", "1");
+      window.history.replaceState({}, "", url.toString());
+    } catch (error) {
+      setCloudError(error instanceof Error ? error.message : "Project kon niet worden geopend.");
+      setCloudStatus("error");
+    }
+  }
+
+  async function duplicateProject() {
+    const sourceName = form.projectName.trim() || cloudProject?.name || "Naamloos project";
+    const copyName = `${sourceName} - kopie`;
+    const copyForm = { ...form, projectName: copyName };
+
+    setCloudStatus("saving");
+    setCloudError("");
+    try {
+      const response = await fetch("/api/rendements-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: copyName, data: copyForm }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "Project kon niet worden gedupliceerd.");
+      }
+
+      const nextProject: CloudProject = {
+        id: result.id,
+        name: result.name || copyName,
+        viewToken: result.viewToken || "",
+        editToken: result.editToken || "",
+        canEdit: true,
+        internalAccess: false,
+      };
+      setForm(copyForm);
+      setCloudProject(nextProject);
+      setCloudProjects((current) => upsertProjectListItem(current, {
+        id: nextProject.id,
+        name: nextProject.name,
+        createdAt: result.createdAt || new Date().toISOString(),
+        updatedAt: result.updatedAt || new Date().toISOString(),
+      }));
+      setCloudStatus("saved");
+      window.history.replaceState({}, "", makeProjectUrl(nextProject, "edit"));
+    } catch (error) {
+      setCloudError(error instanceof Error ? error.message : "Dupliceren is mislukt.");
+      setCloudStatus("error");
+    }
+  }
+
+  async function deleteCurrentProject() {
+    if (!cloudProject?.id) return;
+    const shouldDelete = window.confirm(
+      `Project “${cloudProject.name}” definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
+    );
+    if (!shouldDelete) return;
+
+    setCloudStatus("saving");
+    setCloudError("");
+    try {
+      const response = await fetch(
+        `/api/rendements-projects/${encodeURIComponent(cloudProject.id)}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            editToken: cloudProject.editToken,
+            internal: cloudProject.internalAccess,
+          }),
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "Project kon niet worden verwijderd.");
+      }
+
+      setCloudProjects((current) =>
+        current.filter((project) => project.id !== cloudProject.id)
+      );
+      const url = new URL(window.location.href);
+      url.search = "";
+      window.history.replaceState({}, "", url.toString());
+      setCloudProject(null);
+      setCloudStatus("idle");
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      setForm(createInitialForm(initialData));
+      setUploadedPhotos([]);
+      setPhotoInputKey((current) => current + 1);
+    } catch (error) {
+      setCloudError(error instanceof Error ? error.message : "Verwijderen is mislukt.");
+      setCloudStatus("error");
+    }
+  }
+
+  function makeProjectUrl(project: CloudProject, mode: "view" | "edit") {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("project", project.id);
+
+    if (project.viewToken) {
+      url.searchParams.set("view", project.viewToken);
+    }
+    if (mode === "edit" && project.editToken) {
+      url.searchParams.set("edit", project.editToken);
+    }
+
+    return url.toString();
+  }
+
+  async function saveProjectOnline() {
+    setCloudError("");
+
+    if (
+      cloudProject?.id &&
+      cloudProject.canEdit &&
+      (cloudProject.editToken || cloudProject.internalAccess)
+    ) {
+      setCloudStatus("saving");
+      try {
+        const response = await fetch(
+          `/api/rendements-projects/${encodeURIComponent(cloudProject.id)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              editToken: cloudProject.editToken,
+              internal: cloudProject.internalAccess,
+              name: form.projectName.trim() || cloudProject.name || "Naamloos project",
+              data: form,
+            }),
+          }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.error || "Opslaan is mislukt.");
+        }
+        const nextName = result.name || form.projectName.trim() || cloudProject.name;
+        setCloudProject((current) =>
+          current ? { ...current, name: nextName } : current
+        );
+        setCloudProjects((current) => upsertProjectListItem(current, {
+          id: cloudProject.id,
+          name: nextName,
+          createdAt: "",
+          updatedAt: result.updatedAt || new Date().toISOString(),
+        }));
+        setCloudStatus("saved");
+      } catch (error) {
+        setCloudError(error instanceof Error ? error.message : "Opslaan is mislukt.");
+        setCloudStatus("error");
+      }
+      return;
+    }
+
+    setCloudStatus("saving");
+    try {
+      const response = await fetch("/api/rendements-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.projectName.trim() || "Naamloos project",
+          data: form,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "Online project kon niet worden aangemaakt.");
+      }
+
+      const nextProject: CloudProject = {
+        id: result.id,
+        name: result.name || form.projectName.trim() || "Naamloos project",
+        viewToken: result.viewToken,
+        editToken: result.editToken,
+        canEdit: true,
+        internalAccess: false,
+      };
+
+      setCloudProject(nextProject);
+      setCloudProjects((current) => upsertProjectListItem(current, {
+        id: nextProject.id,
+        name: nextProject.name,
+        createdAt: result.createdAt || new Date().toISOString(),
+        updatedAt: result.updatedAt || new Date().toISOString(),
+      }));
+      setCloudStatus("saved");
+
+      const editUrl = makeProjectUrl(nextProject, "edit");
+      window.history.replaceState({}, "", editUrl);
+    } catch (error) {
+      setCloudError(
+        error instanceof Error ? error.message : "Online project kon niet worden aangemaakt."
+      );
+      setCloudStatus("error");
+    }
+  }
+
+  async function copyProjectLink(mode: "view" | "edit") {
+    if (!cloudProject) return;
+    const url = makeProjectUrl(cloudProject, mode);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCloudStatus("saved");
+    } catch {
+      window.prompt("Kopieer deze link:", url);
+    }
+  }
+
+  function startNewProject() {
+    const shouldContinue = window.confirm(
+      "Nieuw project starten? Niet-opgeslagen lokale wijzigingen gaan verloren."
+    );
+    if (!shouldContinue) return;
+
+    const url = new URL(window.location.href);
+    url.search = "";
+    window.history.replaceState({}, "", url.toString());
+    setCloudProject(null);
+    setCloudStatus("idle");
+    setCloudError("");
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    setForm(createInitialForm(initialData));
+    setUploadedPhotos([]);
+    setPhotoInputKey((current) => current + 1);
+  }
+
   function printReport() {
     window.print();
   }
 
   function resetForm() {
+    if (
+      cloudProject?.canEdit &&
+      !window.confirm(
+        "Dit zet alle invoer terug naar de beginwaarden. Omdat autosave actief is, wordt ook het online project hiermee overschreven. Doorgaan?"
+      )
+    ) {
+      return;
+    }
+
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(LEGACY_STORAGE_KEY);
     setForm(createInitialForm(initialData));
@@ -2357,6 +2831,87 @@ export default function LosNaranjosClient({
             </button>
           </div>
         </header>
+
+        <section className="cloud-project-bar">
+          <div className="cloud-project-left">
+            <label className="cloud-project-picker">
+              <span>Mijn projecten</span>
+              <select
+                value={cloudProject?.id || ""}
+                onChange={(event) => void openProjectFromList(event.currentTarget.value)}
+                disabled={projectListStatus === "loading"}
+              >
+                <option value="">
+                  {projectListStatus === "loading"
+                    ? "Projecten laden…"
+                    : cloudProjects.length
+                      ? "Kies een project…"
+                      : "Nog geen opgeslagen projecten"}
+                </option>
+                {cloudProjects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="cloud-project-copy">
+              <span>Geopend project</span>
+              <strong>
+                {cloudProject
+                  ? cloudProject.name
+                  : "Nieuw / nog niet online opgeslagen"}
+              </strong>
+              <small className={`cloud-status cloud-status-${cloudStatus}`}>
+                {projectListStatus === "error"
+                  ? projectListError || "Projectlijst kon niet worden geladen."
+                  : cloudStatus === "loading"
+                    ? "Project laden…"
+                    : cloudStatus === "saving"
+                      ? "Wijzigingen opslaan…"
+                      : cloudStatus === "saved"
+                        ? cloudProject?.canEdit
+                          ? "Online opgeslagen · autosave actief"
+                          : "Presentatiemodus · wijzigingen worden niet online opgeslagen"
+                        : cloudStatus === "error"
+                          ? cloudError || "Er ging iets mis."
+                          : "Kies een project of sla het huidige project online op."}
+              </small>
+            </div>
+          </div>
+
+          <div className="cloud-project-actions">
+            {(!cloudProject || cloudProject.canEdit) && (
+              <button type="button" onClick={saveProjectOnline}>
+                {cloudProject ? "Nu opslaan" : "Opslaan"}
+              </button>
+            )}
+            <button type="button" className="cloud-button-muted" onClick={startNewProject}>
+              Nieuw project
+            </button>
+            {cloudProject?.canEdit && (
+              <button type="button" onClick={duplicateProject}>
+                Dupliceren
+              </button>
+            )}
+            {cloudProject?.viewToken && (
+              <button type="button" onClick={() => copyProjectLink("view")}>
+                Kopieer presentatielink
+              </button>
+            )}
+            {cloudProject?.canEdit && cloudProject.editToken && (
+              <button type="button" onClick={() => copyProjectLink("edit")}>
+                Kopieer bewerklink
+              </button>
+            )}
+            {cloudProject?.canEdit && (
+              <button type="button" className="cloud-button-danger" onClick={deleteCurrentProject}>
+                Verwijderen
+              </button>
+            )}
+          </div>
+        </section>
 
         <InputGroup title="Projectgegevens">
           <SelectField
@@ -4053,6 +4608,112 @@ const styles = `
     background: #ead4ac;
     color: #2a2119;
   }
+  .cloud-project-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(117, 96, 68, .16);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .72);
+  }
+  .cloud-project-left {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 14px;
+  }
+  .cloud-project-picker {
+    display: grid;
+    flex: 0 1 300px;
+    min-width: 220px;
+    gap: 5px;
+  }
+  .cloud-project-picker > span {
+    color: #8a7257;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .cloud-project-picker select {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid #cabca8;
+    border-radius: 9px;
+    padding: 7px 34px 7px 10px;
+    background: #fffdf9;
+    color: #392d22;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .cloud-project-picker select:disabled {
+    cursor: wait;
+    opacity: .65;
+  }
+  .cloud-project-copy {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+  .cloud-project-copy > span {
+    color: #8a7257;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .cloud-project-copy > strong {
+    overflow: hidden;
+    color: #2a2119;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cloud-status {
+    color: #786d62;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .cloud-status-saving,
+  .cloud-status-loading { color: #8b6737; }
+  .cloud-status-saved { color: #3f6c53; }
+  .cloud-status-error { color: #a23838; }
+  .cloud-project-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+  .cloud-project-actions button {
+    min-height: 34px;
+    border: 1px solid #cabca8;
+    border-radius: 9px;
+    padding: 7px 11px;
+    background: #fffdf9;
+    color: #392d22;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .cloud-project-actions button:hover { background: #f5eee4; }
+  .cloud-project-actions .cloud-button-muted {
+    border-color: transparent;
+    background: transparent;
+    color: #756b61;
+  }
+  .cloud-project-actions .cloud-button-danger {
+    border-color: rgba(162, 56, 56, .24);
+    background: #fff9f8;
+    color: #a23838;
+  }
+  .cloud-project-actions .cloud-button-danger:hover {
+    background: #fff0ee;
+  }
   .input-header .print-button:hover { background: #f0ddb9; }
   .input-group {
     margin-top: 12px;
@@ -4637,6 +5298,10 @@ const styles = `
     .report-page { width: min(980px, 100%); }
   }
   @media (max-width: 850px) {
+    .cloud-project-bar { align-items: stretch; flex-direction: column; }
+    .cloud-project-left { align-items: stretch; flex-direction: column; }
+    .cloud-project-picker { flex-basis: auto; min-width: 0; }
+    .cloud-project-actions { justify-content: flex-start; }
     .input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .downpayment-list,
     .investor-card-stats { grid-template-columns: 1fr; }
