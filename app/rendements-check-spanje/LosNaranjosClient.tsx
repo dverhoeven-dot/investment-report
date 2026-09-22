@@ -72,6 +72,7 @@ export type LosNaranjosInitialData = {
 
   salePrice: number;
   agentCommissionPercentage: number;
+  saleLawyerFeePercentage?: number;
 
   firstPaymentMonth: number;
   firstPaymentAmount: number;
@@ -129,6 +130,7 @@ type FormState = {
 
   salePrice: string;
   agentCommissionPercentage: string;
+  saleLawyerFeePercentage: string;
 
   downpaymentCount: string;
   downpayments: Downpayment[];
@@ -312,6 +314,7 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
 
     salePrice: "0",
     agentCommissionPercentage: "0",
+    saleLawyerFeePercentage: "0",
 
     downpaymentCount: "0",
     downpayments,
@@ -1310,7 +1313,13 @@ export default function LosNaranjosClient({
       parsePercent(form.agentCommissionPercentage)
     );
     const agentCommission = salePrice * agentCommissionPercentage;
-    const netProceeds = salePrice - agentCommission + furnitureSaleProceeds;
+    const saleLawyerFeePercentage = Math.max(
+      0,
+      parsePercent(form.saleLawyerFeePercentage)
+    );
+    const saleLawyerFee = salePrice * saleLawyerFeePercentage;
+    const netProceeds =
+      salePrice - agentCommission - saleLawyerFee + furnitureSaleProceeds;
     const netSaleProceedsBeforeFurniture = netProceeds;
     const operatingNetProfit = netProceeds - capitalDeployed;
 
@@ -1454,7 +1463,7 @@ export default function LosNaranjosClient({
     rawCashflow.push({
       paymentId: "sale-proceeds",
       month: durationMonths,
-      event: "Sales proceeds (after commission + Furniture incl. mark-up)",
+      event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
       outflow: 0,
       inflow: netProceeds,
       category: "sale",
@@ -1734,10 +1743,15 @@ export default function LosNaranjosClient({
     const coInvestorSalesCommission = coInvestorSummaries.map(
       (summary) => agentCommission * summary.capitalShare
     );
+    const coInvestorSaleLawyerFees = coInvestorSummaries.map(
+      (summary) => saleLawyerFee * summary.capitalShare
+    );
     const ourGrossProceeds = salePrice * ourEquityPercentage;
     const partnerGrossProceeds = salePrice * partnerEquityPercentage;
     const ourSalesCommission = agentCommission * ourEquityPercentage;
     const partnerSalesCommission = agentCommission * partnerEquityPercentage;
+    const ourSaleLawyerFee = saleLawyerFee * ourEquityPercentage;
+    const partnerSaleLawyerFee = saleLawyerFee * partnerEquityPercentage;
     const irr = calculateAnnualizedIrr(rawCashflow);
     const cashAtMonth0 = Math.max(
       0,
@@ -1778,7 +1792,7 @@ export default function LosNaranjosClient({
           ...investmentCashflow,
           {
             month,
-            event: "Sales proceeds (after commission + Furniture incl. mark-up)",
+            event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
             outflow: 0,
             inflow: netProceeds,
             category: "sale" as const,
@@ -1789,7 +1803,9 @@ export default function LosNaranjosClient({
     const saleSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map((change) => {
       const scenarioSalePrice = salePrice * (1 + change);
       const scenarioNetProceeds =
-        scenarioSalePrice * (1 - agentCommissionPercentage) + furnitureSaleProceeds;
+        scenarioSalePrice *
+          (1 - agentCommissionPercentage - saleLawyerFeePercentage) +
+        furnitureSaleProceeds;
       const scenarioProfit =
         scenarioNetProceeds - capitalDeployed - totalBankInterest;
       const scenarioRoi = equityCapitalDeployed
@@ -1804,7 +1820,7 @@ export default function LosNaranjosClient({
           ...investmentCashflow,
           {
             month: durationMonths,
-            event: "Sales proceeds (after commission + Furniture incl. mark-up)",
+            event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
             outflow: 0,
             inflow: scenarioNetProceeds,
             category: "sale" as const,
@@ -1844,7 +1860,7 @@ export default function LosNaranjosClient({
             ...scenarioInvestmentCashflow,
             {
               month: durationMonths,
-              event: "Sales proceeds (after commission + Furniture incl. mark-up)",
+              event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
               outflow: 0,
               inflow: netProceeds,
               category: "sale" as const,
@@ -1868,6 +1884,7 @@ export default function LosNaranjosClient({
       coInvestorProjectCosts,
       coInvestorGrossProceeds,
       coInvestorSalesCommission,
+      coInvestorSaleLawyerFees,
       plannedPartnerCapital,
       unusedPartnerCapital,
       ourEquityPercentage,
@@ -1886,6 +1903,8 @@ export default function LosNaranjosClient({
       partnerGrossProceeds,
       ourSalesCommission,
       partnerSalesCommission,
+      ourSaleLawyerFee,
+      partnerSaleLawyerFee,
       ourRoi,
       partnerRoi,
       ourIrr,
@@ -1944,6 +1963,8 @@ export default function LosNaranjosClient({
       salePrice,
       agentCommissionPercentage,
       agentCommission,
+      saleLawyerFeePercentage,
+      saleLawyerFee,
       netSaleProceedsBeforeFurniture,
       netProceeds,
       netProfit,
@@ -2155,6 +2176,16 @@ export default function LosNaranjosClient({
               {entries.map(({ investorIndex }) => (
                 <td key={`commission-${investorIndex}`}>
                   -{euro(data.coInvestorSalesCommission[investorIndex] ?? 0)}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td><strong>Lawyer fee on sale</strong></td>
+              <td>-{euro(data.saleLawyerFee)}</td>
+              <td>-{euro(data.ourSaleLawyerFee)}</td>
+              {entries.map(({ investorIndex }) => (
+                <td key={`sale-lawyer-${investorIndex}`}>
+                  -{euro(data.coInvestorSaleLawyerFees[investorIndex] ?? 0)}
                 </td>
               ))}
             </tr>
@@ -2617,6 +2648,13 @@ export default function LosNaranjosClient({
               updateField("agentCommissionPercentage", value)
             }
           />
+          <InputField
+            label="Advocaatkosten verkoop %"
+            value={form.saleLawyerFeePercentage}
+            onChange={(value) =>
+              updateField("saleLawyerFeePercentage", value)
+            }
+          />
         </InputGroup>
 
         <InputGroup title="Bankfinanciering">
@@ -3059,6 +3097,10 @@ export default function LosNaranjosClient({
           <DataRow label="Gross Sale Price" value={euro(data.salePrice)} strong />
           <DataRow label={`Agent Commission (${percent(data.agentCommissionPercentage)})`} value={euro(data.agentCommission)} />
           <DataRow
+            label={`Lawyer Fee on Sale (${percent(data.saleLawyerFeePercentage)})`}
+            value={euro(data.saleLawyerFee)}
+          />
+          <DataRow
             label={`Furniture + Mark-up – added to proceeds (${percent(data.furnitureMarkupPercentage)})`}
             value={`+${euro(data.furnitureSaleProceeds)}`}
           />
@@ -3082,6 +3124,7 @@ export default function LosNaranjosClient({
           acquisition={data.totalAcquisition}
           project={data.totalProjectCost}
           commission={data.agentCommission}
+          legalCosts={data.saleLawyerFee}
           profit={data.netProfit}
         />
         <PageFooter label={config.footerLabel} page={`1 / ${totalPages}`} />
@@ -3824,12 +3867,13 @@ function TableTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="table-title">{children}</h3>;
 }
 
-function AllocationBar({ salePrice, acquisition, project, commission, profit }: { salePrice: number; acquisition: number; project: number; commission: number; profit: number }) {
+function AllocationBar({ salePrice, acquisition, project, commission, legalCosts, profit }: { salePrice: number; acquisition: number; project: number; commission: number; legalCosts: number; profit: number }) {
   const total = Math.max(salePrice, 1);
   const items = [
     { label: "Acquisition", value: acquisition, className: "acquisition" },
     { label: "Build / project", value: project, className: "project" },
     { label: "Commission", value: commission, className: "commission" },
+    { label: "Sale legal costs", value: legalCosts, className: "commission" },
     { label: "Net profit", value: Math.max(0, profit), className: "profit" },
   ];
 
