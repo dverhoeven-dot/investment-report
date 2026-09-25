@@ -45,6 +45,13 @@ export default function Home() {
         >
           Investeerder Bedrijfsmatig Vastgoed
         </a>
+
+        <a
+  href="/furniture-procurement"
+  className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-gray-50"
+>
+  Furniture Procurement
+</a>  
       </div>
     </main>
   );

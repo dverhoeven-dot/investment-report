@@ -25,6 +25,32 @@ const statuses = [
 
 const paymentStatuses = ["Niet betaald", "Aanbetaling", "Volledig betaald"];
 
+const standardLocations = [
+  "Calderon de la Barca",
+  "Meuleveldlaan 30",
+  "Calle Margarita 7",
+];
+
+const normalizeLocation = (value: string) => {
+  const location = value.trim().toLowerCase();
+
+  if (!location) return "";
+
+  if (location.includes("calderon")) {
+    return "Calderon de la Barca";
+  }
+
+  if (location.includes("meuleveldlaan")) {
+    return "Meuleveldlaan 30";
+  }
+
+  if (location.includes("calle margarita")) {
+    return "Calle Margarita 7";
+  }
+
+  return value.trim();
+};
+
 const euro = (value: number) =>
   new Intl.NumberFormat("nl-NL", {
     style: "currency",
@@ -39,6 +65,17 @@ const cleanNumber = (value: string) => {
     .replace(",", ".");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatDate = (value: string) => {
+  if (!value) return "Nog niet ingevuld";
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return value;
+  return new Intl.DateTimeFormat("nl-NL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day));
 };
 
 type DraftItem = {
@@ -74,7 +111,12 @@ const emptyDraft = (): DraftItem => ({
 });
 
 export default function FurnitureProcurementClient() {
-  const [items, setItems] = useState<FurnitureItem[]>(initialFurnitureItems);
+  const [items, setItems] = useState<FurnitureItem[]>(() =>
+    initialFurnitureItems.map((item) => ({
+      ...item,
+      location: normalizeLocation(item.location),
+    }))
+  );
   const [view, setView] = useState<"gallery" | "table">("gallery");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Alle categorieën");
@@ -186,7 +228,7 @@ export default function FurnitureProcurementClient() {
                 ...item,
                 name: draft.name.trim(),
                 category: draft.category,
-                location: draft.location.trim(),
+                location: normalizeLocation(draft.location),
                 purchasePrice: cleanNumber(draft.purchasePrice),
                 normalPrice: cleanNumber(draft.normalPrice),
                 quantity: Math.max(1, Math.round(cleanNumber(draft.quantity) || 1)),
@@ -212,7 +254,7 @@ export default function FurnitureProcurementClient() {
           itemNo: `ART.${String(nextNumber).padStart(2, "0")}`,
           name: draft.name.trim(),
           category: draft.category,
-          location: draft.location.trim(),
+          location: normalizeLocation(draft.location),
           purchasePrice: cleanNumber(draft.purchasePrice),
           normalPrice: cleanNumber(draft.normalPrice),
           quantity: Math.max(1, Math.round(cleanNumber(draft.quantity) || 1)),
@@ -401,6 +443,10 @@ export default function FurnitureProcurementClient() {
                   <p className="location">
                     {item.location ? `⌖ ${item.location}` : "Locatie nog niet ingevuld"}
                   </p>
+                  <p className="delivery-date">
+                    <span>Datum</span>
+                    <strong>{formatDate(item.expectedDelivery)}</strong>
+                  </p>
 
                   <div className="price-grid">
                     <div>
@@ -565,11 +611,19 @@ export default function FurnitureProcurementClient() {
 
               <label>
                 <span>Huidige locatie</span>
-                <input
+                <select
                   value={draft.location}
-                  onChange={(event) => setDraft({ ...draft, location: event.target.value })}
-                  placeholder="Bijv. Calderon"
-                />
+                  onChange={(event) =>
+                    setDraft({ ...draft, location: event.target.value })
+                  }
+                >
+                  <option value="">Kies locatie</option>
+                  {standardLocations.map((entry) => (
+                    <option key={entry} value={entry}>
+                      {entry}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label>
@@ -978,6 +1032,26 @@ export default function FurnitureProcurementClient() {
           gap: 7px;
           margin-top: 12px;
         }
+        .delivery-date {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin: 8px 0 2px;
+          padding: 8px 10px;
+          border-radius: 10px;
+          background: #f7f3eb;
+          font-size: 12px;
+          color: #706456;
+        }
+        .delivery-date span {
+          font-weight: 700;
+        }
+        .delivery-date strong {
+          color: #2d241b;
+          font-size: 12px;
+        }
+
         .price-grid > div {
           padding: 9px;
           background: #f8f5ef;
