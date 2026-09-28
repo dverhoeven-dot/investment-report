@@ -78,6 +78,17 @@ const formatDate = (value: string) => {
   }).format(new Date(year, month - 1, day));
 };
 
+type ProductImportResult = {
+  url?: string;
+  name?: string;
+  supplier?: string;
+  description?: string;
+  price?: number | null;
+  currency?: string;
+  imageUrl?: string;
+  sku?: string;
+};
+
 type DraftItem = {
   name: string;
   category: string;
@@ -128,6 +139,9 @@ export default function FurnitureProcurementClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftItem>(emptyDraft());
   const [notice, setNotice] = useState("");
+  const [importingProduct, setImportingProduct] = useState(false);
+  const [productImportError, setProductImportError] = useState("");
+  const [productImportInfo, setProductImportInfo] = useState("");
 
   const locations = useMemo(() => {
     const values = Array.from(
@@ -186,11 +200,15 @@ export default function FurnitureProcurementClient() {
   function openNewItem() {
     setEditingId(null);
     setDraft(emptyDraft());
+    setProductImportError("");
+    setProductImportInfo("");
     setShowForm(true);
   }
 
   function openEdit(item: FurnitureItem) {
     setEditingId(item.id);
+    setProductImportError("");
+    setProductImportInfo("");
     setDraft({
       name: item.name,
       category: item.category,
@@ -214,6 +232,85 @@ export default function FurnitureProcurementClient() {
     if (!file) return;
     const url = URL.createObjectURL(file);
     setDraft((current) => ({ ...current, imagePreview: url }));
+  }
+
+  async function importProductFromUrl() {
+    const productUrl = draft.productUrl.trim();
+
+    setProductImportError("");
+    setProductImportInfo("");
+
+    if (!productUrl) {
+      setProductImportError("Plak eerst een productlink.");
+      return;
+    }
+
+    try {
+      new URL(productUrl);
+    } catch {
+      setProductImportError("Dit lijkt geen geldige productlink.");
+      return;
+    }
+
+    setImportingProduct(true);
+
+    try {
+      const response = await fetch("/api/product-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: productUrl }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | (ProductImportResult & { error?: string })
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Productgegevens konden niet worden opgehaald.");
+      }
+
+      if (!payload) {
+        throw new Error("De productpagina gaf geen bruikbare gegevens terug.");
+      }
+
+      const foundFields = [
+        payload.name,
+        payload.supplier,
+        typeof payload.price === "number" ? payload.price : null,
+        payload.imageUrl,
+      ].filter(Boolean).length;
+
+      setDraft((current) => ({
+        ...current,
+        productUrl: payload.url || current.productUrl,
+        name: payload.name || current.name,
+        supplier: payload.supplier || current.supplier,
+        normalPrice:
+          typeof payload.price === "number" && Number.isFinite(payload.price)
+            ? String(payload.price)
+            : current.normalPrice,
+        imagePreview: payload.imageUrl || current.imagePreview,
+        notes: current.notes || payload.description || "",
+      }));
+
+      if (foundFields === 0) {
+        setProductImportInfo(
+          "De link is bereikbaar, maar de webshop publiceert weinig productgegevens. Vul de ontbrekende velden handmatig aan."
+        );
+      } else {
+        setProductImportInfo(
+          `Productgegevens opgehaald${payload.currency && payload.currency !== "EUR" ? ` · prijs in ${payload.currency}` : ""}. Controleer ze voor je opslaat.`
+        );
+      }
+    } catch (error) {
+      setProductImportError(
+        error instanceof Error
+          ? error.message
+          : "Productgegevens konden niet worden opgehaald."
+      );
+    } finally {
+      setImportingProduct(false);
+    }
   }
 
   function saveDraft(event: FormEvent) {
@@ -701,13 +798,36 @@ export default function FurnitureProcurementClient() {
                 />
               </label>
 
-              <label>
+              <label className="wide product-import-field">
                 <span>Productlink</span>
-                <input
-                  value={draft.productUrl}
-                  onChange={(event) => setDraft({ ...draft, productUrl: event.target.value })}
-                  placeholder="https://..."
-                />
+                <div className="product-import-row">
+                  <input
+                    value={draft.productUrl}
+                    onChange={(event) => {
+                      setDraft({ ...draft, productUrl: event.target.value });
+                      setProductImportError("");
+                      setProductImportInfo("");
+                    }}
+                    placeholder="https://webshop.nl/product/..."
+                  />
+                  <button
+                    type="button"
+                    className="import-button"
+                    onClick={importProductFromUrl}
+                    disabled={importingProduct}
+                  >
+                    {importingProduct ? "Ophalen..." : "Productgegevens ophalen"}
+                  </button>
+                </div>
+                <small className="field-help">
+                  We proberen automatisch naam, leverancier, normale prijs, omschrijving en productfoto in te vullen.
+                </small>
+                {productImportError && (
+                  <small className="import-message error">{productImportError}</small>
+                )}
+                {productImportInfo && (
+                  <small className="import-message success">{productImportInfo}</small>
+                )}
               </label>
 
               <label className="wide">
@@ -1157,6 +1277,45 @@ export default function FurnitureProcurementClient() {
         .modal-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
         .modal-head h2 { margin: 0; font-size: 25px; }
         .close-button { border: 0; background: transparent; font-size: 27px; line-height: 1; }
+        .product-import-field { gap: 7px; }
+        .product-import-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 8px;
+          align-items: stretch;
+        }
+        .product-import-row input { min-width: 0; }
+        .import-button {
+          border: 1px solid #2a241d;
+          background: #f2ecdf;
+          color: #2a241d;
+          border-radius: 10px;
+          padding: 0 14px;
+          min-height: 42px;
+          font-size: 12px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+        .import-button:hover:not(:disabled) { background: #e9dfcc; }
+        .import-button:disabled { opacity: .55; cursor: wait; }
+        .field-help {
+          display: block;
+          margin-top: 1px;
+          color: #83786a;
+          font-size: 10px;
+          line-height: 1.45;
+        }
+        .import-message {
+          display: block;
+          margin-top: 2px;
+          padding: 8px 10px;
+          border-radius: 9px;
+          font-size: 10px;
+          line-height: 1.45;
+        }
+        .import-message.success { background: #edf4eb; color: #365d35; }
+        .import-message.error { background: #faece8; color: #8a3a2f; }
+
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .form-grid label { display: grid; gap: 6px; font-size: 10px; color: #766b5d; font-weight: 800; }
         .form-grid .wide { grid-column: 1 / -1; }
@@ -1288,6 +1447,12 @@ export default function FurnitureProcurementClient() {
           .prototype-note { flex-direction: column; gap: 4px; }
           .lightbox-stage { padding: 10px 44px; }
         }
+
+        @media (max-width: 720px) {
+          .product-import-row { grid-template-columns: 1fr; }
+          .import-button { width: 100%; }
+        }
+
       `}</style>
     </main>
   );
