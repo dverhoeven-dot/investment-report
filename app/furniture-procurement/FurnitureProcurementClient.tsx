@@ -1,7 +1,7 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
-import { FurnitureItem, initialFurnitureItems } from "./furnitureSeed";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import type { FurnitureItem } from "./furnitureSeed";
 
 const categories = [
   "Alle categorieën",
@@ -122,12 +122,11 @@ const emptyDraft = (): DraftItem => ({
 });
 
 export default function FurnitureProcurementClient() {
-  const [items, setItems] = useState<FurnitureItem[]>(() =>
-    initialFurnitureItems.map((item) => ({
-      ...item,
-      location: normalizeLocation(item.location),
-    }))
-  );
+  const [items, setItems] = useState<FurnitureItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(true);
+  const [storageError, setStorageError] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [view, setView] = useState<"gallery" | "table">("gallery");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Alle categorieën");
@@ -142,6 +141,44 @@ export default function FurnitureProcurementClient() {
   const [importingProduct, setImportingProduct] = useState(false);
   const [productImportError, setProductImportError] = useState("");
   const [productImportInfo, setProductImportInfo] = useState("");
+
+  useEffect(() => {
+    void loadItems();
+  }, []);
+
+  async function loadItems() {
+    setLoadingItems(true);
+    setStorageError("");
+
+    try {
+      const response = await fetch("/api/furniture-items", { cache: "no-store" });
+      const payload = (await response.json().catch(() => null)) as
+        | { items?: FurnitureItem[]; error?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Meubels konden niet worden geladen.");
+      }
+
+      const loadedItems = payload?.items ?? [];
+
+      setItems(
+        loadedItems.map((item) => ({
+          ...item,
+          location: normalizeLocation(item.location || ""),
+        }))
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Online opslag kon niet worden geladen.";
+      setStorageError(message);
+
+      // Bij een opslagfout tonen we geen oude voorbeelddata: de pagina blijft bewust leeg.
+      setItems([]);
+    } finally {
+      setLoadingItems(false);
+    }
+  }
 
   const locations = useMemo(() => {
     const values = Array.from(
@@ -170,11 +207,11 @@ export default function FurnitureProcurementClient() {
 
   const totals = useMemo(() => {
     const purchase = items.reduce(
-      (sum, item) => sum + item.purchasePrice * item.quantity,
+      (sum, item) => sum + item.purchasePrice,
       0
     );
     const normal = items.reduce(
-      (sum, item) => sum + item.normalPrice * item.quantity,
+      (sum, item) => sum + item.normalPrice,
       0
     );
     const savings = Math.max(0, normal - purchase);
@@ -199,6 +236,7 @@ export default function FurnitureProcurementClient() {
 
   function openNewItem() {
     setEditingId(null);
+    setPendingImageFile(null);
     setDraft(emptyDraft());
     setProductImportError("");
     setProductImportInfo("");
@@ -207,6 +245,7 @@ export default function FurnitureProcurementClient() {
 
   function openEdit(item: FurnitureItem) {
     setEditingId(item.id);
+    setPendingImageFile(null);
     setProductImportError("");
     setProductImportInfo("");
     setDraft({
@@ -230,8 +269,37 @@ export default function FurnitureProcurementClient() {
   function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (file.size > 15 * 1024 * 1024) {
+      flash("Foto is te groot. Maximaal 15 MB.");
+      event.target.value = "";
+      return;
+    }
+
     const url = URL.createObjectURL(file);
+    setPendingImageFile(file);
     setDraft((current) => ({ ...current, imagePreview: url }));
+  }
+
+  async function uploadPendingImage() {
+    if (!pendingImageFile) return null;
+
+    const formData = new FormData();
+    formData.append("file", pendingImageFile);
+
+    const response = await fetch("/api/furniture-images", {
+      method: "POST",
+      body: formData,
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { url?: string; error?: string }
+      | null;
+
+    if (!response.ok || !payload?.url) {
+      throw new Error(payload?.error || "Foto kon niet online worden opgeslagen.");
+    }
+
+    return payload.url;
   }
 
   async function importProductFromUrl() {
@@ -313,80 +381,146 @@ export default function FurnitureProcurementClient() {
     }
   }
 
-  function saveDraft(event: FormEvent) {
+  async function saveDraft(event: FormEvent) {
     event.preventDefault();
     if (!draft.name.trim()) return;
 
-    if (editingId) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                name: draft.name.trim(),
-                category: draft.category,
-                location: normalizeLocation(draft.location),
-                purchasePrice: cleanNumber(draft.purchasePrice),
-                normalPrice: cleanNumber(draft.normalPrice),
-                quantity: Math.max(1, Math.round(cleanNumber(draft.quantity) || 1)),
-                supplier: draft.supplier.trim(),
-                status: draft.status,
-                paymentStatus: draft.paymentStatus,
-                expectedDelivery: draft.expectedDelivery,
-                productUrl: draft.productUrl.trim(),
-                notes: draft.notes.trim(),
-                images: draft.imagePreview
-                  ? [draft.imagePreview, ...item.images.filter((x) => x !== draft.imagePreview)]
-                  : item.images,
-              }
-            : item
-        )
-      );
-      flash("Item bijgewerkt");
-    } else {
-      const nextNumber = items.length + 1;
-      setItems((current) => [
-        {
-          id: `local-${Date.now()}`,
-          itemNo: `ART.${String(nextNumber).padStart(2, "0")}`,
-          name: draft.name.trim(),
-          category: draft.category,
-          location: normalizeLocation(draft.location),
-          purchasePrice: cleanNumber(draft.purchasePrice),
-          normalPrice: cleanNumber(draft.normalPrice),
-          quantity: Math.max(1, Math.round(cleanNumber(draft.quantity) || 1)),
-          supplier: draft.supplier.trim(),
-          status: draft.status,
-          paymentStatus: draft.paymentStatus,
-          expectedDelivery: draft.expectedDelivery,
-          productUrl: draft.productUrl.trim(),
-          notes: draft.notes.trim(),
-          images: draft.imagePreview ? [draft.imagePreview] : [],
-        },
-        ...current,
-      ]);
-      flash("Nieuw item toegevoegd");
-    }
+    setSaveState("saving");
+    setStorageError("");
 
-    setShowForm(false);
-    setEditingId(null);
-    setDraft(emptyDraft());
+    try {
+      const uploadedImage = await uploadPendingImage();
+      const existingItem = editingId
+        ? items.find((item) => item.id === editingId)
+        : null;
+
+      let images = existingItem?.images ?? [];
+      if (uploadedImage) {
+        images = [uploadedImage, ...images];
+      } else if (draft.imagePreview && !draft.imagePreview.startsWith("blob:")) {
+        images = [
+          draft.imagePreview,
+          ...images.filter((image) => image !== draft.imagePreview),
+        ];
+      }
+
+      const itemPayload = {
+        itemNo:
+          existingItem?.itemNo ||
+          `ART.${String(items.length + 1).padStart(2, "0")}`,
+        name: draft.name.trim(),
+        category: draft.category,
+        location: normalizeLocation(draft.location),
+        purchasePrice: cleanNumber(draft.purchasePrice),
+        normalPrice: cleanNumber(draft.normalPrice),
+        quantity: Math.max(1, Math.round(cleanNumber(draft.quantity) || 1)),
+        supplier: draft.supplier.trim(),
+        status: draft.status,
+        paymentStatus: draft.paymentStatus,
+        expectedDelivery: draft.expectedDelivery,
+        productUrl: draft.productUrl.trim(),
+        notes: draft.notes.trim(),
+        images,
+      };
+
+      const response = await fetch(
+        editingId ? `/api/furniture-items/${editingId}` : "/api/furniture-items",
+        {
+          method: editingId ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(itemPayload),
+        }
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { item?: FurnitureItem; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.item) {
+        throw new Error(payload?.error || "Item kon niet worden opgeslagen.");
+      }
+
+      const savedItem = {
+        ...payload.item,
+        location: normalizeLocation(payload.item.location || ""),
+      };
+
+      if (editingId) {
+        setItems((current) =>
+          current.map((item) => (item.id === editingId ? savedItem : item))
+        );
+        flash("Item online opgeslagen");
+      } else {
+        setItems((current) => [savedItem, ...current]);
+        flash("Nieuw item online opgeslagen");
+      }
+
+      setSaveState("saved");
+      setShowForm(false);
+      setEditingId(null);
+      setPendingImageFile(null);
+      setDraft(emptyDraft());
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Opslaan is mislukt.";
+      setSaveState("error");
+      setStorageError(message);
+      flash(message);
+    }
   }
 
-  function removeItem(id: string) {
+  async function removeItem(id: string) {
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
     if (!window.confirm(`"${item.name}" verwijderen?`)) return;
-    setItems((current) => current.filter((entry) => entry.id !== id));
-    flash("Item verwijderd");
+
+    try {
+      const response = await fetch(`/api/furniture-items/${id}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; error?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Item kon niet worden verwijderd.");
+      }
+
+      setItems((current) => current.filter((entry) => entry.id !== id));
+      flash("Item verwijderd");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Verwijderen is mislukt.");
+    }
   }
 
-  function updateQuickStatus(id: string, nextStatus: string) {
+  async function updateQuickStatus(id: string, nextStatus: string) {
+    const previous = items;
     setItems((current) =>
       current.map((item) =>
         item.id === id ? { ...item, status: nextStatus } : item
       )
     );
+    setSaveState("saving");
+
+    try {
+      const response = await fetch(`/api/furniture-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { item?: FurnitureItem; error?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Status kon niet worden opgeslagen.");
+      }
+
+      setSaveState("saved");
+    } catch (error) {
+      setItems(previous);
+      setSaveState("error");
+      flash(error instanceof Error ? error.message : "Status opslaan is mislukt.");
+    }
   }
 
   function stepLightbox(direction: 1 | -1) {
@@ -411,8 +545,16 @@ export default function FurnitureProcurementClient() {
           </div>
           <div className="project-chip">
             <span>PROJECT</span>
-            <strong>Demo / nog niet gekoppeld</strong>
-            <small>Koppeling met actuele projecten volgt later</small>
+            <strong>Furniture database</strong>
+            <small>
+              {loadingItems
+                ? "Online gegevens laden..."
+                : storageError
+                  ? "Opslagfout · controleer melding onderaan"
+                  : saveState === "saving"
+                    ? "Opslaan..."
+                    : "Online opgeslagen ✓"}
+            </small>
           </div>
         </header>
 
@@ -548,11 +690,11 @@ export default function FurnitureProcurementClient() {
                   <div className="price-grid">
                     <div>
                       <span>Aankoop</span>
-                      <strong>{euro(item.purchasePrice * item.quantity)}</strong>
+                      <strong>{euro(item.purchasePrice)}</strong>
                     </div>
                     <div>
                       <span>Normale waarde</span>
-                      <strong>{euro(item.normalPrice * item.quantity)}</strong>
+                      <strong>{euro(item.normalPrice)}</strong>
                     </div>
                   </div>
 
@@ -627,8 +769,8 @@ export default function FurnitureProcurementClient() {
                       <td>{item.category}</td>
                       <td>{item.location || "—"}</td>
                       <td>{item.quantity}</td>
-                      <td>{euro(item.purchasePrice * item.quantity)}</td>
-                      <td>{euro(item.normalPrice * item.quantity)}</td>
+                      <td>{euro(item.purchasePrice)}</td>
+                      <td>{euro(item.normalPrice)}</td>
                       <td>
                         <select
                           className="table-select"
@@ -656,12 +798,12 @@ export default function FurnitureProcurementClient() {
           </section>
         )}
 
-        <section className="prototype-note">
-          <strong>Prototype-modus</strong>
+        <section className={`prototype-note ${storageError ? "storage-error" : ""}`}>
+          <strong>{storageError ? "Online opslag heeft aandacht nodig" : "Online opslag actief"}</strong>
           <p>
-            De pagina werkt nu volledig lokaal in de browser. Nieuwe items en wijzigingen
-            verdwijnen bij een refresh. In de volgende stap koppelen we dit aan Supabase en
-            daarna aan jullie actuele projecten.
+            {storageError
+              ? storageError
+              : "Items, wijzigingen en geüploade foto's worden in Supabase opgeslagen en blijven na verversen beschikbaar. De koppeling met actuele projecten kan later worden toegevoegd."}
           </p>
         </section>
       </div>
@@ -724,7 +866,7 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Aankoopprijs</span>
+                <span>Aankoopbedrag (totaal)</span>
                 <input
                   value={draft.purchasePrice}
                   onChange={(event) => setDraft({ ...draft, purchasePrice: event.target.value })}
@@ -734,7 +876,7 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Normale prijs</span>
+                <span>Normale waarde (totaal)</span>
                 <input
                   value={draft.normalPrice}
                   onChange={(event) => setDraft({ ...draft, normalPrice: event.target.value })}
@@ -744,7 +886,7 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Aantal</span>
+                <span>Aantal (informatief)</span>
                 <input
                   value={draft.quantity}
                   onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
@@ -833,6 +975,7 @@ export default function FurnitureProcurementClient() {
               <label className="wide">
                 <span>Productfoto</span>
                 <input type="file" accept="image/*" onChange={handleImageUpload} />
+                <small className="field-help">De foto wordt online opgeslagen zodra je het item opslaat.</small>
                 {draft.imagePreview && (
                   <img className="form-preview" src={draft.imagePreview} alt="Voorbeeld" />
                 )}
@@ -853,8 +996,12 @@ export default function FurnitureProcurementClient() {
               <button type="button" className="secondary-button" onClick={() => setShowForm(false)}>
                 Annuleren
               </button>
-              <button className="primary-button" type="submit">
-                {editingId ? "Wijzigingen opslaan" : "Item toevoegen"}
+              <button className="primary-button" type="submit" disabled={saveState === "saving"}>
+                {saveState === "saving"
+                  ? "Opslaan..."
+                  : editingId
+                    ? "Wijzigingen opslaan"
+                    : "Item toevoegen"}
               </button>
             </div>
           </form>
@@ -1254,6 +1401,11 @@ export default function FurnitureProcurementClient() {
           align-items: baseline;
         }
         .prototype-note p { margin: 0; }
+        .prototype-note.storage-error {
+          border-color: #b45b51;
+          background: #fff1ef;
+          color: #7f2f28;
+        }
 
         .modal-backdrop {
           position: fixed;
