@@ -1,3 +1,4 @@
+import {requirePermission} from "@/lib/portal/auth";
 import { PORTFOLIO } from "../portfolio";
 import type { ReactNode } from "react";
 
@@ -106,6 +107,7 @@ async function fetchCsv(url: string): Promise<CsvRow[]> {
 }
 
 export default async function PortfolioPage() {
+ await requirePermission("spain");
   const sold = (await fetchCsv(PORTFOLIO.soldProjects)).filter((p) =>
     hasValue(p.project)
   );

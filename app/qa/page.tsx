@@ -1,4 +1,6 @@
-export default function QAPage() {
+import {requireEmployee} from "@/lib/portal/auth";
+export default async function QAPage() {
+  await requireEmployee();
     return (
       <main
         style={{

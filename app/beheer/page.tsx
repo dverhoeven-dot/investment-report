@@ -1,0 +1,7 @@
+import Shell from "@/components/portal/Shell";
+import {UserForm,AccountAction} from "@/components/portal/Form";
+import {requireEmployee} from "@/lib/portal/auth";
+import {db} from "@/lib/portal/db";
+import {toUser} from "@/lib/portal/store";
+import {sections} from "@/lib/portal/permissions";
+export default async function Beheer(){const actor=await requireEmployee();const users=(await db().execute("SELECT id,name,email,role,active,permissions,version FROM portal_users ORDER BY name")).rows.map(toUser);return <Shell user={actor}><h1>Gebruikers beheren</h1><p>Voeg een account toe, kies de toegang en sla op.</p><details className="portal-card"><summary>+ Nieuwe gebruiker</summary><UserForm/></details><h2>Alle gebruikers ({users.length})</h2>{users.map(user=><article className="portal-card" key={user.id+":"+user.version}><h2>{user.name}</h2><p>{user.email}</p><span className="portal-tag">{user.role==="employee"?"Medewerker":"Externe gebruiker"}</span><span className="portal-tag">{user.active?"Actief":"Geblokkeerd"}</span><p>Toegang: {user.role==="employee"?"Alle onderdelen + gebruikersbeheer":sections.filter(s=>user.permissions.includes(s.id)).map(s=>s.label).join(", ")||"Nog geen onderdelen"}</p><details><summary>Gegevens en toegang bewerken</summary><UserForm user={user} self={user.id===actor.id}/></details><details><summary>Wachtwoord wijzigen</summary><AccountAction user={user} kind="password"/></details>{user.id!==actor.id && <details><summary>Account verwijderen</summary><AccountAction user={user} kind="delete"/></details>}</article>)}</Shell>;}

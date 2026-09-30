@@ -1,3 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -37,6 +38,9 @@ function safeExtension(file: File) {
 }
 
 export async function POST(request: Request) {
+ const access=await authorizeApi("furniture",true,request);
+ if(access.response) return access.response;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file");
@@ -89,6 +93,9 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+ const access=await authorizeApi("furniture",false,request);
+ if(access.response) return access.response;
+
   try {
     const url = new URL(request.url);
     const path = url.searchParams.get("path") ?? "";
@@ -114,7 +121,7 @@ export async function GET(request: Request) {
       status: 200,
       headers: {
         "Content-Type": data.type || "application/octet-stream",
-        "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
+        "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {

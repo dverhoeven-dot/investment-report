@@ -1,5 +1,6 @@
 "use client";
 
+import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 export type LosNaranjosConfig = {
@@ -903,6 +904,7 @@ export default function LosNaranjosClient({
   initialData: LosNaranjosInitialData;
   config: LosNaranjosConfig;
 }) {
+  const {readOnly}=usePortalAccess();
   const [form, setForm] = useState<FormState>(() =>
     createInitialForm(initialData)
   );
@@ -924,6 +926,7 @@ export default function LosNaranjosClient({
         return;
       }
 
+      if(readOnly) return;
       const saved =
         localStorage.getItem(STORAGE_KEY) ??
         localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -935,7 +938,7 @@ export default function LosNaranjosClient({
     } finally {
       setStorageReady(true);
     }
-  }, [initialData]);
+  }, [initialData, readOnly]);
 
   useEffect(() => {
     void refreshProjectList();
@@ -976,8 +979,8 @@ export default function LosNaranjosClient({
           name: result.name || "Online project",
           viewToken,
           editToken,
-          canEdit: Boolean(result.canEdit),
-          internalAccess,
+          canEdit: !readOnly && Boolean(result.canEdit),
+          internalAccess: !readOnly && Boolean(result.internalAccess),
         });
         setCloudStatus("saved");
         setCloudProjects((current) => upsertProjectListItem(current, {
@@ -997,19 +1000,20 @@ export default function LosNaranjosClient({
     return () => {
       cancelled = true;
     };
-  }, [initialData]);
+  }, [initialData, readOnly]);
 
   useEffect(() => {
-    if (!storageReady) return;
+    if (!storageReady || readOnly) return;
     const saveHandle = window.setTimeout(() => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
     }, 180);
     return () => window.clearTimeout(saveHandle);
-  }, [form, storageReady]);
+  }, [form, storageReady, readOnly]);
 
 
   useEffect(() => {
     if (
+      readOnly ||
       !storageReady ||
       !cloudProject?.id ||
       !cloudProject.canEdit ||
@@ -1304,8 +1308,8 @@ export default function LosNaranjosClient({
         name: result.name || "Online project",
         viewToken: "",
         editToken: "",
-        canEdit: true,
-        internalAccess: true,
+        canEdit: !readOnly && Boolean(result.canEdit),
+        internalAccess: !readOnly && Boolean(result.internalAccess),
       });
       setUploadedPhotos([]);
       setPhotoInputKey((current) => current + 1);
@@ -1329,6 +1333,7 @@ export default function LosNaranjosClient({
   }
 
   async function duplicateProject() {
+    if(readOnly) return;
     const sourceName = form.projectName.trim() || cloudProject?.name || "Naamloos project";
     const copyName = `${sourceName} - kopie`;
     const copyForm = { ...form, projectName: copyName };
@@ -1371,6 +1376,7 @@ export default function LosNaranjosClient({
   }
 
   async function deleteCurrentProject() {
+    if(readOnly) return;
     if (!cloudProject?.id) return;
     const shouldDelete = window.confirm(
       `Project “${cloudProject.name}” definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
@@ -1431,6 +1437,7 @@ export default function LosNaranjosClient({
   }
 
   async function saveProjectOnline() {
+    if(readOnly) return;
     setCloudError("");
 
     if (
@@ -1530,6 +1537,7 @@ export default function LosNaranjosClient({
   }
 
   function startNewProject() {
+    if(readOnly) return;
     const shouldContinue = window.confirm(
       "Nieuw project starten? Niet-opgeslagen lokale wijzigingen gaan verloren."
     );
@@ -1553,6 +1561,7 @@ export default function LosNaranjosClient({
   }
 
   function resetForm() {
+    if(readOnly) return;
     if (
       cloudProject?.canEdit &&
       !window.confirm(
@@ -2831,7 +2840,7 @@ export default function LosNaranjosClient({
             <button type="button" className="print-button" onClick={printReport}>
               Afdrukken
             </button>
-            <button type="button" onClick={resetForm}>
+            <button type="button" data-portal-edit disabled={readOnly} onClick={resetForm}>
               Reset naar beginwaarden
             </button>
           </div>
@@ -2841,7 +2850,7 @@ export default function LosNaranjosClient({
           <div className="cloud-project-left">
             <label className="cloud-project-picker">
               <span>Mijn projecten</span>
-              <select
+              <select data-portal-view-control
                 value={cloudProject?.id || ""}
                 onChange={(event) => void openProjectFromList(event.currentTarget.value)}
                 disabled={projectListStatus === "loading"}
@@ -2887,16 +2896,16 @@ export default function LosNaranjosClient({
           </div>
 
           <div className="cloud-project-actions">
-            {(!cloudProject || cloudProject.canEdit) && (
-              <button type="button" onClick={saveProjectOnline}>
+            {(!readOnly && (!cloudProject || cloudProject.canEdit)) && (
+              <button type="button" data-portal-edit disabled={readOnly} onClick={saveProjectOnline}>
                 {cloudProject ? "Nu opslaan" : "Opslaan"}
               </button>
             )}
-            <button type="button" className="cloud-button-muted" onClick={startNewProject}>
+            <button type="button" className="cloud-button-muted" data-portal-edit disabled={readOnly} onClick={startNewProject}>
               Nieuw project
             </button>
             {cloudProject?.canEdit && (
-              <button type="button" onClick={duplicateProject}>
+              <button type="button" data-portal-edit disabled={readOnly} onClick={duplicateProject}>
                 Dupliceren
               </button>
             )}
@@ -2911,7 +2920,7 @@ export default function LosNaranjosClient({
               </button>
             )}
             {cloudProject?.canEdit && (
-              <button type="button" className="cloud-button-danger" onClick={deleteCurrentProject}>
+              <button type="button" className="cloud-button-danger" data-portal-edit disabled={readOnly} onClick={deleteCurrentProject}>
                 Verwijderen
               </button>
             )}
