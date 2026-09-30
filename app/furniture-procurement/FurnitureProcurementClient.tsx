@@ -67,6 +67,38 @@ const cleanNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatMoneyInput = (value: string) => {
+  const cleaned = value
+    .replace(/[€\s]/g, "")
+    .replace(/\./g, "")
+    .replace(/[^\d,]/g, "");
+
+  if (!cleaned) return "";
+
+  const hasDecimalComma = cleaned.includes(",");
+  const [integerPart = "", decimalPart = ""] = cleaned.split(",", 2);
+  const normalizedInteger = integerPart.replace(/^0+(?=\d)/, "") || "0";
+  const formattedInteger = normalizedInteger.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+  if (!hasDecimalComma) return formattedInteger;
+
+  const decimals = decimalPart.replace(/\D/g, "").slice(0, 2);
+  return `${formattedInteger},${decimals}`;
+};
+
+const discountPercentage = (purchasePrice: number, normalPrice: number) => {
+  if (!Number.isFinite(purchasePrice) || !Number.isFinite(normalPrice)) return null;
+  if (purchasePrice <= 0 || normalPrice <= 0) return null;
+
+  const percentage = ((normalPrice - purchasePrice) / normalPrice) * 100;
+  return Math.max(0, percentage);
+};
+
+const formatPercentage = (value: number | null) =>
+  value === null
+    ? "—"
+    : `${new Intl.NumberFormat("nl-NL", { maximumFractionDigits: 1 }).format(value)}%`;
+
 const formatDate = (value: string) => {
   if (!value) return "Nog niet ingevuld";
   const [year, month, day] = value.split("-").map(Number);
@@ -252,8 +284,8 @@ export default function FurnitureProcurementClient() {
       name: item.name,
       category: item.category,
       location: item.location,
-      purchasePrice: item.purchasePrice ? String(item.purchasePrice) : "",
-      normalPrice: item.normalPrice ? String(item.normalPrice) : "",
+      purchasePrice: item.purchasePrice ? formatMoneyInput(String(item.purchasePrice)) : "",
+      normalPrice: item.normalPrice ? formatMoneyInput(String(item.normalPrice)) : "",
       quantity: String(item.quantity || 1),
       supplier: item.supplier,
       status: item.status,
@@ -355,7 +387,7 @@ export default function FurnitureProcurementClient() {
         supplier: payload.supplier || current.supplier,
         normalPrice:
           typeof payload.price === "number" && Number.isFinite(payload.price)
-            ? String(payload.price)
+            ? formatMoneyInput(String(payload.price))
             : current.normalPrice,
         imagePreview: payload.imageUrl || current.imagePreview,
         notes: current.notes || payload.description || "",
@@ -698,6 +730,15 @@ export default function FurnitureProcurementClient() {
                     </div>
                   </div>
 
+                  <div className="discount-row">
+                    <span>Korting</span>
+                    <strong>
+                      {formatPercentage(
+                        discountPercentage(item.purchasePrice, item.normalPrice)
+                      )}
+                    </strong>
+                  </div>
+
                   <div className="card-status">
                     <select
                       value={item.status}
@@ -869,7 +910,9 @@ export default function FurnitureProcurementClient() {
                 <span>Aankoopbedrag (totaal)</span>
                 <input
                   value={draft.purchasePrice}
-                  onChange={(event) => setDraft({ ...draft, purchasePrice: event.target.value })}
+                  onChange={(event) =>
+                    setDraft({ ...draft, purchasePrice: formatMoneyInput(event.target.value) })
+                  }
                   placeholder="€ 0"
                   inputMode="decimal"
                 />
@@ -879,7 +922,9 @@ export default function FurnitureProcurementClient() {
                 <span>Normale waarde (totaal)</span>
                 <input
                   value={draft.normalPrice}
-                  onChange={(event) => setDraft({ ...draft, normalPrice: event.target.value })}
+                  onChange={(event) =>
+                    setDraft({ ...draft, normalPrice: formatMoneyInput(event.target.value) })
+                  }
                   placeholder="€ 0"
                   inputMode="decimal"
                 />
@@ -1326,6 +1371,20 @@ export default function FurnitureProcurementClient() {
         }
         .price-grid span { display: block; font-size: 9px; color: #8c8174; margin-bottom: 3px; }
         .price-grid strong { font-size: 13px; }
+        .discount-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-top: 7px;
+          padding: 8px 10px;
+          border-radius: 10px;
+          background: #e8f0e6;
+          color: #4f6d50;
+          font-size: 11px;
+        }
+        .discount-row span { font-weight: 700; }
+        .discount-row strong { font-size: 13px; color: #355b39; }
         .card-status {
           display: flex;
           gap: 7px;

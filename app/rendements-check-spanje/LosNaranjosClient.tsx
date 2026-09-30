@@ -1762,12 +1762,17 @@ export default function LosNaranjosClient({
     const furnitureSaleProceeds = looseFurniture + furnitureMarkup;
     const fixedFurnitureCost = fixedInterior;
     const looseFurnitureCost = looseFurniture;
-    const projectSubtotal =
-      baseBuildCost + contingency + fixedInterior + looseFurniture;
+    // Subtotal excludes loose Furniture so the report can show Furniture as a
+    // separate line directly below Subtotal. Project management keeps the same
+    // calculation base as before (including Furniture), so this presentation
+    // change does not alter the total project economics.
+    const projectSubtotal = baseBuildCost + contingency + fixedInterior;
+    const projectManagementBase = projectSubtotal + looseFurniture;
     const projectManagement = isSharedProject
-      ? projectSubtotal * projectManagementPercentage
+      ? projectManagementBase * projectManagementPercentage
       : 0;
-    const totalProjectCost = projectSubtotal + projectManagement;
+    const totalProjectCost =
+      projectSubtotal + looseFurniture + projectManagement;
     const capitalDeployed = totalAcquisition + totalProjectCost;
 
     // Een mede-investeerder kan zijn deelname invoeren als vast bedrag of als
@@ -2696,7 +2701,7 @@ export default function LosNaranjosClient({
               ))}
             </tr>
             <tr className="split-profit-row">
-              <td><strong>Net profit / (loss)</strong></td>
+              <td><strong>Net profit before tax / (loss)</strong></td>
               <td className={data.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfit)}</td>
               <td className={data.ourNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfit)}</td>
               {entries.map(({ summary, investorIndex }) => (
@@ -3612,7 +3617,7 @@ export default function LosNaranjosClient({
         />
 
         <div className="metric-grid">
-          <Metric label="Net Profit" value={signedEuro(data.netProfit)} positive={data.netProfit >= 0} />
+          <Metric label="Net Profit before Tax" value={signedEuro(data.netProfit)} positive={data.netProfit >= 0} />
           <Metric label="ROI" value={percent(data.roi, true)} positive={data.roi >= 0} />
           <Metric label={`IRR (${data.durationMonths}M EXIT)`} value={percent(data.irr, true)} positive={data.irr >= 0} />
           <Metric label="Capital Deployed" value={euro(data.capitalDeployed)} />
@@ -3636,8 +3641,8 @@ export default function LosNaranjosClient({
             <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} />
             <DataRow label={`Contingency (${percent(data.contingencyPercentage)})`} value={euro(data.contingency)} />
             <DataRow label="Built-in Furniture" value={euro(data.fixedInterior)} />
-            <DataRow label="Furniture" value={euro(data.looseFurniture)} />
             <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
+            <DataRow label="Furniture" value={euro(data.looseFurniture)} />
             {data.isSharedProject && (
               <DataRow
                 label={`Project Management (${percent(data.projectManagementPercentage)})`}
@@ -3671,7 +3676,7 @@ export default function LosNaranjosClient({
               <DataRow label="Total Bank Interest" value={`-${euro(data.totalBankInterest)}`} />
             </>
           )}
-          <DataRow label="Net Profit / (Loss)" value={signedEuro(data.netProfit)} strong positive={data.netProfit >= 0} />
+          <DataRow label="Net Profit before Tax / (Loss)" value={signedEuro(data.netProfit)} strong positive={data.netProfit >= 0} />
         </DataBlock>
 
         <AllocationBar
@@ -3706,12 +3711,12 @@ export default function LosNaranjosClient({
               sub={euro(data.partnerInvestment)}
             />
             <Metric
-              label="Our net profit"
+              label="Our net profit before tax"
               value={signedEuro(data.ourNetProfit)}
               positive={data.ourNetProfit >= 0}
             />
             <Metric
-              label="Total co-investors net profit"
+              label="Total co-investors net profit before tax"
               value={signedEuro(data.partnerNetProfit)}
               positive={data.partnerNetProfit >= 0}
             />
@@ -3773,12 +3778,12 @@ export default function LosNaranjosClient({
                   sub={euro(data.partnerInvestment)}
                 />
                 <Metric
-                  label="Our net profit"
+                  label="Our net profit before tax"
                   value={signedEuro(data.ourNetProfit)}
                   positive={data.ourNetProfit >= 0}
                 />
                 <Metric
-                  label="Total co-investors net profit"
+                  label="Total co-investors net profit before tax"
                   value={signedEuro(data.partnerNetProfit)}
                   positive={data.partnerNetProfit >= 0}
                 />
@@ -3830,7 +3835,7 @@ export default function LosNaranjosClient({
         <TableTitle>Returns by exit timeline</TableTitle>
         <table>
           <thead>
-            <tr><th>Exit</th><th>Datum</th><th>Net Profit</th><th>ROI</th><th>IRR (Ann.)</th></tr>
+            <tr><th>Exit</th><th>Datum</th><th>Net Profit before Tax</th><th>ROI</th><th>IRR (Ann.)</th></tr>
           </thead>
           <tbody>
             {data.exitScenarios.map((row) => (
@@ -4429,7 +4434,7 @@ function AllocationBar({ salePrice, acquisition, project, commission, legalCosts
     { label: "Build / project", value: project, className: "project" },
     { label: "Commission", value: commission, className: "commission" },
     { label: "Sale legal costs", value: legalCosts, className: "commission" },
-    { label: "Net profit", value: Math.max(0, profit), className: "profit" },
+    { label: "Net profit before tax", value: Math.max(0, profit), className: "profit" },
   ];
 
   return (
@@ -4493,7 +4498,7 @@ type SensitivityRow = {
 function SensitivityTable({ rows, valueKey, valueLabel }: { rows: SensitivityRow[]; valueKey: "salePrice" | "projectCost"; valueLabel: string }) {
   return (
     <table>
-      <thead><tr><th></th><th>{valueLabel}</th><th>Net Profit</th><th>ROI</th><th>IRR</th></tr></thead>
+      <thead><tr><th></th><th>{valueLabel}</th><th>Net Profit before Tax</th><th>ROI</th><th>IRR</th></tr></thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.change}>
