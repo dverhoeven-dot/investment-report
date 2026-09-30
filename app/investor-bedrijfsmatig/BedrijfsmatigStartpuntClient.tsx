@@ -621,7 +621,7 @@ export function StartpuntReport({
             <span>Live invoer</span>
             <strong>Startpunt analyse</strong>
           </div>
-          <button type="button" onClick={resetForm}>
+          <button type="button" data-portal-edit onClick={resetForm}>
             Reset naar beginwaarden
           </button>
         </div>

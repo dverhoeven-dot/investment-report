@@ -1,3 +1,5 @@
+import {requirePermission} from "@/lib/portal/auth";
+import ReadOnlyBoundary from "@/components/portal/ReadOnlyBoundary";
 import LosNaranjosClient, {
   type LosNaranjosConfig,
   type LosNaranjosInitialData,
@@ -53,11 +55,12 @@ const config: LosNaranjosConfig = {
   footerLabel: "Leovari",
 };
 
-export default function Page() {
-  return (
-    <LosNaranjosClient
+export default async function Page() {
+ const user=await requirePermission("returns");
+  return (<ReadOnlyBoundary readOnly={user.role!=="employee"} userId={user.id}>
+<LosNaranjosClient
       initialData={initialData}
       config={config}
     />
-  );
+</ReadOnlyBoundary>);
 }

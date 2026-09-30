@@ -1,3 +1,5 @@
+import {requirePermission} from "@/lib/portal/auth";
+import ReadOnlyBoundary from "@/components/portal/ReadOnlyBoundary";
 import BedrijfsmatigStartpuntClient, {
   type ReportData,
   type StartpuntConfig,
@@ -73,11 +75,13 @@ const initialData: ReportData = {
   waarschuwingen: [],
 };
 
-export default function BedrijfsmatigPage() {
-  return (
-    <BedrijfsmatigStartpuntClient
+export default async function BedrijfsmatigPage() {
+ const user=await requirePermission("commercial");
+  await requirePermission("commercial");
+  return (<ReadOnlyBoundary readOnly={user.role!=="employee"} userId={user.id}>
+<BedrijfsmatigStartpuntClient
       initialData={initialData}
       config={config}
     />
-  );
+</ReadOnlyBoundary>);
 }

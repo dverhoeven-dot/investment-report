@@ -1,3 +1,4 @@
+import "server-only";
 export const PORTFOLIO = {
     dashboard:
       "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYfSIZOnl0Cg4ob4wqAPsNMZx52aWd4PIpDC6m1Yg7b3oqXpSCUXO-iRpqY8E5rw/pub?gid=1798228919&single=true&output=csv",

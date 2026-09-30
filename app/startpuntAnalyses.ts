@@ -1,3 +1,4 @@
+import "server-only";
 export const STARTPUNT_ANALYSES = {
     residentieel: {
       inputCsv: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4JQO904LRsVhyTE8tXiEou66YxLjiL9AYuYetnSTQG0YQbpNu1r4CFA3watW55w/pub?gid=1907487261&single=true&output=csv",

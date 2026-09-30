@@ -6,14 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "portal:init": "node --env-file=.env.local --import tsx scripts/portal-init.ts",
+    "test:portal": "node --import tsx tests/portal.test.ts",
+    "test:gegevens": "node --conditions=react-server --import tsx tests/data-permissions.test.ts",
+    "portal:setup": "node --import tsx scripts/portal-setup.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@libsql/client": "^0.18.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -23,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4.23.15"
   }
 }
