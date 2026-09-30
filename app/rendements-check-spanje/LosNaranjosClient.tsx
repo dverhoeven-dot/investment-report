@@ -1,6 +1,5 @@
 "use client";
 
-import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
 export type LosNaranjosConfig = {
@@ -11,6 +10,7 @@ export type LosNaranjosConfig = {
 
 type ProjectOwnership = "own" | "shared";
 type ProjectType = "New Build" | "Renovation";
+type PurchaseVatChoice = "no" | "yes";
 type BankFinancingChoice = "no" | "yes";
 type BankRepaymentFrequency = "monthly" | "yearly";
 type BankScheduleMode = "standard" | "custom";
@@ -56,6 +56,8 @@ export type LosNaranjosInitialData = {
   durationMonths: number;
 
   purchasePrice: number;
+  purchaseVatEnabled?: PurchaseVatChoice;
+  purchaseVatPercentage?: number;
   transferTaxPercentage: number;
   lawyerFeePercentage: number;
   notaryFee: number;
@@ -101,6 +103,8 @@ type FormState = {
   durationMonths: string;
 
   purchasePrice: string;
+  purchaseVatEnabled: PurchaseVatChoice;
+  purchaseVatPercentage: string;
   transferTaxPercentage: string;
   lawyerFeePercentage: string;
   notaryFee: string;
@@ -305,6 +309,8 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     durationMonths: "0",
 
     purchasePrice: "0",
+    purchaseVatEnabled: data.purchaseVatEnabled === "yes" ? "yes" : "no",
+    purchaseVatPercentage: String(data.purchaseVatPercentage ?? 0),
     transferTaxPercentage: "0",
     lawyerFeePercentage: "0",
     notaryFee: "0",
@@ -553,6 +559,11 @@ function normalizeStoredForm(
     ),
     projectStartDate: String(
       stored.projectStartDate ?? base.projectStartDate
+    ),
+    purchaseVatEnabled:
+      stored.purchaseVatEnabled === "yes" ? "yes" : "no",
+    purchaseVatPercentage: String(
+      stored.purchaseVatPercentage ?? base.purchaseVatPercentage
     ),
     fixedInterior: String(
       stored.fixedInterior ?? stored.furniture ?? base.fixedInterior
@@ -904,7 +915,6 @@ export default function LosNaranjosClient({
   initialData: LosNaranjosInitialData;
   config: LosNaranjosConfig;
 }) {
-  const {readOnly}=usePortalAccess();
   const [form, setForm] = useState<FormState>(() =>
     createInitialForm(initialData)
   );
@@ -926,7 +936,6 @@ export default function LosNaranjosClient({
         return;
       }
 
-      if(readOnly) return;
       const saved =
         localStorage.getItem(STORAGE_KEY) ??
         localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -938,7 +947,7 @@ export default function LosNaranjosClient({
     } finally {
       setStorageReady(true);
     }
-  }, [initialData, readOnly]);
+  }, [initialData]);
 
   useEffect(() => {
     void refreshProjectList();
@@ -979,8 +988,8 @@ export default function LosNaranjosClient({
           name: result.name || "Online project",
           viewToken,
           editToken,
-          canEdit: !readOnly && Boolean(result.canEdit),
-          internalAccess: !readOnly && Boolean(result.internalAccess),
+          canEdit: Boolean(result.canEdit),
+          internalAccess,
         });
         setCloudStatus("saved");
         setCloudProjects((current) => upsertProjectListItem(current, {
@@ -1000,20 +1009,19 @@ export default function LosNaranjosClient({
     return () => {
       cancelled = true;
     };
-  }, [initialData, readOnly]);
+  }, [initialData]);
 
   useEffect(() => {
-    if (!storageReady || readOnly) return;
+    if (!storageReady) return;
     const saveHandle = window.setTimeout(() => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
     }, 180);
     return () => window.clearTimeout(saveHandle);
-  }, [form, storageReady, readOnly]);
+  }, [form, storageReady]);
 
 
   useEffect(() => {
     if (
-      readOnly ||
       !storageReady ||
       !cloudProject?.id ||
       !cloudProject.canEdit ||
@@ -1308,8 +1316,8 @@ export default function LosNaranjosClient({
         name: result.name || "Online project",
         viewToken: "",
         editToken: "",
-        canEdit: !readOnly && Boolean(result.canEdit),
-        internalAccess: !readOnly && Boolean(result.internalAccess),
+        canEdit: true,
+        internalAccess: true,
       });
       setUploadedPhotos([]);
       setPhotoInputKey((current) => current + 1);
@@ -1333,7 +1341,6 @@ export default function LosNaranjosClient({
   }
 
   async function duplicateProject() {
-    if(readOnly) return;
     const sourceName = form.projectName.trim() || cloudProject?.name || "Naamloos project";
     const copyName = `${sourceName} - kopie`;
     const copyForm = { ...form, projectName: copyName };
@@ -1376,7 +1383,6 @@ export default function LosNaranjosClient({
   }
 
   async function deleteCurrentProject() {
-    if(readOnly) return;
     if (!cloudProject?.id) return;
     const shouldDelete = window.confirm(
       `Project “${cloudProject.name}” definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
@@ -1437,7 +1443,6 @@ export default function LosNaranjosClient({
   }
 
   async function saveProjectOnline() {
-    if(readOnly) return;
     setCloudError("");
 
     if (
@@ -1537,7 +1542,6 @@ export default function LosNaranjosClient({
   }
 
   function startNewProject() {
-    if(readOnly) return;
     const shouldContinue = window.confirm(
       "Nieuw project starten? Niet-opgeslagen lokale wijzigingen gaan verloren."
     );
@@ -1561,7 +1565,6 @@ export default function LosNaranjosClient({
   }
 
   function resetForm() {
-    if(readOnly) return;
     if (
       cloudProject?.canEdit &&
       !window.confirm(
@@ -1721,6 +1724,10 @@ export default function LosNaranjosClient({
       }));
 
     const purchasePrice = Math.max(0, parseNumber(form.purchasePrice));
+    const purchaseVatEnabled = form.purchaseVatEnabled === "yes";
+    const purchaseVatPercentage = purchaseVatEnabled
+      ? Math.min(1, Math.max(0, parsePercent(form.purchaseVatPercentage)))
+      : 0;
     const transferTaxPercentage = Math.max(
       0,
       parsePercent(form.transferTaxPercentage)
@@ -1735,10 +1742,12 @@ export default function LosNaranjosClient({
       parseNumber(form.otherAcquisitionCosts)
     );
 
+    const purchaseVat = purchasePrice * purchaseVatPercentage;
     const transferTax = purchasePrice * transferTaxPercentage;
     const lawyerFee = purchasePrice * lawyerFeePercentage;
     const totalAcquisition =
       purchasePrice +
+      purchaseVat +
       transferTax +
       lawyerFee +
       notaryFee +
@@ -1771,12 +1780,11 @@ export default function LosNaranjosClient({
     const furnitureSaleProceeds = looseFurniture + furnitureMarkup;
     const fixedFurnitureCost = fixedInterior;
     const looseFurnitureCost = looseFurniture;
-    // Subtotal excludes loose Furniture so the report can show Furniture as a
-    // separate line directly below Subtotal. Project management keeps the same
-    // calculation base as before (including Furniture), so this presentation
-    // change does not alter the total project economics.
+    // Subtotal excludes loose Furniture so Furniture remains a separate line.
+    // Project Management is calculated strictly over this Subtotal and therefore
+    // does not include loose Furniture.
     const projectSubtotal = baseBuildCost + contingency + fixedInterior;
-    const projectManagementBase = projectSubtotal + looseFurniture;
+    const projectManagementBase = projectSubtotal;
     const projectManagement = isSharedProject
       ? projectManagementBase * projectManagementPercentage
       : 0;
@@ -1881,6 +1889,18 @@ export default function LosNaranjosClient({
         inflow: 0,
         category: "acquisition",
       },
+      ...(purchaseVatEnabled
+        ? [
+            {
+              paymentId: "purchase-vat",
+              month: closingMonth,
+              event: `VAT on purchase (${percent(purchaseVatPercentage)})`,
+              outflow: purchaseVat,
+              inflow: 0,
+              category: "acquisition" as const,
+            },
+          ]
+        : []),
       {
         paymentId: "transfer-tax",
         month: closingMonth,
@@ -2401,6 +2421,9 @@ export default function LosNaranjosClient({
       plotM2,
       durationMonths,
       purchasePrice,
+      purchaseVatEnabled,
+      purchaseVatPercentage,
+      purchaseVat,
       transferTaxPercentage,
       lawyerFeePercentage,
       notaryFee,
@@ -2840,7 +2863,7 @@ export default function LosNaranjosClient({
             <button type="button" className="print-button" onClick={printReport}>
               Afdrukken
             </button>
-            <button type="button" data-portal-edit disabled={readOnly} onClick={resetForm}>
+            <button type="button" onClick={resetForm}>
               Reset naar beginwaarden
             </button>
           </div>
@@ -2850,7 +2873,7 @@ export default function LosNaranjosClient({
           <div className="cloud-project-left">
             <label className="cloud-project-picker">
               <span>Mijn projecten</span>
-              <select data-portal-view-control
+              <select
                 value={cloudProject?.id || ""}
                 onChange={(event) => void openProjectFromList(event.currentTarget.value)}
                 disabled={projectListStatus === "loading"}
@@ -2896,16 +2919,16 @@ export default function LosNaranjosClient({
           </div>
 
           <div className="cloud-project-actions">
-            {(!readOnly && (!cloudProject || cloudProject.canEdit)) && (
-              <button type="button" data-portal-edit disabled={readOnly} onClick={saveProjectOnline}>
+            {(!cloudProject || cloudProject.canEdit) && (
+              <button type="button" onClick={saveProjectOnline}>
                 {cloudProject ? "Nu opslaan" : "Opslaan"}
               </button>
             )}
-            <button type="button" className="cloud-button-muted" data-portal-edit disabled={readOnly} onClick={startNewProject}>
+            <button type="button" className="cloud-button-muted" onClick={startNewProject}>
               Nieuw project
             </button>
             {cloudProject?.canEdit && (
-              <button type="button" data-portal-edit disabled={readOnly} onClick={duplicateProject}>
+              <button type="button" onClick={duplicateProject}>
                 Dupliceren
               </button>
             )}
@@ -2920,7 +2943,7 @@ export default function LosNaranjosClient({
               </button>
             )}
             {cloudProject?.canEdit && (
-              <button type="button" className="cloud-button-danger" data-portal-edit disabled={readOnly} onClick={deleteCurrentProject}>
+              <button type="button" className="cloud-button-danger" onClick={deleteCurrentProject}>
                 Verwijderen
               </button>
             )}
@@ -3114,6 +3137,24 @@ export default function LosNaranjosClient({
             format="amount"
             onChange={(value) => updateField("purchasePrice", value)}
           />
+          <SelectField
+            label="BTW op aankoop?"
+            value={form.purchaseVatEnabled}
+            options={[
+              { value: "no", label: "Nee" },
+              { value: "yes", label: "Ja" },
+            ]}
+            onChange={(value) =>
+              updateField("purchaseVatEnabled", value as PurchaseVatChoice)
+            }
+          />
+          {form.purchaseVatEnabled === "yes" && (
+            <InputField
+              label="BTW %"
+              value={form.purchaseVatPercentage}
+              onChange={(value) => updateField("purchaseVatPercentage", value)}
+            />
+          )}
           <InputField
             label="Overdrachtsbelasting %"
             value={form.transferTaxPercentage}
@@ -3635,6 +3676,12 @@ export default function LosNaranjosClient({
         <div className="two-column">
           <DataBlock title="Acquisition">
             <DataRow label="Purchase Price" value={euro(data.purchasePrice)} />
+            {data.purchaseVatEnabled && (
+              <DataRow
+                label={`VAT (${percent(data.purchaseVatPercentage)})`}
+                value={euro(data.purchaseVat)}
+              />
+            )}
             <DataRow label={`Transfer Tax (${percent(data.transferTaxPercentage)})`} value={euro(data.transferTax)} />
             <DataRow label={`Lawyer Fee (${percent(data.lawyerFeePercentage)})`} value={euro(data.lawyerFee)} />
             <DataRow label="Notary Fee" value={euro(data.notaryFee)} />
