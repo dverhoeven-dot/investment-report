@@ -1,3 +1,4 @@
+import {requirePermission} from "@/lib/portal/auth";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { PROJECTS } from "../../projects";
@@ -252,6 +253,7 @@ export default async function Home({
     params: Promise<{ project: string }>;
   }) {
     const { project } = await params;
+    await requirePermission(project);
     const projectConfig = PROJECTS[project as keyof typeof PROJECTS];
   
     if (!projectConfig) {

@@ -1,3 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -125,14 +126,23 @@ async function updateItem(request: Request, context: RouteContext) {
 }
 
 export async function PUT(request: Request, context: RouteContext) {
+ const access=await authorizeApi("furniture",true,request);
+ if(access.response) return access.response;
+
   return updateItem(request, context);
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+ const access=await authorizeApi("furniture",true,request);
+ if(access.response) return access.response;
+
   return updateItem(request, context);
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
+ const access=await authorizeApi("furniture",true,_request);
+ if(access.response) return access.response;
+
   try {
     const { id } = await context.params;
     const supabase = getAdminClient();

@@ -1,3 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
 type SavePayload = {
     input?: {
       objectNaam?: unknown;
@@ -25,6 +26,9 @@ type SavePayload = {
   }
   
   export async function POST(request: Request) {
+ const access=await authorizeApi("residential",true,request);
+ if(access.response) return access.response;
+
     const webAppUrl = process.env.GOOGLE_SHEETS_WEB_APP_URL;
     const secret = process.env.GOOGLE_SHEETS_WEB_APP_SECRET;
   
