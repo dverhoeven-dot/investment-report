@@ -1,3 +1,5 @@
+import {requirePermission} from "@/lib/portal/auth";
+import ReadOnlyBoundary from "@/components/portal/ReadOnlyBoundary";
 import ResidentieelStartpuntClient, {
   type ReportData,
   type StartpuntConfig,
@@ -82,11 +84,12 @@ const initialData: ReportData = {
   waarschuwingen: [],
 };
 
-export default function ResidentieelPage() {
-  return (
-    <ResidentieelStartpuntClient
+export default async function ResidentieelPage() {
+ const user=await requirePermission("residential");
+  return (<ReadOnlyBoundary readOnly={user.role!=="employee"} userId={user.id}>
+<ResidentieelStartpuntClient
       initialData={initialData}
       config={config}
     />
-  );
+</ReadOnlyBoundary>);
 }

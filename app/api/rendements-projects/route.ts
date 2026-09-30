@@ -1,3 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
 import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -41,6 +42,9 @@ function hashToken(token: string) {
  * Zorg dat de bestaande toegangssleutel/middleware van de site ook /api/rendements-projects beschermt.
  */
 export async function GET() {
+ const access=await authorizeApi("returns",false,undefined);
+ if(access.response) return access.response;
+
   try {
     const supabase = getAdminClient();
     const { data, error } = await supabase
@@ -68,6 +72,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+ const access=await authorizeApi("returns",true,request);
+ if(access.response) return access.response;
+
   try {
     const body = (await request.json()) as ProjectPayload;
     const name = String(body.name ?? "Naamloos project").trim() || "Naamloos project";

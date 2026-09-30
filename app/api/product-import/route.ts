@@ -1,3 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
@@ -470,6 +471,9 @@ function extractProductData(html: string, finalUrl: URL) {
 }
 
 export async function POST(request: Request) {
+ const access=await authorizeApi("furniture",true,request);
+ if(access.response) return access.response;
+
   try {
     const body = (await request.json().catch(() => null)) as { url?: unknown } | null;
     const rawUrl = typeof body?.url === "string" ? body.url.trim() : "";

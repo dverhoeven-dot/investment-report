@@ -1,3 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -94,6 +95,9 @@ function fromRow(row: Record<string, any>) {
 }
 
 export async function GET() {
+ const access=await authorizeApi("furniture",false,undefined);
+ if(access.response) return access.response;
+
   try {
     const supabase = getAdminClient();
     const { data, error } = await supabase
@@ -120,6 +124,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+ const access=await authorizeApi("furniture",true,request);
+ if(access.response) return access.response;
+
   try {
     const body = (await request.json()) as
       | (FurnitureItemInput & { bootstrapItems?: never })
