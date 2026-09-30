@@ -1,5 +1,6 @@
 "use client";
 
+import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import type { FurnitureItem } from "./furnitureSeed";
 
@@ -154,6 +155,7 @@ const emptyDraft = (): DraftItem => ({
 });
 
 export default function FurnitureProcurementClient() {
+ const {readOnly}=usePortalAccess();
   const [items, setItems] = useState<FurnitureItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [storageError, setStorageError] = useState("");
@@ -267,6 +269,7 @@ export default function FurnitureProcurementClient() {
   }
 
   function openNewItem() {
+    if(readOnly) return;
     setEditingId(null);
     setPendingImageFile(null);
     setDraft(emptyDraft());
@@ -276,6 +279,7 @@ export default function FurnitureProcurementClient() {
   }
 
   function openEdit(item: FurnitureItem) {
+    if(readOnly) return;
     setEditingId(item.id);
     setPendingImageFile(null);
     setProductImportError("");
@@ -299,6 +303,7 @@ export default function FurnitureProcurementClient() {
   }
 
   function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    if(readOnly) return;
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -314,6 +319,7 @@ export default function FurnitureProcurementClient() {
   }
 
   async function uploadPendingImage() {
+    if(readOnly) return;
     if (!pendingImageFile) return null;
 
     const formData = new FormData();
@@ -335,6 +341,7 @@ export default function FurnitureProcurementClient() {
   }
 
   async function importProductFromUrl() {
+    if(readOnly) return;
     const productUrl = draft.productUrl.trim();
 
     setProductImportError("");
@@ -414,6 +421,7 @@ export default function FurnitureProcurementClient() {
   }
 
   async function saveDraft(event: FormEvent) {
+    if(readOnly) return;
     event.preventDefault();
     if (!draft.name.trim()) return;
 
@@ -501,6 +509,7 @@ export default function FurnitureProcurementClient() {
   }
 
   async function removeItem(id: string) {
+    if(readOnly) return;
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
     if (!window.confirm(`"${item.name}" verwijderen?`)) return;
@@ -525,6 +534,7 @@ export default function FurnitureProcurementClient() {
   }
 
   async function updateQuickStatus(id: string, nextStatus: string) {
+    if(readOnly) return;
     const previous = items;
     setItems((current) =>
       current.map((item) =>
@@ -608,27 +618,27 @@ export default function FurnitureProcurementClient() {
           <div className="filters">
             <label className="search-box">
               <span>⌕</span>
-              <input
+              <input data-portal-view-control
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Zoek meubel, locatie, leverancier..."
               />
             </label>
 
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <select data-portal-view-control value={category} onChange={(event) => setCategory(event.target.value)}>
               {categories.map((entry) => (
                 <option key={entry}>{entry}</option>
               ))}
             </select>
 
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            <select data-portal-view-control value={status} onChange={(event) => setStatus(event.target.value)}>
               <option>Alle statussen</option>
               {statuses.map((entry) => (
                 <option key={entry}>{entry}</option>
               ))}
             </select>
 
-            <select value={location} onChange={(event) => setLocation(event.target.value)}>
+            <select data-portal-view-control value={location} onChange={(event) => setLocation(event.target.value)}>
               {locations.map((entry) => (
                 <option key={entry}>{entry}</option>
               ))}
@@ -650,7 +660,7 @@ export default function FurnitureProcurementClient() {
                 ☰ Tabel
               </button>
             </div>
-            <button className="primary-button" onClick={openNewItem}>
+            <button data-portal-edit disabled={readOnly} className="primary-button" onClick={openNewItem}>
               + Nieuw meubel
             </button>
           </div>
@@ -756,8 +766,8 @@ export default function FurnitureProcurementClient() {
                   </div>
 
                   <div className="card-footer">
-                    <button onClick={() => openEdit(item)}>Bewerken</button>
-                    <button className="danger-link" onClick={() => removeItem(item.id)}>
+                    <button data-portal-edit disabled={readOnly} onClick={() => openEdit(item)}>Bewerken</button>
+                    <button data-portal-edit disabled={readOnly} className="danger-link" onClick={() => removeItem(item.id)}>
                       Verwijderen
                     </button>
                   </div>
@@ -827,7 +837,7 @@ export default function FurnitureProcurementClient() {
                       </td>
                       <td>{item.paymentStatus}</td>
                       <td>
-                        <button className="text-button" onClick={() => openEdit(item)}>
+                        <button data-portal-edit disabled={readOnly} className="text-button" onClick={() => openEdit(item)}>
                           Bewerk
                         </button>
                       </td>

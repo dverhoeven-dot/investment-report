@@ -1,3 +1,4 @@
+import "server-only";
 export const PROJECTS = {
     "los-naranjos": {
       reportData:

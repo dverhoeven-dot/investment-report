@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "gebruikersportaal",
+    "herstel-mooie-print",
+    "main"
+  ],
+  "parent": {
+    "gebruikersportaal": "main",
+    "herstel-mooie-print": "main",
+    "main": null
+  },
+  "order": [
+    "main",
+    "gebruikersportaal",
+    "herstel-mooie-print"
+  ]
+}
