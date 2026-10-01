@@ -2,7 +2,7 @@
 
 import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import type { FurnitureItem } from "./furnitureSeed";
+import { furnitureSeed, type FurnitureItem } from "./furnitureSeed";
 
 const categories = [
   "Alle categorieën",
@@ -194,7 +194,35 @@ export default function FurnitureProcurementClient() {
         throw new Error(payload?.error || "Meubels konden niet worden geladen.");
       }
 
-      const loadedItems = payload?.items ?? [];
+      let loadedItems = payload?.items ?? [];
+
+      const existingSourceRows = new Set(
+        loadedItems
+          .map((item) => item.sourceRow)
+          .filter((value): value is number => typeof value === "number")
+      );
+      const seedIsComplete = furnitureSeed.every(
+        (item) => typeof item.sourceRow === "number" && existingSourceRows.has(item.sourceRow)
+      );
+
+      // De goedgekeurde Excel-lijst wordt éénmalig/idempotent naar Supabase gezet.
+      // De API slaat alleen ontbrekende bronregels op, zodat bestaande items behouden blijven.
+      if (!readOnly && !seedIsComplete) {
+        const seedResponse = await fetch("/api/furniture-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bootstrapItems: furnitureSeed }),
+        });
+        const seedPayload = (await seedResponse.json().catch(() => null)) as
+          | { items?: FurnitureItem[]; error?: string }
+          | null;
+
+        if (!seedResponse.ok) {
+          throw new Error(seedPayload?.error || "Goedgekeurde meubellijst kon niet worden ingevoerd.");
+        }
+
+        loadedItems = seedPayload?.items ?? loadedItems;
+      }
 
       setItems(
         loadedItems.map((item) => ({

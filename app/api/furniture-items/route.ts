@@ -134,15 +134,39 @@ export async function POST(request: Request) {
     const supabase = getAdminClient();
 
     if ("bootstrapItems" in body && Array.isArray(body.bootstrapItems)) {
-      const { count, error: countError } = await supabase
+      const seedItems = body.bootstrapItems.filter((item) => String(item.name ?? "").trim());
+      const { data: existingRows, error: existingError } = await supabase
         .from("furniture_items")
-        .select("id", { count: "exact", head: true });
+        .select("source_key, source_row");
 
-      if (countError) throw countError;
+      if (existingError) throw existingError;
 
-      if ((count ?? 0) === 0 && body.bootstrapItems.length > 0) {
-        const total = body.bootstrapItems.length;
-        const rows = body.bootstrapItems.map((item, index) => ({
+      const existingSourceKeys = new Set(
+        (existingRows ?? [])
+          .map((row) => row.source_key)
+          .filter((value): value is string => typeof value === "string" && value.length > 0)
+      );
+      const existingSourceRows = new Set(
+        (existingRows ?? [])
+          .map((row) => row.source_row)
+          .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      );
+
+      const missingItems = seedItems.filter((item) => {
+        const sourceKey = item.id ? String(item.id) : "";
+        const sourceRow =
+          typeof item.sourceRow === "number" && Number.isFinite(item.sourceRow)
+            ? Math.round(item.sourceRow)
+            : null;
+
+        if (sourceKey && existingSourceKeys.has(sourceKey)) return false;
+        if (sourceRow !== null && existingSourceRows.has(sourceRow)) return false;
+        return true;
+      });
+
+      if (missingItems.length > 0) {
+        const total = seedItems.length;
+        const rows = missingItems.map((item, index) => ({
           ...normalizeItem(item),
           source_key: item.id ? String(item.id) : null,
           sort_order: (total - index) * 1000,
