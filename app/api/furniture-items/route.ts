@@ -11,6 +11,8 @@ type FurnitureItemInput = {
   name?: string;
   category?: string;
   location?: string;
+  placementLocation?: string;
+  dimensions?: string;
   purchasePrice?: number;
   normalPrice?: number;
   quantity?: number;
@@ -51,6 +53,8 @@ function normalizeItem(input: FurnitureItemInput) {
     name: String(input.name ?? "").trim(),
     category: String(input.category ?? "Furniture").trim() || "Furniture",
     location: String(input.location ?? "").trim(),
+    placement_location: String(input.placementLocation ?? "").trim(),
+    dimensions: String(input.dimensions ?? "").trim(),
     purchase_price: toNumber(input.purchasePrice),
     normal_price: toNumber(input.normalPrice),
     quantity: Math.max(1, Math.round(toNumber(input.quantity, 1))),
@@ -80,6 +84,8 @@ function fromRow(row: Record<string, any>) {
     name: row.name ?? "",
     category: row.category ?? "Furniture",
     location: row.location ?? "",
+    placementLocation: row.placement_location ?? "",
+    dimensions: row.dimensions ?? "",
     purchasePrice: Number(row.purchase_price ?? 0),
     normalPrice: Number(row.normal_price ?? 0),
     quantity: Number(row.quantity ?? 1),
@@ -128,67 +134,10 @@ export async function POST(request: Request) {
  if(access.response) return access.response;
 
   try {
-    const body = (await request.json()) as
-      | (FurnitureItemInput & { bootstrapItems?: never })
-      | { bootstrapItems: FurnitureItemInput[] };
+    const body = (await request.json()) as FurnitureItemInput;
     const supabase = getAdminClient();
 
-    if ("bootstrapItems" in body && Array.isArray(body.bootstrapItems)) {
-      const seedItems = body.bootstrapItems.filter((item) => String(item.name ?? "").trim());
-      const { data: existingRows, error: existingError } = await supabase
-        .from("furniture_items")
-        .select("source_key, source_row");
-
-      if (existingError) throw existingError;
-
-      const existingSourceKeys = new Set(
-        (existingRows ?? [])
-          .map((row) => row.source_key)
-          .filter((value): value is string => typeof value === "string" && value.length > 0)
-      );
-      const existingSourceRows = new Set(
-        (existingRows ?? [])
-          .map((row) => row.source_row)
-          .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-      );
-
-      const missingItems = seedItems.filter((item) => {
-        const sourceKey = item.id ? String(item.id) : "";
-        const sourceRow =
-          typeof item.sourceRow === "number" && Number.isFinite(item.sourceRow)
-            ? Math.round(item.sourceRow)
-            : null;
-
-        if (sourceKey && existingSourceKeys.has(sourceKey)) return false;
-        if (sourceRow !== null && existingSourceRows.has(sourceRow)) return false;
-        return true;
-      });
-
-      if (missingItems.length > 0) {
-        const total = seedItems.length;
-        const rows = missingItems.map((item, index) => ({
-          ...normalizeItem(item),
-          source_key: item.id ? String(item.id) : null,
-          sort_order: (total - index) * 1000,
-        }));
-
-        const { error: insertError } = await supabase
-          .from("furniture_items")
-          .insert(rows);
-        if (insertError) throw insertError;
-      }
-
-      const { data, error } = await supabase
-        .from("furniture_items")
-        .select("*")
-        .order("sort_order", { ascending: false })
-        .order("created_at", { ascending: true });
-
-      if (error) throw error;
-      return NextResponse.json({ items: (data ?? []).map(fromRow) });
-    }
-
-    const normalized = normalizeItem(body as FurnitureItemInput);
+    const normalized = normalizeItem(body);
     if (!normalized.name) {
       return NextResponse.json({ error: "Productnaam ontbreekt." }, { status: 400 });
     }

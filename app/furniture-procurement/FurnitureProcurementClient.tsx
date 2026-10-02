@@ -2,7 +2,25 @@
 
 import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { furnitureSeed, type FurnitureItem } from "./furnitureSeed";
+type FurnitureItem = {
+  id: string;
+  itemNo: string;
+  name: string;
+  category: string;
+  location: string;
+  placementLocation: string;
+  dimensions: string;
+  purchasePrice: number;
+  normalPrice: number;
+  quantity: number;
+  status: string;
+  paymentStatus: string;
+  supplier: string;
+  productUrl: string;
+  notes: string;
+  images: string[];
+  sourceRow?: number;
+};
 
 const categories = [
   "Alle categorieën",
@@ -100,17 +118,6 @@ const formatPercentage = (value: number | null) =>
     ? "—"
     : `${new Intl.NumberFormat("nl-NL", { maximumFractionDigits: 1 }).format(value)}%`;
 
-const formatDate = (value: string) => {
-  if (!value) return "Nog niet ingevuld";
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return value;
-  return new Intl.DateTimeFormat("nl-NL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(year, month - 1, day));
-};
-
 type ProductImportResult = {
   url?: string;
   name?: string;
@@ -126,13 +133,14 @@ type DraftItem = {
   name: string;
   category: string;
   location: string;
+  placementLocation: string;
+  dimensions: string;
   purchasePrice: string;
   normalPrice: string;
   quantity: string;
   supplier: string;
   status: string;
   paymentStatus: string;
-  expectedDelivery: string;
   productUrl: string;
   notes: string;
   imagePreview: string;
@@ -142,13 +150,14 @@ const emptyDraft = (): DraftItem => ({
   name: "",
   category: "Furniture",
   location: "",
+  placementLocation: "",
+  dimensions: "",
   purchasePrice: "",
   normalPrice: "",
   quantity: "1",
   supplier: "",
   status: "Geselecteerd",
   paymentStatus: "Niet betaald",
-  expectedDelivery: "",
   productUrl: "",
   notes: "",
   imagePreview: "",
@@ -194,35 +203,10 @@ export default function FurnitureProcurementClient() {
         throw new Error(payload?.error || "Meubels konden niet worden geladen.");
       }
 
-      let loadedItems = payload?.items ?? [];
-
-      const existingSourceRows = new Set(
-        loadedItems
-          .map((item) => item.sourceRow)
-          .filter((value): value is number => typeof value === "number")
-      );
-      const seedIsComplete = furnitureSeed.every(
-        (item) => typeof item.sourceRow === "number" && existingSourceRows.has(item.sourceRow)
-      );
-
-      // De goedgekeurde Excel-lijst wordt éénmalig/idempotent naar Supabase gezet.
-      // De API slaat alleen ontbrekende bronregels op, zodat bestaande items behouden blijven.
-      if (!readOnly && !seedIsComplete) {
-        const seedResponse = await fetch("/api/furniture-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bootstrapItems: furnitureSeed }),
-        });
-        const seedPayload = (await seedResponse.json().catch(() => null)) as
-          | { items?: FurnitureItem[]; error?: string }
-          | null;
-
-        if (!seedResponse.ok) {
-          throw new Error(seedPayload?.error || "Goedgekeurde meubellijst kon niet worden ingevoerd.");
-        }
-
-        loadedItems = seedPayload?.items ?? loadedItems;
-      }
+      // Supabase is de enige bron van waarheid voor de meubellijst.
+      // Er wordt bewust geen seed/import meer gesynchroniseerd bij het laden.
+      // Daardoor blijft een verwijderd of handmatig aangepast item ook na refresh verwijderd/aangepast.
+      const loadedItems = payload?.items ?? [];
 
       setItems(
         loadedItems.map((item) => ({
@@ -254,7 +238,7 @@ export default function FurnitureProcurementClient() {
     return items.filter((item) => {
       const matchSearch =
         !query ||
-        [item.name, item.itemNo, item.location, item.supplier, item.category]
+        [item.name, item.itemNo, item.location, item.placementLocation, item.dimensions, item.supplier, item.category]
           .join(" ")
           .toLowerCase()
           .includes(query);
@@ -316,13 +300,14 @@ export default function FurnitureProcurementClient() {
       name: item.name,
       category: item.category,
       location: item.location,
+      placementLocation: item.placementLocation || "",
+      dimensions: item.dimensions || "",
       purchasePrice: item.purchasePrice ? formatMoneyInput(String(item.purchasePrice)) : "",
       normalPrice: item.normalPrice ? formatMoneyInput(String(item.normalPrice)) : "",
       quantity: String(item.quantity || 1),
       supplier: item.supplier,
       status: item.status,
       paymentStatus: item.paymentStatus,
-      expectedDelivery: item.expectedDelivery,
       productUrl: item.productUrl,
       notes: item.notes,
       imagePreview: item.images[0] || "",
@@ -479,13 +464,14 @@ export default function FurnitureProcurementClient() {
         name: draft.name.trim(),
         category: draft.category,
         location: normalizeLocation(draft.location),
+        placementLocation: draft.placementLocation.trim(),
+        dimensions: draft.dimensions.trim(),
         purchasePrice: cleanNumber(draft.purchasePrice),
         normalPrice: cleanNumber(draft.normalPrice),
         quantity: Math.max(1, Math.round(cleanNumber(draft.quantity) || 1)),
         supplier: draft.supplier.trim(),
         status: draft.status,
         paymentStatus: draft.paymentStatus,
-        expectedDelivery: draft.expectedDelivery,
         productUrl: draft.productUrl.trim(),
         notes: draft.notes.trim(),
         images,
@@ -752,10 +738,16 @@ export default function FurnitureProcurementClient() {
                   <p className="location">
                     {item.location ? `⌖ ${item.location}` : "Locatie nog niet ingevuld"}
                   </p>
-                  <p className="delivery-date">
-                    <span>Datum</span>
-                    <strong>{formatDate(item.expectedDelivery)}</strong>
-                  </p>
+                  <div className="item-detail-grid">
+                    <div className="item-detail">
+                      <span>Komt te staan</span>
+                      <strong>{item.placementLocation || "Nog niet ingevuld"}</strong>
+                    </div>
+                    <div className="item-detail">
+                      <span>Afmetingen</span>
+                      <strong>{item.dimensions || "Nog niet ingevuld"}</strong>
+                    </div>
+                  </div>
 
                   <div className="price-grid">
                     <div>
@@ -812,7 +804,9 @@ export default function FurnitureProcurementClient() {
                     <th>Foto</th>
                     <th>Item</th>
                     <th>Categorie</th>
-                    <th>Locatie</th>
+                    <th>Huidige locatie</th>
+                    <th>Komt te staan</th>
+                    <th>Afmetingen</th>
                     <th>Aantal</th>
                     <th>Aankoop</th>
                     <th>Normale waarde</th>
@@ -847,6 +841,8 @@ export default function FurnitureProcurementClient() {
                       </td>
                       <td>{item.category}</td>
                       <td>{item.location || "—"}</td>
+                      <td>{item.placementLocation || "—"}</td>
+                      <td>{item.dimensions || "—"}</td>
                       <td>{item.quantity}</td>
                       <td>{euro(item.purchasePrice)}</td>
                       <td>{euro(item.normalPrice)}</td>
@@ -945,6 +941,28 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
+                <span>Locatie waar het komt te staan</span>
+                <input
+                  value={draft.placementLocation}
+                  onChange={(event) =>
+                    setDraft({ ...draft, placementLocation: event.target.value })
+                  }
+                  placeholder="Bijv. Woonkamer, master bedroom, terras"
+                />
+              </label>
+
+              <label>
+                <span>Afmetingen</span>
+                <input
+                  value={draft.dimensions}
+                  onChange={(event) =>
+                    setDraft({ ...draft, dimensions: event.target.value })
+                  }
+                  placeholder="Bijv. 280 × 110 × 75 cm"
+                />
+              </label>
+
+              <label>
                 <span>Aankoopbedrag (totaal)</span>
                 <input
                   value={draft.purchasePrice}
@@ -1010,17 +1028,6 @@ export default function FurnitureProcurementClient() {
                     <option key={entry}>{entry}</option>
                   ))}
                 </select>
-              </label>
-
-              <label>
-                <span>Verwachte levering</span>
-                <input
-                  type="date"
-                  value={draft.expectedDelivery}
-                  onChange={(event) =>
-                    setDraft({ ...draft, expectedDelivery: event.target.value })
-                  }
-                />
               </label>
 
               <label className="wide product-import-field">
@@ -1382,24 +1389,32 @@ export default function FurnitureProcurementClient() {
           gap: 7px;
           margin-top: 12px;
         }
-        .delivery-date {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
+        .item-detail-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 7px;
           margin: 8px 0 2px;
+        }
+        .item-detail {
+          min-width: 0;
           padding: 8px 10px;
           border-radius: 10px;
           background: #f7f3eb;
-          font-size: 12px;
           color: #706456;
         }
-        .delivery-date span {
+        .item-detail span {
+          display: block;
+          margin-bottom: 3px;
+          font-size: 9px;
           font-weight: 700;
+          color: #8c8174;
         }
-        .delivery-date strong {
+        .item-detail strong {
+          display: block;
           color: #2d241b;
-          font-size: 12px;
+          font-size: 11px;
+          line-height: 1.35;
+          overflow-wrap: anywhere;
         }
 
         .price-grid > div {

@@ -14,6 +14,8 @@ type FurnitureItemInput = {
   name?: string;
   category?: string;
   location?: string;
+  placementLocation?: string;
+  dimensions?: string;
   purchasePrice?: number;
   normalPrice?: number;
   quantity?: number;
@@ -49,6 +51,8 @@ function fromRow(row: Record<string, any>) {
     name: row.name ?? "",
     category: row.category ?? "Furniture",
     location: row.location ?? "",
+    placementLocation: row.placement_location ?? "",
+    dimensions: row.dimensions ?? "",
     purchasePrice: Number(row.purchase_price ?? 0),
     normalPrice: Number(row.normal_price ?? 0),
     quantity: Number(row.quantity ?? 1),
@@ -72,6 +76,10 @@ function buildUpdate(body: FurnitureItemInput) {
   if (body.name !== undefined) update.name = String(body.name).trim();
   if (body.category !== undefined) update.category = String(body.category).trim();
   if (body.location !== undefined) update.location = String(body.location).trim();
+  if (body.placementLocation !== undefined)
+    update.placement_location = String(body.placementLocation).trim();
+  if (body.dimensions !== undefined)
+    update.dimensions = String(body.dimensions).trim();
   if (body.purchasePrice !== undefined)
     update.purchase_price = Number(body.purchasePrice) || 0;
   if (body.normalPrice !== undefined)
