@@ -23,7 +23,7 @@ type FurnitureItem = {
 };
 
 const categories = [
-  "Alle categorieën",
+  "All categories",
   "Furniture",
   "Sleeping",
   "Lighting",
@@ -32,17 +32,25 @@ const categories = [
   "Outdoor",
 ];
 
-const statuses = [
-  "Geselecteerd",
-  "Offerte aangevraagd",
-  "Besteld",
-  "Aanbetaling",
-  "Onderweg",
-  "Geleverd",
-  "Geplaatst",
+// Keep the stored values unchanged so existing Supabase records remain compatible.
+const statusOptions = [
+  { value: "Geselecteerd", label: "Selected" },
+  { value: "Offerte aangevraagd", label: "Quote requested" },
+  { value: "Besteld", label: "Ordered" },
+  { value: "Aanbetaling", label: "Deposit paid" },
+  { value: "Onderweg", label: "In transit" },
+  { value: "Geleverd", label: "Delivered" },
+  { value: "Geplaatst", label: "Installed" },
 ];
 
-const paymentStatuses = ["Niet betaald", "Aanbetaling", "Volledig betaald"];
+const paymentStatusOptions = [
+  { value: "Niet betaald", label: "Unpaid" },
+  { value: "Aanbetaling", label: "Deposit paid" },
+  { value: "Volledig betaald", label: "Paid in full" },
+];
+
+const paymentStatusLabel = (value: string) =>
+  paymentStatusOptions.find((option) => option.value === value)?.label ?? value;
 
 const standardLocations = [
   "Calderon de la Barca",
@@ -172,9 +180,9 @@ export default function FurnitureProcurementClient() {
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
   const [view, setView] = useState<"gallery" | "table">("gallery");
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("Alle categorieën");
-  const [status, setStatus] = useState("Alle statussen");
-  const [location, setLocation] = useState("Alle locaties");
+  const [category, setCategory] = useState("All categories");
+  const [status, setStatus] = useState("All statuses");
+  const [location, setLocation] = useState("All locations");
   const [lightbox, setLightbox] = useState<{ itemId: string; imageIndex: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [showForm, setShowForm] = useState(false);
@@ -200,12 +208,12 @@ export default function FurnitureProcurementClient() {
         | null;
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Meubels konden niet worden geladen.");
+        throw new Error(payload?.error || "Furniture items could not be loaded.");
       }
 
-      // Supabase is de enige bron van waarheid voor de meubellijst.
-      // Er wordt bewust geen seed/import meer gesynchroniseerd bij het laden.
-      // Daardoor blijft een verwijderd of handmatig aangepast item ook na refresh verwijderd/aangepast.
+      // Supabase is the only source of truth for the furniture list.
+      // No seed/import is synchronized when the page loads.
+      // Deleted or manually edited items therefore remain deleted/edited after refresh.
       const loadedItems = payload?.items ?? [];
 
       setItems(
@@ -216,10 +224,10 @@ export default function FurnitureProcurementClient() {
       );
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Online opslag kon niet worden geladen.";
+        error instanceof Error ? error.message : "Online storage could not be loaded.";
       setStorageError(message);
 
-      // Bij een opslagfout tonen we geen oude voorbeelddata: de pagina blijft bewust leeg.
+      // On a storage error we do not show stale sample data; the page intentionally stays empty.
       setItems([]);
     } finally {
       setLoadingItems(false);
@@ -230,7 +238,7 @@ export default function FurnitureProcurementClient() {
     const values = Array.from(
       new Set(items.map((item) => item.location.trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
-    return ["Alle locaties", ...values];
+    return ["All locations", ...values];
   }, [items]);
 
   const filtered = useMemo(() => {
@@ -243,10 +251,10 @@ export default function FurnitureProcurementClient() {
           .toLowerCase()
           .includes(query);
       const matchCategory =
-        category === "Alle categorieën" || item.category === category;
-      const matchStatus = status === "Alle statussen" || item.status === status;
+        category === "All categories" || item.category === category;
+      const matchStatus = status === "All statuses" || item.status === status;
       const matchLocation =
-        location === "Alle locaties" || item.location === location;
+        location === "All locations" || item.location === location;
       return matchSearch && matchCategory && matchStatus && matchLocation;
     });
   }, [items, search, category, status, location]);
@@ -321,7 +329,7 @@ export default function FurnitureProcurementClient() {
     if (!file) return;
 
     if (file.size > 15 * 1024 * 1024) {
-      flash("Foto is te groot. Maximaal 15 MB.");
+      flash("The image is too large. Maximum size is 15 MB.");
       event.target.value = "";
       return;
     }
@@ -347,7 +355,7 @@ export default function FurnitureProcurementClient() {
       | null;
 
     if (!response.ok || !payload?.url) {
-      throw new Error(payload?.error || "Foto kon niet online worden opgeslagen.");
+      throw new Error(payload?.error || "The image could not be saved online.");
     }
 
     return payload.url;
@@ -361,14 +369,14 @@ export default function FurnitureProcurementClient() {
     setProductImportInfo("");
 
     if (!productUrl) {
-      setProductImportError("Plak eerst een productlink.");
+      setProductImportError("Paste a product link first.");
       return;
     }
 
     try {
       new URL(productUrl);
     } catch {
-      setProductImportError("Dit lijkt geen geldige productlink.");
+      setProductImportError("This does not appear to be a valid product link.");
       return;
     }
 
@@ -386,11 +394,11 @@ export default function FurnitureProcurementClient() {
         | null;
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Productgegevens konden niet worden opgehaald.");
+        throw new Error(payload?.error || "Product information could not be retrieved.");
       }
 
       if (!payload) {
-        throw new Error("De productpagina gaf geen bruikbare gegevens terug.");
+        throw new Error("The product page did not return usable information.");
       }
 
       const foundFields = [
@@ -415,18 +423,18 @@ export default function FurnitureProcurementClient() {
 
       if (foundFields === 0) {
         setProductImportInfo(
-          "De link is bereikbaar, maar de webshop publiceert weinig productgegevens. Vul de ontbrekende velden handmatig aan."
+          "The link is accessible, but the webshop publishes limited product information. Please complete the missing fields manually."
         );
       } else {
         setProductImportInfo(
-          `Productgegevens opgehaald${payload.currency && payload.currency !== "EUR" ? ` · prijs in ${payload.currency}` : ""}. Controleer ze voor je opslaat.`
+          `Product information retrieved${payload.currency && payload.currency !== "EUR" ? ` · price in ${payload.currency}` : ""}. Please check it before saving.`
         );
       }
     } catch (error) {
       setProductImportError(
         error instanceof Error
           ? error.message
-          : "Productgegevens konden niet worden opgehaald."
+          : "Product information could not be retrieved."
       );
     } finally {
       setImportingProduct(false);
@@ -490,7 +498,7 @@ export default function FurnitureProcurementClient() {
         | null;
 
       if (!response.ok || !payload?.item) {
-        throw new Error(payload?.error || "Item kon niet worden opgeslagen.");
+        throw new Error(payload?.error || "The item could not be saved.");
       }
 
       const savedItem = {
@@ -502,10 +510,10 @@ export default function FurnitureProcurementClient() {
         setItems((current) =>
           current.map((item) => (item.id === editingId ? savedItem : item))
         );
-        flash("Item online opgeslagen");
+        flash("Item saved online");
       } else {
         setItems((current) => [savedItem, ...current]);
-        flash("Nieuw item online opgeslagen");
+        flash("New item saved online");
       }
 
       setSaveState("saved");
@@ -515,7 +523,7 @@ export default function FurnitureProcurementClient() {
       setDraft(emptyDraft());
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Opslaan is mislukt.";
+        error instanceof Error ? error.message : "Saving failed.";
       setSaveState("error");
       setStorageError(message);
       flash(message);
@@ -526,7 +534,7 @@ export default function FurnitureProcurementClient() {
     if(readOnly) return;
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
-    if (!window.confirm(`"${item.name}" verwijderen?`)) return;
+    if (!window.confirm(`Delete "${item.name}"?`)) return;
 
     try {
       const response = await fetch(`/api/furniture-items/${id}`, {
@@ -537,13 +545,13 @@ export default function FurnitureProcurementClient() {
         | null;
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Item kon niet worden verwijderd.");
+        throw new Error(payload?.error || "The item could not be deleted.");
       }
 
       setItems((current) => current.filter((entry) => entry.id !== id));
-      flash("Item verwijderd");
+      flash("Item deleted");
     } catch (error) {
-      flash(error instanceof Error ? error.message : "Verwijderen is mislukt.");
+      flash(error instanceof Error ? error.message : "Deleting failed.");
     }
   }
 
@@ -568,14 +576,14 @@ export default function FurnitureProcurementClient() {
         | null;
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Status kon niet worden opgeslagen.");
+        throw new Error(payload?.error || "The status could not be saved.");
       }
 
       setSaveState("saved");
     } catch (error) {
       setItems(previous);
       setSaveState("error");
-      flash(error instanceof Error ? error.message : "Status opslaan is mislukt.");
+      flash(error instanceof Error ? error.message : "Saving the status failed.");
     }
   }
 
@@ -593,10 +601,10 @@ export default function FurnitureProcurementClient() {
       <div className="page-wrap">
         <header className="hero">
           <div>
-            <p className="eyebrow">L3 CAPITAL · INTERNE TOOL</p>
+            <p className="eyebrow">L3 CAPITAL · INTERNAL TOOL</p>
             <h1>Furniture Procurement</h1>
             <p className="hero-copy">
-              Visueel meubeloverzicht voor selectie, aankoop, levering en plaatsing.
+              Visual furniture overview for selection, purchasing, delivery and installation.
             </p>
           </div>
           <div className="project-chip">
@@ -604,26 +612,26 @@ export default function FurnitureProcurementClient() {
             <strong>Furniture database</strong>
             <small>
               {loadingItems
-                ? "Online gegevens laden..."
+                ? "Loading online data..."
                 : storageError
-                  ? "Opslagfout · controleer melding onderaan"
+                  ? "Storage error · check the message below"
                   : saveState === "saving"
-                    ? "Opslaan..."
-                    : "Online opgeslagen ✓"}
+                    ? "Saving..."
+                    : "Saved online ✓"}
             </small>
           </div>
         </header>
 
         <section className="metric-grid">
-          <Metric label="Aankoopwaarde" value={euro(totals.purchase)} />
-          <Metric label="Normale waarde" value={euro(totals.normal)} />
+          <Metric label="Purchase value" value={euro(totals.purchase)} />
+          <Metric label="Retail value" value={euro(totals.normal)} />
           <Metric
-            label="Besparing t.o.v. normaal"
+            label="Savings vs. retail"
             value={euro(totals.savings)}
             accent
           />
           <Metric
-            label="Geleverd / geplaatst"
+            label="Delivered / installed"
             value={`${totals.delivered} / ${items.length}`}
           />
         </section>
@@ -635,7 +643,7 @@ export default function FurnitureProcurementClient() {
               <input data-portal-view-control
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Zoek meubel, locatie, leverancier..."
+                placeholder="Search furniture, location, supplier..."
               />
             </label>
 
@@ -646,9 +654,9 @@ export default function FurnitureProcurementClient() {
             </select>
 
             <select data-portal-view-control value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option>Alle statussen</option>
-              {statuses.map((entry) => (
-                <option key={entry}>{entry}</option>
+              <option>All statuses</option>
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
 
@@ -665,36 +673,36 @@ export default function FurnitureProcurementClient() {
                 className={view === "gallery" ? "active" : ""}
                 onClick={() => setView("gallery")}
               >
-                ▦ Galerij
+                ▦ Gallery
               </button>
               <button
                 className={view === "table" ? "active" : ""}
                 onClick={() => setView("table")}
               >
-                ☰ Tabel
+                ☰ Table
               </button>
             </div>
             <button data-portal-edit disabled={readOnly} className="primary-button" onClick={openNewItem}>
-              + Nieuw meubel
+              + New furniture item
             </button>
           </div>
         </section>
 
         <div className="result-line">
-          <strong>{filtered.length}</strong> items zichtbaar
+          <strong>{filtered.length}</strong> items shown
           {(search ||
-            category !== "Alle categorieën" ||
-            status !== "Alle statussen" ||
-            location !== "Alle locaties") && (
+            category !== "All categories" ||
+            status !== "All statuses" ||
+            location !== "All locations") && (
             <button
               onClick={() => {
                 setSearch("");
-                setCategory("Alle categorieën");
-                setStatus("Alle statussen");
-                setLocation("Alle locaties");
+                setCategory("All categories");
+                setStatus("All statuses");
+                setLocation("All locations");
               }}
             >
-              Filters wissen
+              Clear filters
             </button>
           )}
         </div>
@@ -711,21 +719,21 @@ export default function FurnitureProcurementClient() {
                     setLightbox({ itemId: item.id, imageIndex: 0 });
                     setZoom(1);
                   }}
-                  title={item.images[0] ? "Klik om te vergroten" : "Geen foto"}
+                  title={item.images[0] ? "Click to enlarge" : "No image"}
                 >
                   {item.images[0] ? (
                     <img src={item.images[0]} alt={item.name} />
                   ) : (
                     <div className="image-placeholder">
-                      <span>Geen foto</span>
-                      <small>Voeg een productfoto toe</small>
+                      <span>No image</span>
+                      <small>Add a product image</small>
                     </div>
                   )}
                   {item.images.length > 0 && (
-                    <div className="zoom-hint">⌕ Vergroten</div>
+                    <div className="zoom-hint">⌕ Enlarge</div>
                   )}
                   {item.images.length > 1 && (
-                    <div className="photo-count">{item.images.length} foto&apos;s</div>
+                    <div className="photo-count">{item.images.length} images</div>
                   )}
                 </button>
 
@@ -736,32 +744,32 @@ export default function FurnitureProcurementClient() {
                   </div>
                   <h2>{item.name}</h2>
                   <p className="location">
-                    {item.location ? `⌖ ${item.location}` : "Locatie nog niet ingevuld"}
+                    {item.location ? `⌖ ${item.location}` : "Location not entered yet"}
                   </p>
                   <div className="item-detail-grid">
                     <div className="item-detail">
-                      <span>Komt te staan</span>
-                      <strong>{item.placementLocation || "Nog niet ingevuld"}</strong>
+                      <span>Placement location</span>
+                      <strong>{item.placementLocation || "Not entered yet"}</strong>
                     </div>
                     <div className="item-detail">
-                      <span>Afmetingen</span>
-                      <strong>{item.dimensions || "Nog niet ingevuld"}</strong>
+                      <span>Dimensions</span>
+                      <strong>{item.dimensions || "Not entered yet"}</strong>
                     </div>
                   </div>
 
                   <div className="price-grid">
                     <div>
-                      <span>Aankoop</span>
+                      <span>Purchase</span>
                       <strong>{euro(item.purchasePrice)}</strong>
                     </div>
                     <div>
-                      <span>Normale waarde</span>
+                      <span>Retail value</span>
                       <strong>{euro(item.normalPrice)}</strong>
                     </div>
                   </div>
 
                   <div className="discount-row">
-                    <span>Korting</span>
+                    <span>Discount</span>
                     <strong>
                       {formatPercentage(
                         discountPercentage(item.purchasePrice, item.normalPrice)
@@ -776,19 +784,19 @@ export default function FurnitureProcurementClient() {
                         updateQuickStatus(item.id, event.target.value)
                       }
                     >
-                      {statuses.map((entry) => (
-                        <option key={entry}>{entry}</option>
+                      {statusOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
                     <span className={`payment payment-${item.paymentStatus.replace(/\s/g, "-").toLowerCase()}`}>
-                      {item.paymentStatus}
+                      {paymentStatusLabel(item.paymentStatus)}
                     </span>
                   </div>
 
                   <div className="card-footer">
-                    <button data-portal-edit disabled={readOnly} onClick={() => openEdit(item)}>Bewerken</button>
+                    <button data-portal-edit disabled={readOnly} onClick={() => openEdit(item)}>Edit</button>
                     <button data-portal-edit disabled={readOnly} className="danger-link" onClick={() => removeItem(item.id)}>
-                      Verwijderen
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -801,17 +809,17 @@ export default function FurnitureProcurementClient() {
               <table>
                 <thead>
                   <tr>
-                    <th>Foto</th>
+                    <th>Image</th>
                     <th>Item</th>
-                    <th>Categorie</th>
-                    <th>Huidige locatie</th>
-                    <th>Komt te staan</th>
-                    <th>Afmetingen</th>
-                    <th>Aantal</th>
-                    <th>Aankoop</th>
-                    <th>Normale waarde</th>
+                    <th>Category</th>
+                    <th>Current location</th>
+                    <th>Placement location</th>
+                    <th>Dimensions</th>
+                    <th>Quantity</th>
+                    <th>Purchase</th>
+                    <th>Retail value</th>
                     <th>Status</th>
-                    <th>Betaling</th>
+                    <th>Payment</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -854,15 +862,15 @@ export default function FurnitureProcurementClient() {
                             updateQuickStatus(item.id, event.target.value)
                           }
                         >
-                          {statuses.map((entry) => (
-                            <option key={entry}>{entry}</option>
+                          {statusOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
                         </select>
                       </td>
-                      <td>{item.paymentStatus}</td>
+                      <td>{paymentStatusLabel(item.paymentStatus)}</td>
                       <td>
                         <button data-portal-edit disabled={readOnly} className="text-button" onClick={() => openEdit(item)}>
-                          Bewerk
+                          Edit
                         </button>
                       </td>
                     </tr>
@@ -874,11 +882,11 @@ export default function FurnitureProcurementClient() {
         )}
 
         <section className={`prototype-note ${storageError ? "storage-error" : ""}`}>
-          <strong>{storageError ? "Online opslag heeft aandacht nodig" : "Online opslag actief"}</strong>
+          <strong>{storageError ? "Online storage requires attention" : "Online storage active"}</strong>
           <p>
             {storageError
               ? storageError
-              : "Items, wijzigingen en geüploade foto's worden in Supabase opgeslagen en blijven na verversen beschikbaar. De koppeling met actuele projecten kan later worden toegevoegd."}
+              : "Items, changes and uploaded images are stored in Supabase and remain available after refreshing. Integration with active projects can be added later."}
           </p>
         </section>
       </div>
@@ -892,8 +900,8 @@ export default function FurnitureProcurementClient() {
           >
             <div className="modal-head">
               <div>
-                <p className="eyebrow">{editingId ? "ITEM BEWERKEN" : "NIEUW ITEM"}</p>
-                <h2>{editingId ? "Meubel aanpassen" : "Meubel toevoegen"}</h2>
+                <p className="eyebrow">{editingId ? "EDIT ITEM" : "NEW ITEM"}</p>
+                <h2>{editingId ? "Edit furniture item" : "Add furniture item"}</h2>
               </div>
               <button type="button" className="close-button" onClick={() => setShowForm(false)}>
                 ×
@@ -902,36 +910,36 @@ export default function FurnitureProcurementClient() {
 
             <div className="form-grid">
               <label className="wide">
-                <span>Product / omschrijving</span>
+                <span>Product / description</span>
                 <input
                   required
                   value={draft.name}
                   onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                  placeholder="Bijv. Minotti sofa"
+                  placeholder="e.g. Minotti sofa"
                 />
               </label>
 
               <label>
-                <span>Categorie</span>
+                <span>Category</span>
                 <select
                   value={draft.category}
                   onChange={(event) => setDraft({ ...draft, category: event.target.value })}
                 >
-                  {categories.filter((entry) => entry !== "Alle categorieën").map((entry) => (
+                  {categories.filter((entry) => entry !== "All categories").map((entry) => (
                     <option key={entry}>{entry}</option>
                   ))}
                 </select>
               </label>
 
               <label>
-                <span>Huidige locatie</span>
+                <span>Current location</span>
                 <select
                   value={draft.location}
                   onChange={(event) =>
                     setDraft({ ...draft, location: event.target.value })
                   }
                 >
-                  <option value="">Kies locatie</option>
+                  <option value="">Select location</option>
                   {standardLocations.map((entry) => (
                     <option key={entry} value={entry}>
                       {entry}
@@ -941,29 +949,29 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Locatie waar het komt te staan</span>
+                <span>Placement location</span>
                 <input
                   value={draft.placementLocation}
                   onChange={(event) =>
                     setDraft({ ...draft, placementLocation: event.target.value })
                   }
-                  placeholder="Bijv. Woonkamer, master bedroom, terras"
+                  placeholder="e.g. Living room, master bedroom, terrace"
                 />
               </label>
 
               <label>
-                <span>Afmetingen</span>
+                <span>Dimensions</span>
                 <input
                   value={draft.dimensions}
                   onChange={(event) =>
                     setDraft({ ...draft, dimensions: event.target.value })
                   }
-                  placeholder="Bijv. 280 × 110 × 75 cm"
+                  placeholder="e.g. 280 × 110 × 75 cm"
                 />
               </label>
 
               <label>
-                <span>Aankoopbedrag (totaal)</span>
+                <span>Purchase price (total)</span>
                 <input
                   value={draft.purchasePrice}
                   onChange={(event) =>
@@ -975,7 +983,7 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Normale waarde (totaal)</span>
+                <span>Retail value (total)</span>
                 <input
                   value={draft.normalPrice}
                   onChange={(event) =>
@@ -987,7 +995,7 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Aantal (informatief)</span>
+                <span>Quantity (informational)</span>
                 <input
                   value={draft.quantity}
                   onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
@@ -996,11 +1004,11 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label>
-                <span>Leverancier</span>
+                <span>Supplier</span>
                 <input
                   value={draft.supplier}
                   onChange={(event) => setDraft({ ...draft, supplier: event.target.value })}
-                  placeholder="Leverancier"
+                  placeholder="Supplier"
                 />
               </label>
 
@@ -1010,28 +1018,28 @@ export default function FurnitureProcurementClient() {
                   value={draft.status}
                   onChange={(event) => setDraft({ ...draft, status: event.target.value })}
                 >
-                  {statuses.map((entry) => (
-                    <option key={entry}>{entry}</option>
+                  {statusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </label>
 
               <label>
-                <span>Betaalstatus</span>
+                <span>Payment status</span>
                 <select
                   value={draft.paymentStatus}
                   onChange={(event) =>
                     setDraft({ ...draft, paymentStatus: event.target.value })
                   }
                 >
-                  {paymentStatuses.map((entry) => (
-                    <option key={entry}>{entry}</option>
+                  {paymentStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </label>
 
               <label className="wide product-import-field">
-                <span>Productlink</span>
+                <span>Product link</span>
                 <div className="product-import-row">
                   <input
                     value={draft.productUrl}
@@ -1048,11 +1056,11 @@ export default function FurnitureProcurementClient() {
                     onClick={importProductFromUrl}
                     disabled={importingProduct}
                   >
-                    {importingProduct ? "Ophalen..." : "Productgegevens ophalen"}
+                    {importingProduct ? "Retrieving..." : "Retrieve product information"}
                   </button>
                 </div>
                 <small className="field-help">
-                  We proberen automatisch naam, leverancier, normale prijs, omschrijving en productfoto in te vullen.
+                  We try to automatically fill in the name, supplier, retail price, description and product image.
                 </small>
                 {productImportError && (
                   <small className="import-message error">{productImportError}</small>
@@ -1063,35 +1071,35 @@ export default function FurnitureProcurementClient() {
               </label>
 
               <label className="wide">
-                <span>Productfoto</span>
+                <span>Product image</span>
                 <input type="file" accept="image/*" onChange={handleImageUpload} />
-                <small className="field-help">De foto wordt online opgeslagen zodra je het item opslaat.</small>
+                <small className="field-help">The image will be stored online when you save the item.</small>
                 {draft.imagePreview && (
-                  <img className="form-preview" src={draft.imagePreview} alt="Voorbeeld" />
+                  <img className="form-preview" src={draft.imagePreview} alt="Preview" />
                 )}
               </label>
 
               <label className="wide">
-                <span>Opmerkingen</span>
+                <span>Notes</span>
                 <textarea
                   rows={3}
                   value={draft.notes}
                   onChange={(event) => setDraft({ ...draft, notes: event.target.value })}
-                  placeholder="Afmetingen, kleur, afspraken, bijzonderheden..."
+                  placeholder="Dimensions, colour, agreements, special details..."
                 />
               </label>
             </div>
 
             <div className="modal-actions">
               <button type="button" className="secondary-button" onClick={() => setShowForm(false)}>
-                Annuleren
+                Cancel
               </button>
               <button className="primary-button" type="submit" disabled={saveState === "saving"}>
                 {saveState === "saving"
-                  ? "Opslaan..."
+                  ? "Saving..."
                   : editingId
-                    ? "Wijzigingen opslaan"
-                    : "Item toevoegen"}
+                    ? "Save changes"
+                    : "Add item"}
               </button>
             </div>
           </form>
@@ -1151,7 +1159,7 @@ export default function FurnitureProcurementClient() {
             <button onClick={() => setZoom(1)}>Reset</button>
             {activeLightboxItem.images.length > 1 && (
               <span>
-                Foto {lightbox.imageIndex + 1} / {activeLightboxItem.images.length}
+                Image {lightbox.imageIndex + 1} / {activeLightboxItem.images.length}
               </span>
             )}
           </div>
