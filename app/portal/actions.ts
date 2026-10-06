@@ -28,7 +28,7 @@ export async function manage(_:Result,form:FormData):Promise<Result> {
  const kind=value(form,"kind");
  if(!["create","save","password","delete"].includes(kind)) return {error:"Onbekende actie."};
  if(kind==="delete" && value(form,"confirmation")!=="VERWIJDEREN") return {error:"Typ VERWIJDEREN om dit account te verwijderen."};
- try {await mutateUser(actor.id,{kind:kind as "create"|"save"|"password"|"delete",id:value(form,"id"),version:Number(value(form,"version")),name:value(form,"name"),email:value(form,"email").trim().toLowerCase(),role:value(form,"role"),active:form.get("active")==="on",permissions:form.getAll("permissions").map(String),password:value(form,"password")});}
+ try {await mutateUser(actor.id,{kind:kind as "create"|"save"|"password"|"delete",id:value(form,"id"),version:Number(value(form,"version")),name:value(form,"name"),email:value(form,"email").trim().toLowerCase(),role:value(form,"role"),active:form.get("active")==="on",permissions:form.getAll("permissions").map(String),teamOverview:form.get("teamOverview")==="on",password:value(form,"password")});}
  catch(error) {return {error:error instanceof PortalError ? error.message : "Opslaan is niet gelukt. Vernieuw de pagina en probeer opnieuw."};}
  revalidatePath("/beheer");revalidatePath("/portal");return {success:kind==="create" ? "Gebruiker aangemaakt." : kind==="delete" ? "Gebruiker verwijderd." : "Wijzigingen opgeslagen. De gebruiker moet opnieuw inloggen."};
 }

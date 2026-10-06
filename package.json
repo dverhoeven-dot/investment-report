@@ -10,7 +10,9 @@
     "portal:init": "node --env-file=.env.local --import tsx scripts/portal-init.ts",
     "test:portal": "node --import tsx tests/portal.test.ts",
     "test:gegevens": "node --conditions=react-server --import tsx tests/data-permissions.test.ts",
-    "portal:setup": "node --import tsx scripts/portal-setup.ts"
+    "portal:setup": "node --import tsx scripts/portal-setup.ts",
+    "test:taken": "node --conditions=react-server --import tsx tests/tasks.test.ts",
+    "test:office": "node --conditions=react-server --import tsx tests/office.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

@@ -20,7 +20,7 @@ export async function consumeLimit(key:string,max=10,window=15*60*1000) {
  const result=await db().execute({sql:`INSERT INTO portal_limits(key,count,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN expires<=? THEN 1 ELSE count+1 END, expires=CASE WHEN expires<=? THEN excluded.expires ELSE expires END RETURNING count`,args:[key,now+window,now,now]});
  return Number(result.rows[0].count)<=max;
 }
-export type Mutation={kind:"create"|"save"|"password"|"delete";id:string;version:number;name:string;email:string;role:string;active:boolean;permissions:string[];password:string};
+export type Mutation={kind:"create"|"save"|"password"|"delete";id:string;version:number;name:string;email:string;role:string;active:boolean;permissions:string[];password:string;teamOverview?:boolean};
 export async function mutateUser(actorId:string,input:Mutation) {
  const tx=await db().transaction("write");
  try {
@@ -44,7 +44,7 @@ export async function mutateUser(actorId:string,input:Mutation) {
  let passwordHash="";
  if(input.kind==="create" || input.kind==="password") {const error=passwordError(input.password);if(error) throw new PortalError(error);passwordHash=await hashPassword(input.password);}
  const id=input.kind==="create" ? randomUUID() : input.id;
- const permissions=JSON.stringify(input.role==="employee" ? [] : [...new Set(input.permissions)]);
+ const permissions=JSON.stringify(input.role==="employee" ? (input.teamOverview?["__task_team__"]:[]) : [...new Set(input.permissions)]);
  if(input.kind==="create") await tx.execute({sql:"INSERT INTO portal_users(id,name,email,password_hash,role,permissions) VALUES (?,?,?,?,?,?)",args:[id,input.name.trim(),input.email,passwordHash,input.role,permissions]});
  if(input.kind==="save") await tx.execute({sql:"UPDATE portal_users SET name=?,email=?,role=?,active=?,permissions=?,version=version+1 WHERE id=?",args:[input.name.trim(),input.email,input.role,input.active?1:0,permissions,id]});
  if(input.kind==="password") await tx.execute({sql:"UPDATE portal_users SET password_hash=?,version=version+1 WHERE id=?",args:[passwordHash,id]});

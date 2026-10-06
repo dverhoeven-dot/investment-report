@@ -24,6 +24,8 @@ export function pathPermission(path:string):string|null {
 export function canVisit(user:User,path:string,method="GET") {
  if(!user.active) return false;
  if(["/","/portal","/geen-toegang"].includes(path)) return true;
+ if(["/klanten","/pipeline","/projecten","/api/office-files"].some(base=>path===base||path.startsWith(base+"/")))return user.role==="employee";
+ if(path==="/taken"||path.startsWith("/taken/")||path==="/api/task-files"||path.startsWith("/api/task-files/"))return user.role==="employee";
  if(path==="/beheer" || path.startsWith("/beheer/")) return user.role==="employee";
  if(user.role==="employee") return true;
  if(path.startsWith("/api/") && !["GET","HEAD"].includes(method)) return false;

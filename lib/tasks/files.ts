@@ -1,0 +1,9 @@
+import "server-only";
+import {randomUUID} from "node:crypto";
+import {db} from "../portal/db";
+import type {User} from "../portal/permissions";
+import {employee} from "./store";
+export function fileMime(bytes:Uint8Array){const b=Buffer.from(bytes);if(b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return "image/png";if(b[0]===255&&b[1]===216&&b[2]===255)return "image/jpeg";if(b.subarray(0,4).toString()==="RIFF"&&b.subarray(8,12).toString()==="WEBP")return "image/webp";if(b.subarray(0,5).toString()==="%PDF-")return "application/pdf";return null;}
+export async function putFile(actor:User,taskId:string,file:File){await employee(actor);if(!file.size||file.size>3*1024*1024)throw new Error("Maximaal 3 MB per bijlage.");const bytes=new Uint8Array(await file.arrayBuffer());const mime=fileMime(bytes);if(!mime)throw new Error("Gebruik een PNG, JPEG, WebP of PDF.");const name=file.name.replace(/[\x00-\x1f\x7f/\\]/g,"_").slice(0,180)||"bijlage";const tx=await db().transaction("write");try{if(!(await tx.execute({sql:"SELECT id FROM tasks WHERE id=?",args:[taskId]})).rows.length)throw new Error("Taak niet gevonden.");const count=(await tx.execute({sql:"SELECT COUNT(*) AS n FROM task_files WHERE task_id=?",args:[taskId]})).rows[0];if(Number(count.n)>=10)throw new Error("Maximaal 10 bijlagen per taak.");await tx.execute({sql:"INSERT INTO task_files(id,task_id,name,mime,size,data,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)",args:[randomUUID(),taskId,name,mime,file.size,bytes,actor.id,new Date().toISOString()]});await tx.commit();}finally{tx.close();}}
+export async function getFile(actor:User,id:string){await employee(actor);return (await db().execute({sql:"SELECT name,mime,data FROM task_files WHERE id=?",args:[id]})).rows[0]??null;}
+export async function deleteFile(actor:User,id:string){await employee(actor);await db().execute({sql:"DELETE FROM task_files WHERE id=?",args:[id]});}

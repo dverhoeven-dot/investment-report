@@ -1,3 +1,4 @@
+import {PORTFOLIO_OPTIONS,getPortfolioId,type PortfolioId} from "./portfolio-groups";
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import "server-only";
 
@@ -282,41 +283,6 @@ const SOLD_FEATURED_PROJECT_RULES: Record<SoldCategoryId, RegExp[]> = {
     /horsterweg 31/,
   ],
 };
-
-type PortfolioId =
-  | "joint-private-real-estate"
-  | "leeuw-vastgoed"
-  | "l3-capital"
-  | "llpi-leovari"
-  | "d-leeuw-private-real-estate"
-  | "d-leeuw-private-real-estate-spain";
-
-const PORTFOLIO_OPTIONS: Array<{ id: PortfolioId; label: string }> = [
-  {
-    id: "joint-private-real-estate",
-    label: "D. Leeuw e/o F. Berden Private Real Estate",
-  },
-  {
-    id: "leeuw-vastgoed",
-    label: "Leeuw Vastgoed B.V. (100%)",
-  },
-  {
-    id: "l3-capital",
-    label: "L3 Capital B.V. (100%)",
-  },
-  {
-    id: "llpi-leovari",
-    label: "LLPI S.L. / Leovari developments",
-  },
-  {
-    id: "d-leeuw-private-real-estate",
-    label: "D. Leeuw Private Real Estate",
-  },
-  {
-    id: "d-leeuw-private-real-estate-spain",
-    label: "D. Leeuw Private Real Estate Spain",
-  },
-];
 
 const currencyFormatter = new Intl.NumberFormat("nl-NL", {
   style: "currency",
@@ -832,34 +798,6 @@ async function loadPortfolioPhoto(assetKey: string): Promise<Blob | null> {
 
   database.close();
   return result;
-}
-
-function getPortfolioId(value: string): PortfolioId | null {
-  const text = normalizeText(value);
-
-  if (text.includes("f berden") || text.includes("private real estate 50")) {
-    return "joint-private-real-estate";
-  }
-
-  if (text.includes("leeuw vastgoed")) return "leeuw-vastgoed";
-  if (text.includes("l3 capital")) return "l3-capital";
-
-  if (text.includes("llpi") || text.includes("leovari")) {
-    return "llpi-leovari";
-  }
-
-  if (
-    text.includes("d leeuw private real estate spain") ||
-    text.includes("d leeuw private real estate spanje")
-  ) {
-    return "d-leeuw-private-real-estate-spain";
-  }
-
-  if (text.includes("d leeuw private real estate")) {
-    return "d-leeuw-private-real-estate";
-  }
-
-  return null;
 }
 
 function matchesPortfolioSelection(

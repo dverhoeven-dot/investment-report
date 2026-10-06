@@ -1,0 +1,11 @@
+"use client";
+import {useState} from "react";
+import Link from "next/link";
+import {PORTFOLIO_OPTIONS,getPortfolioId} from "@/lib/portal/portfolio-groups";
+import type {taskData} from "@/lib/tasks/store";
+import {visibleProjects} from "@/lib/tasks/types";
+export default function ProjectsClient({data,warning}:{data:Awaited<ReturnType<typeof taskData>>;warning:string}){
+ const [search,setSearch]=useState(''),[entity,setEntity]=useState('');
+ const projects=visibleProjects(data.projects).filter(p=>(!entity||(entity==='manual'?p.source!=='portfolio':p.source==='portfolio'&&(getPortfolioId(p.entity??'')??'other')===entity))&&[p.name,p.address,p.country].some(v=>v.toLowerCase().includes(search.toLowerCase())));
+ return <><p className="office-eyebrow">Nederland · Spanje · Interne projecten</p><div className="office-heading"><h1>Projecten.</h1><Link href="/taken">Projecten beheren →</Link></div><p>Je geselecteerde portefeuilleprojecten en zelf toegevoegde werkzaamheden.</p>{warning&&<p role="status">{warning}</p>}<div className="office-filters"><label>BV<select value={entity} onChange={e=>setEntity(e.target.value)}><option value="">Alle BV’s en overige projecten</option>{PORTFOLIO_OPTIONS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}<option value="manual">Marketing, Algemeen en eigen projecten</option><option value="other">Overige portefeuilleprojecten</option></select></label><label>Zoeken<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Naam, land of adres"/></label></div><section className="office-card office-table"><table><thead><tr><th>Project</th><th>Locatie</th><th>Status</th><th>Open taken</th></tr></thead><tbody>{projects.map(p=><tr key={p.id}><td><Link href={'/taken?project='+p.id}><strong>{p.name}</strong></Link>{p.description&&<span className="office-small office-block">{p.description}</span>}</td><td>{[p.country,p.address].filter(Boolean).join(' · ')||'—'}</td><td>{p.status||'—'}</td><td><Link href={'/taken?project='+p.id}>{data.tasks.filter(t=>t.projectId===p.id&&t.status!=='Klaar').length} →</Link></td></tr>)}</tbody></table>{!projects.length&&<p>Geen projecten voor deze selectie. Pas je filter of projectselectie aan bij Taken → Projecten beheren.</p>}</section></>;
+}

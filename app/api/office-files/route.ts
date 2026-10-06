@@ -1,0 +1,3 @@
+import {authorizeApi} from "@/lib/portal/api";
+import {uploadDocument} from "@/lib/office/files";
+export async function POST(request:Request){const access=await authorizeApi("__office__",true,request);if(access.response)return access.response;if(Number(request.headers.get("content-length"))>3*1024*1024+65536)return Response.json({error:"Maximaal 3 MB per document."},{status:413});try{const form=await request.formData();const file=form.get("file");if(!(file instanceof File))throw new Error("Kies een bestand.");await uploadDocument(access.user!,String(form.get("clientId")??""),file);return Response.json({success:true});}catch(error){return Response.json({error:error instanceof Error?error.message:"Upload mislukt."},{status:400});}}
