@@ -177,6 +177,7 @@ export default function FurnitureProcurementClient() {
   const [propertyName,setPropertyName]=useState("");
   const [showPropertyForm,setShowPropertyForm]=useState(false);
   const [propertyBusy,setPropertyBusy]=useState(false);
+  const [assigning,setAssigning]=useState<string[]>([]);
   const [propertyError,setPropertyError]=useState("");
   const [items, setItems] = useState<FurnitureItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
@@ -566,6 +567,19 @@ export default function FurnitureProcurementClient() {
     }
   }
 
+  async function assignProperty(id:string,nextProperty:string){
+    if(readOnly||assigning.includes(id))return;
+    setAssigning(current=>[...current,id]);
+    try{
+      const response=await fetch(`/api/furniture-items/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({placementLocation:nextProperty})});
+      const payload=await response.json().catch(()=>null);
+      if(!response.ok||!payload?.item)throw new Error(payload?.error||"The property assignment could not be saved.");
+      setItems(current=>current.map(item=>item.id===id?{...item,placementLocation:payload.item.placementLocation??nextProperty}:item));
+      flash(nextProperty?"Property assignment saved.":"Property assignment removed.");
+    }catch(error){flash(error instanceof Error?error.message:"The property assignment could not be saved. Please try again.");}
+    finally{setAssigning(current=>current.filter(value=>value!==id));}
+  }
+
   async function updateQuickStatus(id: string, nextStatus: string) {
     if(readOnly) return;
     const previous = items;
@@ -763,7 +777,17 @@ export default function FurnitureProcurementClient() {
                   <div className="item-detail-grid">
                     <div className="item-detail">
                       <span>Placement location</span>
-                      <strong>{item.placementLocation || "Not entered yet"}</strong>
+                      <select
+                        aria-label={"Placement location for "+item.name}
+                        value={item.placementLocation||""}
+                        disabled={readOnly||assigning.includes(item.id)}
+                        onChange={event=>void assignProperty(item.id,event.target.value)}
+                        style={{width:"100%",minWidth:0,padding:"7px 5px",border:"1px solid #d4cbbd",borderRadius:6,background:"white",fontSize:11}}
+                      >
+                        <option value="">Not assigned</option>
+                        {Array.from(new Set([...locations.filter(entry=>entry!=="All locations"),item.placementLocation].filter(Boolean))).map(entry=><option key={entry} value={entry}>{entry}</option>)}
+                      </select>
+                      {assigning.includes(item.id)&&<small role="status">Saving…</small>}
                     </div>
                     <div className="item-detail">
                       <span>Dimensions</span>
