@@ -4,7 +4,7 @@ import FurnitureProcurementClient from "./FurnitureProcurementClient";
 
 export default async function Page() {
  const user=await requirePermission("furniture");
-  return (<ReadOnlyBoundary readOnly={user.role!=="employee"} userId={user.id}>
+  return (<ReadOnlyBoundary readOnly={false} userId={user.id}>
 <FurnitureProcurementClient />
 </ReadOnlyBoundary>);
 }
