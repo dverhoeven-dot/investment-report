@@ -1,0 +1,7 @@
+"use client";
+import {useEffect,useState} from "react";
+import type {Task,TaskActivity,TaskStep} from "@/lib/tasks/types";
+import Link from "next/link";
+import {history} from "@/app/taken/actions";
+export function TaskPipeline({task}:{task:Task;onChange?:(steps:TaskStep[],current:string,status?:string)=>void}){return <section className="task-space"><h3>Pipeline van deze taak</h3>{task.id?<Link href={'/taken/'+encodeURIComponent(task.id)+'/pipeline'}>Pipeline openen →</Link>:<p className="task-mini">Sla de nieuwe taak op. Daarna kun je direct de eigen pipeline openen.</p>}</section>;}
+export function TaskHistory({id,revision}:{id:string;revision:string}){const [items,setItems]=useState<TaskActivity[]>([]),[error,setError]=useState('');useEffect(()=>{let cancelled=false;history(id).then(data=>{if(!cancelled){setItems(data);setError('');}}).catch(()=>{if(!cancelled)setError('Geschiedenis kon niet worden geladen.');});return()=>{cancelled=true;};},[id,revision]);return <section className="task-space"><h3>Laatste handelingen</h3>{error&&<p role="alert">{error}</p>}{items.map(item=><article className="task-comment" key={item.id}><span className="task-mini">{item.actor} · {new Date(item.at).toLocaleString('nl-NL',{timeZone:'Europe/Amsterdam'})}</span><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.body}</p></article>)}{!items.length&&!error&&<p className="task-mini">Nog geen vastgelegde handelingen.</p>}</section>;}

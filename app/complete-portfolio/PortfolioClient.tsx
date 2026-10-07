@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
+import PortfolioTasks,{PortfolioTasksDirectory} from "@/components/tasks/PortfolioTasks";
 import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 
@@ -2932,6 +2933,8 @@ export default function CompletePortfolioPage() {
         />
       ) : (
         <>
+      <PortfolioTasksDirectory assets={metrics.currentAssets}/>
+
       <PageFrame>
         <ReportHeader
           number="01"
@@ -3237,6 +3240,7 @@ export default function CompletePortfolioPage() {
             title={asset.project}
             subtitle={asset.entity}
           />
+          <PortfolioTasks asset={asset}/>
 
           <div className="mt-5 grid grid-cols-[1.15fr_1fr] gap-5">
             <ProjectImage
@@ -3952,6 +3956,7 @@ function SpanishCurrentProjectPage({
           <p className="mt-3 max-w-[720px] text-[10px] text-[#65706b]">
             {asset.address || asset.entity}
           </p>
+          <PortfolioTasks asset={asset}/>
         </div>
 
         <div className="flex flex-col items-end gap-5">

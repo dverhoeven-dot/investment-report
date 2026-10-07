@@ -1,5 +1,7 @@
-export type TaskProject={id:string;name:string;country:string;address:string;status:string;description:string;source:string;archived:boolean;visible?:boolean;entity?:string};
-export type Task={id:string;title:string;description:string;projectId:string;assigneeId:string;status:string;deadline:string;version:number;checklist:{id:string;text:string;done:boolean}[]};
+export type TaskProject={id:string;name:string;country:string;address:string;status:string;description:string;source:string;archived:boolean;visible?:boolean;entity?:string;portfolioKey?:string};
+export type TaskStep={id:string;name:string;date:string;note:string};
+export type TaskActivity={id:string;body:string;actor:string;at:string};
+export type Task={id:string;title:string;description:string;projectId:string;assigneeId:string;status:string;deadline:string;version:number;createdAt?:string;updatedAt?:string;pipeline?:TaskStep[];currentStepId?:string;latestAction?:string;latestAt?:string;checklist:{id:string;text:string;done:boolean}[]};
 export type TaskMember={id:string;name:string;active:boolean};
 export type TaskComment={id:string;name:string;text:string;createdAt:string};
 export type TaskFile={id:string;name:string;size:number};
@@ -9,3 +11,5 @@ export function dateLabel(value:string){return value?new Date(value+"T12:00:00")
 export function todayAmsterdam(){return new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Amsterdam"}).format(new Date());}
 
 export function visibleProjects(projects:TaskProject[]){return projects.filter(p=>p.visible!==false&&!p.archived);}
+
+export function recentOpen(tasks:Task[],owner?:string){return tasks.filter(t=>t.status!=="Klaar"&&(!owner||t.assigneeId===owner)).sort((a,b)=>(b.latestAt||b.updatedAt||"").localeCompare(a.latestAt||a.updatedAt||"")||a.title.localeCompare(b.title));}
