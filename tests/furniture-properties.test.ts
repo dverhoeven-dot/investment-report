@@ -1,0 +1,13 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {rm} from 'node:fs/promises';
+import {db,schema} from '../lib/portal/db';
+import {furnitureProperties,addFurnitureProperty} from '../lib/furniture/properties';
+import {canVisit,type User} from '../lib/portal/permissions';
+const file=process.cwd()+'/tests/properties-'+randomUUID()+'.db';process.env.TURSO_DATABASE_URL='file:'+file;
+const actor:User={id:'external',name:'External',email:'external@example.com',role:'viewer',active:true,permissions:['furniture'],version:1};
+before(async()=>{await db().batch(schema,'write');await db().execute({sql:'INSERT INTO portal_users(id,name,email,password_hash,role,permissions) VALUES(?,?,?,?,?,?)',args:[actor.id,actor.name,actor.email,'test','viewer','["furniture"]']});});
+after(async()=>{db().close();await rm(file,{force:true});});
+test('Furniture external can save an empty property; repeated names do not duplicate it',async()=>{assert.equal(canVisit(actor,'/api/furniture-properties','POST'),true);assert.deepEqual(await furnitureProperties(actor),[]);await addFurnitureProperty(actor,'  Testpand 12  ');await addFurnitureProperty(actor,'testpand 12');assert.deepEqual(await furnitureProperties(actor),['Testpand 12']);assert.equal((await db().execute('SELECT name FROM furniture_properties')).rows.length,1);});
+test('invalid names and accounts without access are rejected',async()=>{await assert.rejects(addFurnitureProperty(actor,''));await assert.rejects(addFurnitureProperty(actor,'a'.repeat(201)));await assert.rejects(addFurnitureProperty({...actor,permissions:[]},'Niet toegestaan'));assert.equal(canVisit({...actor,permissions:[]},'/api/furniture-properties','POST'),false);await db().execute("UPDATE portal_users SET permissions='[]' WHERE id='external'");await assert.rejects(addFurnitureProperty(actor,'Verouderde toegang'),/toegang/);});

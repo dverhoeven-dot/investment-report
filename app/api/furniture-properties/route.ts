@@ -1,0 +1,4 @@
+import {authorizeApi} from "@/lib/portal/api";
+import {furnitureProperties,addFurnitureProperty} from "@/lib/furniture/properties";
+export async function GET(request:Request){const access=await authorizeApi('furniture',false,request);if(access.response)return access.response;try{return Response.json({properties:await furnitureProperties(access.user!)},{headers:{'Cache-Control':'private, no-store'}});}catch{return Response.json({error:'Panden konden niet worden opgehaald.'},{status:500});}}
+export async function POST(request:Request){const access=await authorizeApi('furniture',true,request);if(access.response)return access.response;try{const input=await request.json();return Response.json({properties:await addFurnitureProperty(access.user!,input.name)});}catch(error){return Response.json({error:error instanceof Error?error.message:'Pand opslaan mislukt.'},{status:400});}}

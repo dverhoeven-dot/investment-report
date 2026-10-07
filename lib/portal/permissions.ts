@@ -14,7 +14,7 @@ export type User = {id:string;name:string;email:string;role:"employee"|"viewer";
 export function allowed(user:User, permission:string) {return user.active && (user.role === "employee" || user.permissions.includes(permission));}
 export function canWrite(user:User,permission:string){return user.active&&(user.role==="employee"||(permission==="furniture"&&allowed(user,"furniture")));}
 export function pathPermission(path:string):string|null {
- if(/^\/api\/furniture-items(?:\/[^/]+)?$/.test(path) || path==="/api/furniture-images" || path==="/api/product-import") return "furniture";
+ if(/^\/api\/furniture-items(?:\/[^/]+)?$/.test(path) || path==="/api/furniture-images" || path==="/api/furniture-properties" || path==="/api/product-import") return "furniture";
  if(/^\/api\/rendements-projects(?:\/[^/]+)?$/.test(path)) return "returns";
  if(path==="/api/portfolio-data/complete") return "complete";
  if(path==="/api/portfolio-data/netherlands") return "netherlands";

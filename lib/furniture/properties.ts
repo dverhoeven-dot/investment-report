@@ -1,0 +1,7 @@
+import "server-only";
+import {db} from "../portal/db";
+import {canWrite,type User} from "../portal/permissions";
+let ready:Promise<unknown>|undefined;
+async function access(actor:User){if(!canWrite(actor,'furniture'))throw new Error('Geen toegang tot Furniture.');const user=(await db().execute({sql:'SELECT active,role,permissions FROM portal_users WHERE id=?',args:[actor.id]})).rows[0];if(!user||!user.active||(user.role!=='employee'&&!JSON.parse(String(user.permissions)).includes('furniture')))throw new Error('Je toegang is gewijzigd. Log opnieuw in.');await(ready??=db().execute('CREATE TABLE IF NOT EXISTS furniture_properties(name TEXT PRIMARY KEY COLLATE NOCASE,created_by TEXT NOT NULL,created_at TEXT NOT NULL)').catch(e=>{ready=undefined;throw e;}));}
+export async function furnitureProperties(actor:User){await access(actor);return(await db().execute('SELECT name FROM furniture_properties ORDER BY name COLLATE NOCASE')).rows.map(r=>String(r.name));}
+export async function addFurnitureProperty(actor:User,value:unknown){await access(actor);if(typeof value!=='string'||!value.trim()||value.trim().length>200)throw new Error('Vul een pandnaam of adres in van maximaal 200 tekens.');await db().execute({sql:'INSERT OR IGNORE INTO furniture_properties(name,created_by,created_at) VALUES(?,?,?)',args:[value.trim(),actor.id,new Date().toISOString()]});return furnitureProperties(actor);}
