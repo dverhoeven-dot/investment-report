@@ -1,3 +1,4 @@
+import PortfolioTasks from "@/components/tasks/PortfolioTasks";
 import {requirePermission} from "@/lib/portal/auth";
 import { PORTFOLIO } from "../portfolio";
 import type { ReactNode } from "react";
@@ -634,6 +635,7 @@ function ProjectDetailPage({
         <div>
           <SectionHeader number="04" label="Current Portfolio" title={name} />
           <p className="text-[11px] text-gray-600 mt-2">{project.address}</p>
+          <PortfolioTasks asset={{project:clean(project.project),address:clean(project.address),country:"Spanje"}}/>
         </div>
 
         <p className="text-[10px] text-gray-500">
