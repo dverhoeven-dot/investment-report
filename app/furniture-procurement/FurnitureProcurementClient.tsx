@@ -200,7 +200,7 @@ export default function FurnitureProcurementClient() {
 
   useEffect(() => {
     void loadItems();
-    void fetch("/api/furniture-properties",{cache:"no-store"}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setProperties(data.properties??[]);}).catch(()=>setPropertyError("Panden konden niet worden geladen. Probeer de pagina opnieuw te laden."));
+    void fetch("/api/furniture-properties",{cache:"no-store"}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error);setProperties(data.properties??[]);}).catch(()=>setPropertyError("Properties could not be loaded. Please refresh the page."));
   }, []);
 
   async function loadItems() {
@@ -296,7 +296,7 @@ export default function FurnitureProcurementClient() {
 
   async function saveProperty(event:FormEvent){
     event.preventDefault();if(readOnly||propertyBusy)return;setPropertyBusy(true);setPropertyError("");
-    try{const response=await fetch("/api/furniture-properties",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:propertyName.trim()})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Pand opslaan mislukt.");setProperties(data.properties);setLocation(data.properties.find((name:string)=>name.toLowerCase()===propertyName.trim().toLowerCase())??propertyName.trim());setShowPropertyForm(false);setPropertyName("");flash("Pand toegevoegd. Je kunt nu meubels aan dit pand koppelen.");}catch(error){setPropertyError(error instanceof Error?error.message:"Pand opslaan mislukt.");}finally{setPropertyBusy(false);}
+    try{const response=await fetch("/api/furniture-properties",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:propertyName.trim()})});const data=await response.json();if(!response.ok)throw new Error(data.error||"The property could not be saved.");setProperties(data.properties);setLocation(data.properties.find((name:string)=>name.toLowerCase()===propertyName.trim().toLowerCase())??propertyName.trim());setShowPropertyForm(false);setPropertyName("");flash("Property added. You can now link furniture to this property.");}catch(error){setPropertyError(error instanceof Error?error.message:"The property could not be saved.");}finally{setPropertyBusy(false);}
   }
 
   function openNewItem() {
@@ -693,7 +693,7 @@ export default function FurnitureProcurementClient() {
                 ☰ Table
               </button>
             </div>
-            <button data-portal-edit disabled={readOnly} className="primary-button" onClick={()=>{setShowPropertyForm(true);setPropertyError("");}}>+ Pand toevoegen</button>
+            <button data-portal-edit disabled={readOnly} className="primary-button" onClick={()=>{setShowPropertyForm(true);setPropertyError("");}}>+ Add property</button>
             <button data-portal-edit disabled={readOnly} className="primary-button" onClick={openNewItem}>
               + New furniture item
             </button>
@@ -701,7 +701,7 @@ export default function FurnitureProcurementClient() {
         </section>
 
         {propertyError&&<p role="alert">{propertyError}</p>}
-        {showPropertyForm&&<form onSubmit={saveProperty} style={{padding:20,border:"1px solid #d4cbbd",borderRadius:10,margin:"20px 0"}}><h2>Pand toevoegen</h2><label>Naam of adres van het pand<input autoFocus required maxLength={200} value={propertyName} disabled={propertyBusy} onChange={e=>setPropertyName(e.target.value)} style={{display:"block",padding:12,width:"100%",margin:"10px 0"}}/></label><p>Dit pand wordt voor iedereen met Furniture-toegang opgeslagen. Kies het bij Current location wanneer je een meubel toevoegt.</p><button className="primary-button" disabled={propertyBusy} type="submit">{propertyBusy?"Opslaan…":"Pand opslaan"}</button> <button type="button" disabled={propertyBusy} onClick={()=>setShowPropertyForm(false)}>Annuleren</button></form>}
+        {showPropertyForm&&<form onSubmit={saveProperty} style={{padding:20,border:"1px solid #d4cbbd",borderRadius:10,margin:"20px 0"}}><h2>Add property</h2><label>Property name or address<input autoFocus required maxLength={200} value={propertyName} disabled={propertyBusy} onChange={e=>setPropertyName(e.target.value)} style={{display:"block",padding:12,width:"100%",margin:"10px 0"}}/></label><p>This property is saved for everyone with Furniture access. Select it under Current location when adding a furniture item.</p><button className="primary-button" disabled={propertyBusy} type="submit">{propertyBusy?"Saving…":"Save property"}</button> <button type="button" disabled={propertyBusy} onClick={()=>setShowPropertyForm(false)}>Cancel</button></form>}
         <div className="result-line">
           <strong>{filtered.length}</strong> items shown
           {(search ||

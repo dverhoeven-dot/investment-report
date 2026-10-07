@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {rm} from 'node:fs/promises';
 import {db,schema} from '../lib/portal/db';
 import {hashPassword,verifyPassword,tokenHash} from '../lib/portal/password';
+import {SESSION_MAX_AGE_SECONDS} from '../lib/portal/session-config';
 import {mutateUser,newSession,sessionUser,consumeLimit,toUser,type Mutation} from '../lib/portal/store';
 import {canVisit,pathPermission,type User} from '../lib/portal/permissions';
 const file='/tmp/portal-'+randomUUID()+'.db';process.env.TURSO_DATABASE_URL='file:'+file;
@@ -30,7 +31,7 @@ test('viewer permissions are isolated, unknown paths denied',()=>{const user:Use
  assert.equal(canVisit(furniture,'/api/furniture-images'),true);
  assert.equal(canVisit(furniture,'/api/furniture-items/id','PATCH'),true);
  assert.equal(canVisit(furniture,'/api/product-import','POST'),true);});
-test('sessions are hashed and forged/expired tokens fail',async()=>{const token=await newSession(viewer);assert.equal((await sessionUser(token))?.id,viewer);assert.equal(await sessionUser('true'),null);assert.equal(await sessionUser('0'.repeat(64)),null);const stored=await db().execute({sql:'SELECT token_hash FROM portal_sessions WHERE user_id=?',args:[viewer]});assert.equal(stored.rows[0].token_hash,tokenHash(token));await db().execute({sql:'UPDATE portal_sessions SET expires=0 WHERE token_hash=?',args:[tokenHash(token)]});assert.equal(await sessionUser(token),null);});
+test('sessions are hashed and forged/expired tokens fail',async()=>{const started=Date.now();const token=await newSession(viewer);const expiry=Number((await db().execute({sql:"SELECT expires FROM portal_sessions WHERE token_hash=?",args:[tokenHash(token)]})).rows[0].expires);assert.equal(SESSION_MAX_AGE_SECONDS,14*24*60*60);assert.ok(expiry>=started+SESSION_MAX_AGE_SECONDS*1000&&expiry<=Date.now()+SESSION_MAX_AGE_SECONDS*1000);const clock=Date.now;try{Date.now=()=>expiry-1;assert.equal((await sessionUser(token))?.id,viewer);Date.now=()=>expiry;assert.equal(await sessionUser(token),null);}finally{Date.now=clock;}assert.equal((await sessionUser(token))?.id,viewer);assert.equal(await sessionUser('true'),null);assert.equal(await sessionUser('0'.repeat(64)),null);const stored=await db().execute({sql:'SELECT token_hash FROM portal_sessions WHERE user_id=?',args:[viewer]});assert.equal(stored.rows[0].token_hash,tokenHash(token));await db().execute({sql:'UPDATE portal_sessions SET expires=0 WHERE token_hash=?',args:[tokenHash(token)]});assert.equal(await sessionUser(token),null);});
 test('viewer cannot manage users',async()=>{await assert.rejects(mutateUser(viewer,base),/mag geen gebruikers/);});
 test('self removal, self block and self demotion are forbidden',async()=>{for(const mutation of [{kind:'delete'},{active:false},{role:'viewer'}]) await assert.rejects(mutateUser(employee,{...base,id:employee,...mutation} as Mutation),/eigen toegang/);});
 test('duplicate accounts and invalid permissions are rejected',async()=>{await assert.rejects(mutateUser(employee,{...base,kind:'create',id:'',email:employee+'@example.com'}),/bestaat al/);await assert.rejects(mutateUser(employee,{...base,kind:'create',id:'',permissions:['unknown']}),/Onbekend/);});

@@ -1,3 +1,4 @@
+import {SESSION_MAX_AGE_SECONDS} from "./session-config";
 import {randomUUID,randomBytes} from "node:crypto";
 import type {Row} from "@libsql/client";
 import {db} from "./db";
@@ -13,7 +14,7 @@ export async function sessionUser(token:string|undefined):Promise<User|null> {
 export async function newSession(id:string,expectedHash?:string) {
  const token=randomBytes(32).toString("hex");
  await db().execute({sql:"DELETE FROM portal_sessions WHERE expires<=?",args:[Date.now()]});
- const result=await db().execute({sql:"INSERT INTO portal_sessions(token_hash,user_id,expires) SELECT ?,id,? FROM portal_users WHERE id=? AND active=1 AND (? IS NULL OR password_hash=?)",args:[tokenHash(token),Date.now()+8*60*60*1000,id,expectedHash??null,expectedHash??null]}); if(result.rowsAffected!==1) throw new PortalError("Het account is gewijzigd. Log opnieuw in."); return token;
+ const result=await db().execute({sql:"INSERT INTO portal_sessions(token_hash,user_id,expires) SELECT ?,id,? FROM portal_users WHERE id=? AND active=1 AND (? IS NULL OR password_hash=?)",args:[tokenHash(token),Date.now()+SESSION_MAX_AGE_SECONDS*1000,id,expectedHash??null,expectedHash??null]}); if(result.rowsAffected!==1) throw new PortalError("Het account is gewijzigd. Log opnieuw in."); return token;
 }
 export async function consumeLimit(key:string,max=10,window=15*60*1000) {
  const now=Date.now();
