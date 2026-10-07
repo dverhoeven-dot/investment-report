@@ -964,13 +964,17 @@ export default function FurnitureProcurementClient() {
 
               <label>
                 <span>Placement location</span>
-                <input
+                <select
                   value={draft.placementLocation}
                   onChange={(event) =>
                     setDraft({ ...draft, placementLocation: event.target.value })
                   }
-                  placeholder="e.g. Living room, master bedroom, terrace"
-                />
+                >
+                  <option value="">Select property</option>
+                  {Array.from(new Set([...locations.filter(entry=>entry!=="All locations"),draft.placementLocation].filter(Boolean))).map(entry=>(
+                    <option key={entry} value={entry}>{entry}</option>
+                  ))}
+                </select>
               </label>
 
               <label>
