@@ -23,6 +23,17 @@ type Downpayment = {
   amount: string;
 };
 
+type BuildLevel = "ground" | "first" | "second" | "basement" | "roof";
+type BuildComponentType = string;
+type BuildInputMode = "simple" | "detailed";
+type BuildAreaLine = {
+  level: BuildLevel;
+  component: BuildComponentType;
+  areaM2: string;
+  costPerM2: string;
+  salePricePerM2: string;
+};
+
 type InvestorInputMode = "amount" | "percentage";
 
 type CoInvestor = {
@@ -98,9 +109,15 @@ type FormState = {
   projectOwnership: ProjectOwnership;
   coInvestorCount: string;
   coInvestors: CoInvestor[];
+  // Legacy fields stay in the saved shape for backwards compatibility.
+  // Detailed projects use buildLevels + buildAreas below.
+  buildInputMode: BuildInputMode;
+  buildRowsManual: boolean;
   surfaceM2: string;
   plotM2: string;
   durationMonths: string;
+  buildLevels: BuildLevel[];
+  buildAreas: BuildAreaLine[];
 
   purchasePrice: string;
   purchaseVatEnabled: PurchaseVatChoice;
@@ -187,6 +204,74 @@ type ProjectListStatus = "idle" | "loading" | "ready" | "error";
 const STORAGE_KEY = "l3capital.los-naranjos.first-setup.v2";
 const LEGACY_STORAGE_KEY = "l3capital.los-naranjos.first-setup.v1";
 const MAX_CO_INVESTORS = 8;
+
+const BUILD_LEVEL_OPTIONS: Array<{ value: BuildLevel; labelNl: string; labelEn: string }> = [
+  { value: "ground", labelNl: "Begane grond", labelEn: "Ground Floor" },
+  { value: "first", labelNl: "Eerste verdieping", labelEn: "First Floor" },
+  { value: "second", labelNl: "Tweede verdieping", labelEn: "Second Floor" },
+  { value: "basement", labelNl: "Kelder", labelEn: "Basement" },
+  { value: "roof", labelNl: "Dak / dakterras", labelEn: "Roof / Roof Terrace" },
+];
+
+const BUILD_COMPONENT_OPTIONS: Array<{
+  value: BuildComponentType;
+  labelNl: string;
+  labelEn: string;
+}> = [
+  { value: "built", labelNl: "Bebouwd", labelEn: "Built Area" },
+  { value: "terrace", labelNl: "Terras", labelEn: "Terrace" },
+  { value: "pool", labelNl: "Zwembad", labelEn: "Pool" },
+  { value: "garage", labelNl: "Garage", labelEn: "Garage" },
+];
+
+function getBuildLevelLabel(level: BuildLevel, language: "nl" | "en") {
+  const match = BUILD_LEVEL_OPTIONS.find((option) => option.value === level);
+  return language === "nl" ? match?.labelNl ?? level : match?.labelEn ?? level;
+}
+
+function getBuildComponentLabel(
+  component: BuildComponentType,
+  language: "nl" | "en"
+) {
+  const match = BUILD_COMPONENT_OPTIONS.find((option) => option.value === component);
+  if (match) return language === "nl" ? match.labelNl : match.labelEn;
+
+  // Vrij toegevoegde onderdelen krijgen een unieke technische sleutel in de
+  // opgeslagen data, maar tonen overal alleen de door de gebruiker gekozen naam.
+  if (component.startsWith("custom:")) {
+    const customName = component.split(":").slice(2).join(":").trim();
+    if (customName) return customName;
+  }
+
+  return component;
+}
+
+function createBuildAreaLine(
+  level: BuildLevel,
+  component: BuildComponentType,
+  areaM2 = "",
+  costPerM2 = "",
+  salePricePerM2 = ""
+): BuildAreaLine {
+  return { level, component, areaM2, costPerM2, salePricePerM2 };
+}
+
+function createBuildLevelLines(
+  level: BuildLevel,
+  legacyAreaM2 = "",
+  legacyCostPerM2 = ""
+): BuildAreaLine[] {
+  // Verdiepingen starten bewust zonder standaard onderdelen. Alleen wanneer
+  // bestaande algemene invoer wordt gemigreerd, nemen we die over als
+  // "Bebouwd" op de begane grond.
+  if (
+    level === "ground" &&
+    (legacyAreaM2.trim() !== "" || legacyCostPerM2.trim() !== "")
+  ) {
+    return [createBuildAreaLine(level, "built", legacyAreaM2, legacyCostPerM2)];
+  }
+  return [];
+}
 
 const amountFormatter = new Intl.NumberFormat("nl-NL", {
   minimumFractionDigits: 0,
@@ -304,9 +389,17 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     coInvestorCount: "1",
     coInvestors: [createInvestor(0)],
 
-    surfaceM2: "0",
+    buildInputMode: "simple",
+    buildRowsManual: true,
+    surfaceM2: String(data.surfaceM2 ?? 0),
     plotM2: "0",
     durationMonths: "0",
+    buildLevels: ["ground"],
+    buildAreas: createBuildLevelLines(
+      "ground",
+      data.surfaceM2 > 0 ? String(data.surfaceM2) : "",
+      data.buildCostPerM2 > 0 ? String(data.buildCostPerM2) : ""
+    ),
 
     purchasePrice: "0",
     purchaseVatEnabled: data.purchaseVatEnabled === "yes" ? "yes" : "no",
@@ -316,7 +409,7 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     notaryFee: "0",
     otherAcquisitionCosts: "0",
 
-    buildCostPerM2: "0",
+    buildCostPerM2: String(data.buildCostPerM2 ?? 0),
     contingencyPercentage: "0",
     fixedInterior: "0",
     looseFurniture: "0",
@@ -550,6 +643,125 @@ function normalizeStoredForm(
     bankRepaymentSchedule.push({ month: "", amount: "" });
   }
 
+  const validLevels = new Set<BuildLevel>(
+    BUILD_LEVEL_OPTIONS.map((option) => option.value)
+  );
+  const normalizedStoredBuildAreas = Array.isArray(stored.buildAreas)
+    ? stored.buildAreas
+        .filter(
+          (line): line is BuildAreaLine =>
+            Boolean(
+              line &&
+                typeof line === "object" &&
+                validLevels.has(line.level as BuildLevel) &&
+                typeof line.component === "string" &&
+                line.component.trim() !== ""
+            )
+        )
+        .map((line) => ({
+          level: line.level as BuildLevel,
+          component: String(line.component),
+          areaM2: String(line.areaM2 ?? ""),
+          costPerM2: String(line.costPerM2 ?? ""),
+          salePricePerM2: String(line.salePricePerM2 ?? ""),
+        }))
+    : [];
+
+  const storedBuildLevels = Array.isArray(stored.buildLevels)
+    ? stored.buildLevels.filter((level): level is BuildLevel =>
+        validLevels.has(level as BuildLevel)
+      )
+    : [];
+
+  // De vorige versie maakte voor iedere verdieping automatisch Bebouwd, Terras,
+  // Zwembad en Garage aan. Bij de eerste load van deze versie verwijderen we
+  // uitsluitend die lege standaardregels. Vanaf nu worden ook lege, bewust
+  // toegevoegde regels bewaard via buildRowsManual.
+  const storedRowsAreManual = stored.buildRowsManual === true;
+  const storedBuildAreas = storedRowsAreManual
+    ? normalizedStoredBuildAreas
+    : normalizedStoredBuildAreas.filter(
+        (line) =>
+          line.areaM2.trim() !== "" ||
+          line.costPerM2.trim() !== "" ||
+          line.salePricePerM2.trim() !== ""
+      );
+
+  const inferredBuildLevels = storedBuildAreas.map((line) => line.level);
+  const buildLevels = Array.from(
+    new Set<BuildLevel>(["ground", ...storedBuildLevels, ...inferredBuildLevels])
+  );
+
+  const legacySurfaceM2 = String(stored.surfaceM2 ?? base.surfaceM2 ?? "");
+  const legacyBuildCostPerM2 = String(
+    stored.buildCostPerM2 ?? base.buildCostPerM2 ?? ""
+  );
+
+  const storedMode = stored.buildInputMode;
+  const inferDetailedMode =
+    storedBuildLevels.some((level) => level !== "ground") ||
+    storedBuildAreas.some(
+      (line) =>
+        line.level !== "ground" ||
+        (line.component !== "built" &&
+          (line.areaM2.trim() !== "" ||
+            line.costPerM2.trim() !== "" ||
+            line.salePricePerM2.trim() !== ""))
+    );
+  const buildInputMode: BuildInputMode =
+    storedMode === "detailed" || storedMode === "simple"
+      ? storedMode
+      : inferDetailedMode
+        ? "detailed"
+        : "simple";
+
+  let buildAreas = [...storedBuildAreas];
+  if (
+    buildInputMode === "detailed" &&
+    buildAreas.length === 0 &&
+    (emptyIfZeroString(legacySurfaceM2) || emptyIfZeroString(legacyBuildCostPerM2))
+  ) {
+    buildAreas.push(
+      createBuildAreaLine(
+        "ground",
+        "built",
+        emptyIfZeroString(legacySurfaceM2),
+        emptyIfZeroString(legacyBuildCostPerM2)
+      )
+    );
+  }
+
+  // Oudere projecten hadden één totale verkoopprijs. Wanneer zo'n project
+  // al gespecificeerde oppervlakten heeft maar nog geen verkoopprijs per m²,
+  // verdelen we de bestaande verkoopprijs als één gewogen m²-prijs over alle
+  // ingevulde oppervlakten. Zo blijft de totale verkoopprijs exact behouden.
+  if (
+    buildInputMode === "detailed" &&
+    buildAreas.length > 0 &&
+    !buildAreas.some((line) => line.salePricePerM2.trim() !== "")
+  ) {
+    const legacySalePrice = Math.max(
+      0,
+      parseNumber(String(stored.salePrice ?? base.salePrice ?? ""))
+    );
+    const detailedSurface = buildAreas.reduce(
+      (sum, line) => sum + Math.max(0, parseNumber(line.areaM2)),
+      0
+    );
+    if (legacySalePrice > 0 && detailedSurface > 0) {
+      const migratedSalePricePerM2 = (
+        Math.round((legacySalePrice / detailedSurface) * 10000) / 10000
+      )
+        .toString()
+        .replace(".", ",");
+      buildAreas = buildAreas.map((line) =>
+        Math.max(0, parseNumber(line.areaM2)) > 0
+          ? { ...line, salePricePerM2: migratedSalePricePerM2 }
+          : line
+      );
+    }
+  }
+
   return {
     ...base,
     ...stored,
@@ -602,6 +814,10 @@ function normalizeStoredForm(
     bankRepaymentSchedule,
     coInvestorCount: String(requestedInvestorCount),
     coInvestors,
+    buildInputMode,
+    buildRowsManual: true,
+    buildLevels,
+    buildAreas,
     downpaymentCount: String(requestedDownpaymentCount),
     downpayments,
   };
@@ -1087,6 +1303,184 @@ export default function LosNaranjosClient({
     value: FormState[K]
   ) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateBuildInputMode(value: BuildInputMode) {
+    setForm((current) => {
+      if (value === "simple") {
+        const detailedSurface = current.buildAreas.reduce(
+          (sum, line) => sum + Math.max(0, parseNumber(line.areaM2)),
+          0
+        );
+        const detailedBuildCost = current.buildAreas.reduce(
+          (sum, line) =>
+            sum +
+            Math.max(0, parseNumber(line.areaM2)) *
+              Math.max(0, parseNumber(line.costPerM2)),
+          0
+        );
+        const detailedSalePrice = current.buildAreas.reduce(
+          (sum, line) =>
+            sum +
+            Math.max(0, parseNumber(line.areaM2)) *
+              Math.max(0, parseNumber(line.salePricePerM2)),
+          0
+        );
+
+        return {
+          ...current,
+          buildInputMode: value,
+          buildRowsManual: true,
+          surfaceM2: detailedSurface > 0 ? String(detailedSurface) : current.surfaceM2,
+          buildCostPerM2:
+            detailedSurface > 0
+              ? String(detailedBuildCost / detailedSurface)
+              : current.buildCostPerM2,
+          salePrice:
+            detailedSalePrice > 0 ? String(detailedSalePrice) : current.salePrice,
+        };
+      }
+
+      const buildLevels = current.buildLevels.includes("ground")
+        ? current.buildLevels
+        : (["ground", ...current.buildLevels] as BuildLevel[]);
+      let buildAreas = current.buildAreas;
+
+      // Bij de eerste overstap van algemene naar gespecificeerde invoer nemen we
+      // de bestaande waarden mee als Bebouwd op de begane grond. Daarna bepaalt
+      // de gebruiker volledig zelf welke onderdelen per verdieping aanwezig zijn.
+      if (buildAreas.length === 0) {
+        const areaM2 = emptyIfZeroString(current.surfaceM2);
+        const costPerM2 = emptyIfZeroString(current.buildCostPerM2);
+        if (areaM2 || costPerM2) {
+          buildAreas = [createBuildAreaLine("ground", "built", areaM2, costPerM2)];
+        }
+      }
+
+      if (
+        buildAreas.length > 0 &&
+        !buildAreas.some((line) => line.salePricePerM2.trim() !== "")
+      ) {
+        const totalSurface = buildAreas.reduce(
+          (sum, line) => sum + Math.max(0, parseNumber(line.areaM2)),
+          0
+        );
+        const currentSalePrice = Math.max(0, parseNumber(current.salePrice));
+        if (totalSurface > 0 && currentSalePrice > 0) {
+          const salePricePerM2 = (
+            Math.round((currentSalePrice / totalSurface) * 10000) / 10000
+          )
+            .toString()
+            .replace(".", ",");
+          buildAreas = buildAreas.map((line) =>
+            Math.max(0, parseNumber(line.areaM2)) > 0
+              ? { ...line, salePricePerM2 }
+              : line
+          );
+        }
+      }
+
+      return {
+        ...current,
+        buildInputMode: value,
+        buildRowsManual: true,
+        buildLevels,
+        buildAreas,
+      };
+    });
+  }
+
+  function updateBuildArea(
+    level: BuildLevel,
+    component: BuildComponentType,
+    field: "areaM2" | "costPerM2" | "salePricePerM2",
+    value: string
+  ) {
+    setForm((current) => ({
+      ...current,
+      buildRowsManual: true,
+      buildAreas: current.buildAreas.map((line) =>
+        line.level === level && line.component === component
+          ? { ...line, [field]: value }
+          : line
+      ),
+    }));
+  }
+
+  function addBuildComponent(level: BuildLevel, component: BuildComponentType) {
+    setForm((current) => {
+      if (
+        current.buildAreas.some(
+          (line) => line.level === level && line.component === component
+        )
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        buildRowsManual: true,
+        buildAreas: [...current.buildAreas, createBuildAreaLine(level, component)],
+      };
+    });
+  }
+
+  function addCustomBuildComponent(level: BuildLevel, name: string) {
+    const cleanName = name.trim();
+    if (!cleanName) return;
+
+    setForm((current) => {
+      const duplicate = current.buildAreas.some(
+        (line) =>
+          line.level === level &&
+          getBuildComponentLabel(line.component, "nl").localeCompare(
+            cleanName,
+            "nl",
+            { sensitivity: "accent" }
+          ) === 0
+      );
+      if (duplicate) return current;
+
+      const customComponent = `custom:${Date.now()}:${cleanName}`;
+      return {
+        ...current,
+        buildRowsManual: true,
+        buildAreas: [
+          ...current.buildAreas,
+          createBuildAreaLine(level, customComponent),
+        ],
+      };
+    });
+  }
+
+  function removeBuildComponent(level: BuildLevel, component: BuildComponentType) {
+    setForm((current) => ({
+      ...current,
+      buildRowsManual: true,
+      buildAreas: current.buildAreas.filter(
+        (line) => !(line.level === level && line.component === component)
+      ),
+    }));
+  }
+
+  function addBuildLevel(level: BuildLevel) {
+    setForm((current) => {
+      if (current.buildLevels.includes(level)) return current;
+      return {
+        ...current,
+        buildRowsManual: true,
+        buildLevels: [...current.buildLevels, level],
+      };
+    });
+  }
+
+  function removeBuildLevel(level: BuildLevel) {
+    if (level === "ground") return;
+    setForm((current) => ({
+      ...current,
+      buildRowsManual: true,
+      buildLevels: current.buildLevels.filter((item) => item !== level),
+      buildAreas: current.buildAreas.filter((line) => line.level !== level),
+    }));
   }
 
   function updateCoInvestorCount(value: string) {
@@ -1612,7 +2006,46 @@ export default function LosNaranjosClient({
     const projectType = form.projectType;
     const projectOwnership = form.projectOwnership;
     const isSharedProject = projectOwnership === "shared";
-    const surfaceM2 = Math.max(0, parseNumber(form.surfaceM2));
+    const buildInputMode = form.buildInputMode;
+    const usesDetailedBuild = buildInputMode === "detailed";
+    const detailedBuildBreakdown = form.buildAreas.map((line) => {
+      const areaM2 = Math.max(0, parseNumber(line.areaM2));
+      const costPerM2 = Math.max(0, parseNumber(line.costPerM2));
+      const salePricePerM2 = Math.max(0, parseNumber(line.salePricePerM2));
+      return {
+        ...line,
+        areaM2,
+        costPerM2,
+        salePricePerM2,
+        totalCost: areaM2 * costPerM2,
+        saleTotal: areaM2 * salePricePerM2,
+      };
+    });
+    const buildBreakdown = usesDetailedBuild ? detailedBuildBreakdown : [];
+    const simpleSurfaceM2 = Math.max(0, parseNumber(form.surfaceM2));
+    const surfaceM2 = usesDetailedBuild
+      ? buildBreakdown.reduce((sum, line) => sum + line.areaM2, 0)
+      : simpleSurfaceM2;
+    const builtSurfaceM2 = usesDetailedBuild
+      ? buildBreakdown
+          .filter((line) => line.component === "built")
+          .reduce((sum, line) => sum + line.areaM2, 0)
+      : surfaceM2;
+    const terraceSurfaceM2 = usesDetailedBuild
+      ? buildBreakdown
+          .filter((line) => line.component === "terrace")
+          .reduce((sum, line) => sum + line.areaM2, 0)
+      : 0;
+    const poolSurfaceM2 = usesDetailedBuild
+      ? buildBreakdown
+          .filter((line) => line.component === "pool")
+          .reduce((sum, line) => sum + line.areaM2, 0)
+      : 0;
+    const garageSurfaceM2 = usesDetailedBuild
+      ? buildBreakdown
+          .filter((line) => line.component === "garage")
+          .reduce((sum, line) => sum + line.areaM2, 0)
+      : 0;
     const plotM2 = Math.max(0, parseNumber(form.plotM2));
     const durationMonths = Math.max(1, Math.round(parseNumber(form.durationMonths)));
     const bankFinancingEnabled = form.bankFinancingEnabled === "yes";
@@ -1753,7 +2186,15 @@ export default function LosNaranjosClient({
       notaryFee +
       otherAcquisitionCosts;
 
-    const buildCostPerM2 = Math.max(0, parseNumber(form.buildCostPerM2));
+    const simpleBuildCostPerM2 = Math.max(0, parseNumber(form.buildCostPerM2));
+    const baseBuildCost = usesDetailedBuild
+      ? buildBreakdown.reduce((sum, line) => sum + line.totalCost, 0)
+      : surfaceM2 * simpleBuildCostPerM2;
+    const buildCostPerM2 = usesDetailedBuild
+      ? surfaceM2 > 0
+        ? baseBuildCost / surfaceM2
+        : 0
+      : simpleBuildCostPerM2;
     const contingencyPercentage = Math.max(
       0,
       parsePercent(form.contingencyPercentage)
@@ -1768,7 +2209,6 @@ export default function LosNaranjosClient({
       ? Math.max(0, parsePercent(form.projectManagementPercentage))
       : 0;
 
-    const baseBuildCost = surfaceM2 * buildCostPerM2;
     const contingency = baseBuildCost * contingencyPercentage;
     // De meubelopslag geldt uitsluitend voor Furniture en is geen bouwbetaling.
     // De opslag wordt daarom niet in de projectkosten of construction draws opgenomen,
@@ -1803,7 +2243,10 @@ export default function LosNaranjosClient({
           : investor.enteredAmount;
     });
 
-    const salePrice = Math.max(0, parseNumber(form.salePrice));
+    const salePrice = usesDetailedBuild
+      ? buildBreakdown.reduce((sum, line) => sum + line.saleTotal, 0)
+      : Math.max(0, parseNumber(form.salePrice));
+    const averageSalePricePerM2 = surfaceM2 > 0 ? salePrice / surfaceM2 : 0;
     const agentCommissionPercentage = Math.max(
       0,
       parsePercent(form.agentCommissionPercentage)
@@ -2417,7 +2860,13 @@ export default function LosNaranjosClient({
       partnerRoi,
       ourIrr,
       partnerIrr,
+      buildInputMode,
       surfaceM2,
+      builtSurfaceM2,
+      terraceSurfaceM2,
+      poolSurfaceM2,
+      garageSurfaceM2,
+      buildBreakdown,
       plotM2,
       durationMonths,
       purchasePrice,
@@ -2472,6 +2921,7 @@ export default function LosNaranjosClient({
       totalProjectCost,
       capitalDeployed,
       salePrice,
+      averageSalePricePerM2,
       agentCommissionPercentage,
       agentCommission,
       saleLawyerFeePercentage,
@@ -2602,8 +3052,16 @@ export default function LosNaranjosClient({
     ? investorPrintPages.length
     : 0;
   const sharedFinancingPageNumber = data.isSharedProject ? 2 : 0;
-  const exitPageNumber = 2 + sharedFinancingPageCount;
-  const cashOverviewPageNumber = 3 + sharedFinancingPageCount;
+  const buildSpecificationPageCount =
+    data.buildInputMode === "detailed" ? 1 : 0;
+  const buildSpecificationPageNumber =
+    data.buildInputMode === "detailed"
+      ? 2 + sharedFinancingPageCount
+      : 0;
+  const exitPageNumber =
+    2 + sharedFinancingPageCount + buildSpecificationPageCount;
+  const cashOverviewPageNumber =
+    3 + sharedFinancingPageCount + buildSpecificationPageCount;
   const cashDetailStartPageNumber = cashOverviewPageNumber + 1;
   const printedCashflowPageCount = data.isSharedProject
     ? cashflowPageCount * investorPrintGroups.length
@@ -2845,9 +3303,25 @@ export default function LosNaranjosClient({
     );
   }
 
-  const exitSectionNumber = data.isSharedProject ? "03" : "02";
-  const cashSectionNumber = data.isSharedProject ? "04" : "03";
-  const sensitivitySectionNumber = data.isSharedProject ? "05" : "04";
+  const hasBuildSpecification = data.buildInputMode === "detailed";
+  const buildSpecificationSectionNumber = String(
+    2 + (data.isSharedProject ? 1 : 0)
+  ).padStart(2, "0");
+  const exitSectionNumber = String(
+    2 +
+      (data.isSharedProject ? 1 : 0) +
+      (hasBuildSpecification ? 1 : 0)
+  ).padStart(2, "0");
+  const cashSectionNumber = String(
+    3 +
+      (data.isSharedProject ? 1 : 0) +
+      (hasBuildSpecification ? 1 : 0)
+  ).padStart(2, "0");
+  const sensitivitySectionNumber = String(
+    4 +
+      (data.isSharedProject ? 1 : 0) +
+      (hasBuildSpecification ? 1 : 0)
+  ).padStart(2, "0");
 
   return (
     <main className="screen">
@@ -2991,11 +3465,22 @@ export default function LosNaranjosClient({
               updateField("projectType", value as ProjectType)
             }
           />
-          <InputField
-            label="Oppervlakte m²"
-            value={form.surfaceM2}
-            onChange={(value) => updateField("surfaceM2", value)}
+          <SelectField
+            label="Oppervlakte & bouwkosten"
+            value={form.buildInputMode}
+            options={[
+              { value: "simple", label: "Algemeen" },
+              { value: "detailed", label: "Specificeren" },
+            ]}
+            onChange={(value) => updateBuildInputMode(value as BuildInputMode)}
           />
+          {form.buildInputMode === "simple" && (
+            <InputField
+              label="Oppervlakte m²"
+              value={form.surfaceM2}
+              onChange={(value) => updateField("surfaceM2", value)}
+            />
+          )}
           <InputField
             label="Perceel m²"
             value={form.plotM2}
@@ -3022,6 +3507,262 @@ export default function LosNaranjosClient({
             </small>
           </label>
         </InputGroup>
+
+        {form.buildInputMode === "detailed" && (
+          <InputGroup title="Oppervlakte, bouwkosten & verkoop">
+            <div className="build-cost-editor field-full">
+              <div className="build-cost-summary">
+                <div>
+                  <span>Totale oppervlakte</span>
+                  <strong>{numberFormatter.format(data.surfaceM2)} m²</strong>
+                </div>
+                <div>
+                  <span>Gem. bouwkosten / m²</span>
+                  <strong>{euro(data.buildCostPerM2)}/m²</strong>
+                </div>
+                <div>
+                  <span>Gem. verkoopprijs / m²</span>
+                  <strong>{euro(data.averageSalePricePerM2)}/m²</strong>
+                </div>
+                <div>
+                  <span>Totale verkoopprijs</span>
+                  <strong>{euro(data.salePrice)}</strong>
+                </div>
+              </div>
+
+              {form.buildLevels.map((level) => {
+                const levelLines = form.buildAreas.filter(
+                  (line) => line.level === level
+                );
+                const availableComponents = BUILD_COMPONENT_OPTIONS.filter(
+                  (option) =>
+                    !levelLines.some((line) => line.component === option.value)
+                );
+
+                return (
+                  <section className="build-level-card" key={level}>
+                    <div className="build-level-header">
+                      <div>
+                        <span>Verdieping</span>
+                        <h3>{getBuildLevelLabel(level, "nl")}</h3>
+                      </div>
+                      {level !== "ground" && (
+                        <button
+                          type="button"
+                          className="build-level-remove"
+                          onClick={() => removeBuildLevel(level)}
+                        >
+                          Verwijderen
+                        </button>
+                      )}
+                    </div>
+
+                    {levelLines.length > 0 ? (
+                      <div className="build-cost-table">
+                        <div className="build-cost-table-head" aria-hidden="true">
+                          <span>Onderdeel</span>
+                          <span>Oppervlakte</span>
+                          <span>Bouw / m²</span>
+                          <span>Bouw totaal</span>
+                          <span>Verkoop / m²</span>
+                          <span>Verkoop totaal</span>
+                        </div>
+
+                        {levelLines.map((line) => {
+                          const lineArea = Math.max(0, parseNumber(line.areaM2));
+                          const lineTotal =
+                            lineArea * Math.max(0, parseNumber(line.costPerM2));
+                          const lineSaleTotal =
+                            lineArea * Math.max(0, parseNumber(line.salePricePerM2));
+
+                          return (
+                            <div
+                              className="build-cost-row"
+                              key={`${line.level}-${line.component}`}
+                            >
+                              <div className="build-cost-name">
+                                <strong>
+                                  {getBuildComponentLabel(line.component, "nl")}
+                                </strong>
+                                <button
+                                  type="button"
+                                  className="build-component-remove"
+                                  onClick={() =>
+                                    removeBuildComponent(level, line.component)
+                                  }
+                                >
+                                  Verwijderen
+                                </button>
+                              </div>
+
+                              <label className="build-cost-input">
+                                <span className="build-cost-mobile-label">Oppervlakte</span>
+                                <div className="build-cost-input-suffix">
+                                  <input
+                                    value={line.areaM2}
+                                    inputMode="decimal"
+                                    autoComplete="off"
+                                    placeholder="0"
+                                    aria-label={`${getBuildLevelLabel(level, "nl")} ${getBuildComponentLabel(line.component, "nl")} oppervlakte in m²`}
+                                    onChange={(event) =>
+                                      updateBuildArea(
+                                        level,
+                                        line.component,
+                                        "areaM2",
+                                        event.currentTarget.value
+                                      )
+                                    }
+                                  />
+                                  <span>m²</span>
+                                </div>
+                              </label>
+
+                              <label className="build-cost-input">
+                                <span className="build-cost-mobile-label">Kosten / m²</span>
+                                <div className="build-cost-input-prefix">
+                                  <span>€</span>
+                                  <input
+                                    value={formatAmountInput(line.costPerM2)}
+                                    inputMode="numeric"
+                                    autoComplete="off"
+                                    placeholder="0"
+                                    aria-label={`${getBuildLevelLabel(level, "nl")} ${getBuildComponentLabel(line.component, "nl")} kosten per m²`}
+                                    onChange={(event) =>
+                                      updateBuildArea(
+                                        level,
+                                        line.component,
+                                        "costPerM2",
+                                        normalizeAmountInput(event.currentTarget.value)
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </label>
+
+                              <strong className="build-cost-total">{euro(lineTotal)}</strong>
+
+                              <label className="build-cost-input">
+                                <span className="build-cost-mobile-label">Verkoop / m²</span>
+                                <div className="build-cost-input-prefix">
+                                  <span>€</span>
+                                  <input
+                                    value={line.salePricePerM2}
+                                    inputMode="decimal"
+                                    autoComplete="off"
+                                    placeholder="0"
+                                    aria-label={`${getBuildLevelLabel(level, "nl")} ${getBuildComponentLabel(line.component, "nl")} verkoopprijs per m²`}
+                                    onChange={(event) =>
+                                      updateBuildArea(
+                                        level,
+                                        line.component,
+                                        "salePricePerM2",
+                                        event.currentTarget.value
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </label>
+
+                              <strong className="build-cost-total build-sale-total">
+                                {euro(lineSaleTotal)}
+                              </strong>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="build-level-empty">
+                        Nog geen onderdelen toegevoegd aan deze verdieping.
+                      </div>
+                    )}
+
+                    <div className="build-component-add">
+                      <div className="build-component-add-controls">
+                        <label>
+                          <span>Standaard onderdeel toevoegen</span>
+                          <select
+                            value=""
+                            disabled={availableComponents.length === 0}
+                            onChange={(event) => {
+                              const component = event.currentTarget.value as BuildComponentType;
+                              if (component) addBuildComponent(level, component);
+                            }}
+                          >
+                            <option value="">
+                              {availableComponents.length > 0
+                                ? "Kies onderdeel…"
+                                : "Alle standaard onderdelen toegevoegd"}
+                            </option>
+                            {availableComponents.map((option) => (
+                              <option value={option.value} key={option.value}>
+                                {option.labelNl}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <form
+                          className="build-custom-component-add"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            const formElement = event.currentTarget;
+                            const formData = new FormData(formElement);
+                            const customName = String(
+                              formData.get("customBuildComponent") ?? ""
+                            );
+                            if (!customName.trim()) return;
+                            addCustomBuildComponent(level, customName);
+                            formElement.reset();
+                          }}
+                        >
+                          <label>
+                            <span>Eigen onderdeel toevoegen</span>
+                            <div className="build-custom-component-row">
+                              <input
+                                name="customBuildComponent"
+                                type="text"
+                                autoComplete="off"
+                                placeholder="Bijv. lift, gym, buitenkeuken…"
+                                aria-label={`${getBuildLevelLabel(level, "nl")} eigen onderdeel toevoegen`}
+                              />
+                              <button type="submit">Toevoegen</button>
+                            </div>
+                          </label>
+                        </form>
+                      </div>
+                      <p>
+                        Kies een standaard onderdeel of vul zelf een nieuwe naam in.
+                      </p>
+                    </div>
+                  </section>
+                );
+              })}
+
+              <div className="build-level-add">
+                <label>
+                  <span>Verdieping toevoegen</span>
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const level = event.currentTarget.value as BuildLevel;
+                      if (level) addBuildLevel(level);
+                    }}
+                  >
+                    <option value="">Kies verdieping…</option>
+                    {BUILD_LEVEL_OPTIONS.filter(
+                      (option) => !form.buildLevels.includes(option.value)
+                    ).map((option) => (
+                      <option value={option.value} key={option.value}>
+                        {option.labelNl}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>Een nieuwe verdieping start leeg; daarna voeg je zelf de gewenste onderdelen toe.</p>
+              </div>
+            </div>
+          </InputGroup>
+        )}
 
         {form.projectOwnership === "shared" && (
           <InputGroup title="Financiering gedeeld project">
@@ -3184,12 +3925,14 @@ export default function LosNaranjosClient({
         </InputGroup>
 
         <InputGroup title="Bouw, meubels en verkoop">
-          <InputField
-            label="Bouwkosten per m²"
-            value={form.buildCostPerM2}
-            format="amount"
-            onChange={(value) => updateField("buildCostPerM2", value)}
-          />
+          {form.buildInputMode === "simple" && (
+            <InputField
+              label="Bouwkosten per m²"
+              value={form.buildCostPerM2}
+              format="amount"
+              onChange={(value) => updateField("buildCostPerM2", value)}
+            />
+          )}
           <InputField
             label="Onvoorzien %"
             value={form.contingencyPercentage}
@@ -3245,12 +3988,14 @@ export default function LosNaranjosClient({
               }
             />
           )}
-          <InputField
-            label="Verkoopprijs"
-            value={form.salePrice}
-            format="amount"
-            onChange={(value) => updateField("salePrice", value)}
-          />
+          {form.buildInputMode === "simple" && (
+            <InputField
+              label="Verkoopprijs"
+              value={form.salePrice}
+              format="amount"
+              onChange={(value) => updateField("salePrice", value)}
+            />
+          )}
           <InputField
             label="Makelaarscommissie %"
             value={form.agentCommissionPercentage}
@@ -3690,11 +4435,37 @@ export default function LosNaranjosClient({
           </DataBlock>
 
           <DataBlock title="Project">
-            <DataRow label="Type" value={`${data.projectType} – ${euro(data.buildCostPerM2)}/m²`} strong />
-            <DataRow label="Surface" value={`${numberFormatter.format(data.surfaceM2)} m²`} strong />
+            <DataRow
+              label="Type"
+              value={
+                data.buildInputMode === "simple"
+                  ? `${data.projectType} – ${euro(data.buildCostPerM2)}/m²`
+                  : data.projectType
+              }
+              strong
+            />
+            <DataRow
+              label={data.buildInputMode === "detailed" ? "Total Surface" : "Surface"}
+              value={`${numberFormatter.format(data.surfaceM2)} m²`}
+              strong
+            />
+            {data.buildInputMode === "detailed" && (
+              <>
+                <DataRow
+                  label="Average Build Cost / m²"
+                  value={`${euro(data.buildCostPerM2)}/m²`}
+                  strong
+                />
+                <DataRow
+                  label="Average Sale Price / m²"
+                  value={`${euro(data.averageSalePricePerM2)}/m²`}
+                  strong
+                />
+              </>
+            )}
             <DataRow label="Plot" value={`${numberFormatter.format(data.plotM2)} m²`} strong />
             <DataRow label="Duration" value={`${data.durationMonths} months`} strong />
-            <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} />
+            <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} strong />
             <DataRow label={`Contingency (${percent(data.contingencyPercentage)})`} value={euro(data.contingency)} />
             <DataRow label="Built-in Furniture" value={euro(data.fixedInterior)} />
             <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
@@ -3885,6 +4656,140 @@ export default function LosNaranjosClient({
             </section>
           );
         })}
+
+      {hasBuildSpecification && (
+        <section className="report-page build-spec-page">
+          <SectionHeading
+            number={buildSpecificationSectionNumber}
+            eyebrow="Project specification"
+            title="Surface, Build Cost & Sale Price Breakdown"
+            subtitle="Detailed overview of surface, build cost and expected sale price per project component."
+          />
+
+          <div className="metric-grid compact-metrics build-spec-metrics">
+            <Metric
+              label="Total Surface"
+              value={`${numberFormatter.format(data.surfaceM2)} m²`}
+              sub="All specified project components"
+            />
+            <Metric
+              label="Average Build Cost / m²"
+              value={`${euro(data.buildCostPerM2)}/m²`}
+              sub="Weighted average over total surface"
+            />
+            <Metric
+              label="Average Sale Price / m²"
+              value={`${euro(data.averageSalePricePerM2)}/m²`}
+              sub="Weighted average over total surface"
+            />
+            <Metric
+              label="Gross Sale Price"
+              value={euro(data.salePrice)}
+              sub="Specified property sale price"
+            />
+          </div>
+
+          <TableTitle>Surface, build cost & sale price specification</TableTitle>
+          <div className="table-scroll">
+            <table className="build-spec-table">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Surface</th>
+                  <th>Build / m²</th>
+                  <th>Build total</th>
+                  <th>Sale / m²</th>
+                  <th>Sale total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {BUILD_LEVEL_OPTIONS.flatMap((levelOption) => {
+                  const levelRows = data.buildBreakdown.filter(
+                    (line) =>
+                      line.level === levelOption.value &&
+                      (line.areaM2 > 0 || line.costPerM2 > 0 || line.salePricePerM2 > 0)
+                  );
+
+                  if (levelRows.length === 0) return [];
+
+                  const levelSurface = levelRows.reduce(
+                    (sum, line) => sum + line.areaM2,
+                    0
+                  );
+                  const levelCost = levelRows.reduce(
+                    (sum, line) => sum + line.totalCost,
+                    0
+                  );
+                  const levelSalePrice = levelRows.reduce(
+                    (sum, line) => sum + line.saleTotal,
+                    0
+                  );
+
+                  return [
+                    <tr
+                      className="build-spec-floor-heading"
+                      key={`floor-${levelOption.value}`}
+                    >
+                      <td colSpan={6}>
+                        <div className="build-spec-floor-heading-content">
+                          <strong>{getBuildLevelLabel(levelOption.value, "en")}</strong>
+                          <span>
+                            {numberFormatter.format(levelSurface)} m² · Build {euro(levelCost)} · Sale {euro(levelSalePrice)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>,
+                    ...levelRows.map((line) => (
+                      <tr
+                        key={`${line.level}-${line.component}`}
+                        className="build-spec-component-row"
+                      >
+                        <td className="build-spec-component">
+                          {getBuildComponentLabel(line.component, "en")}
+                        </td>
+                        <td className="build-spec-number">
+                          {numberFormatter.format(line.areaM2)} m²
+                        </td>
+                        <td className="build-spec-number">
+                          {euro(line.costPerM2)}/m²
+                        </td>
+                        <td className="build-spec-number">
+                          <strong>{euro(line.totalCost)}</strong>
+                        </td>
+                        <td className="build-spec-number">
+                          {euro(line.salePricePerM2)}/m²
+                        </td>
+                        <td className="build-spec-number">
+                          <strong>{euro(line.saleTotal)}</strong>
+                        </td>
+                      </tr>
+                    )),
+                  ];
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td>{numberFormatter.format(data.surfaceM2)} m²</td>
+                  <td>{euro(data.buildCostPerM2)}/m² avg.</td>
+                  <td>{euro(data.baseBuildCost)}</td>
+                  <td>{euro(data.averageSalePricePerM2)}/m² avg.</td>
+                  <td>{euro(data.salePrice)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <p className="note build-spec-note">
+            <strong>Weighted averages:</strong> Average Build Cost / m² and Average Sale Price / m² are calculated from their respective totals divided by Total Surface.
+          </p>
+
+          <PageFooter
+            label={config.footerLabel}
+            page={`${buildSpecificationPageNumber} / ${totalPages}`}
+          />
+        </section>
+      )}
 
       <section className="report-page">
         <SectionHeading number={exitSectionNumber} eyebrow="Exit analysis" title="Returns by Exit Timeline" subtitle="Returns under different exit scenarios." />
@@ -4921,6 +5826,233 @@ const styles = `
   }
   .detailed-select select option { color: #171717; }
   .field-full { grid-column: 1 / -1; }
+  .build-cost-editor {
+    display: grid;
+    gap: 12px;
+  }
+  .build-cost-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .build-cost-summary > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding: 10px 12px;
+    border: 1px solid #ddd4c8;
+    border-radius: 11px;
+    background: #faf7f2;
+  }
+  .build-cost-summary span {
+    color: #756858;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .build-cost-summary strong {
+    color: #2a2119;
+    font-size: 15px;
+  }
+  .build-level-card {
+    overflow: hidden;
+    border: 1px solid #d8d1c7;
+    border-radius: 13px;
+    background: rgba(255, 255, 255, .76);
+  }
+  .build-level-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 12px;
+    border-bottom: 1px solid #e2dbd2;
+    background: #f6f1e9;
+  }
+  .build-level-header > div { display: grid; gap: 2px; }
+  .build-level-header span {
+    color: #8a7257;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .build-level-header h3 {
+    margin: 0;
+    color: #34291f;
+    font-size: 14px;
+  }
+  .build-level-remove {
+    min-height: 32px;
+    padding: 6px 9px;
+    border: 1px solid rgba(162, 56, 56, .22);
+    border-radius: 8px;
+    background: #fff9f8;
+    color: #9a3b3b;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .build-cost-table { display: grid; }
+  .build-cost-table-head,
+  .build-cost-row {
+    display: grid;
+    grid-template-columns: minmax(125px, 1fr) minmax(105px, .68fr) minmax(125px, .76fr) minmax(105px, .7fr) minmax(125px, .76fr) minmax(105px, .7fr);
+    gap: 10px;
+    align-items: center;
+  }
+  .build-cost-table-head {
+    padding: 9px 12px 7px;
+    color: #897968;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .build-cost-table-head span:nth-child(4),
+  .build-cost-table-head span:nth-child(6) { text-align: right; }
+  .build-cost-row {
+    padding: 9px 12px;
+    border-top: 1px solid #eee8e0;
+  }
+  .build-cost-row:first-of-type { border-top: 0; }
+  .build-cost-name {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    color: #3a3027;
+    font-size: 12px;
+  }
+  .build-cost-name strong { min-width: 0; }
+  .build-component-remove {
+    flex: none;
+    padding: 3px 0;
+    border: 0;
+    background: transparent;
+    color: #9a3b3b;
+    font-size: 9px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .build-cost-input { display: grid; gap: 4px; min-width: 0; }
+  .build-cost-mobile-label { display: none; color: #7b7066; font-size: 9px; font-weight: 700; }
+  .build-cost-input-suffix,
+  .build-cost-input-prefix {
+    display: grid;
+    align-items: center;
+    min-height: 38px;
+    overflow: hidden;
+    border: 1px solid #d7d0c6;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .build-cost-input-suffix { grid-template-columns: minmax(0, 1fr) 38px; }
+  .build-cost-input-prefix { grid-template-columns: 32px minmax(0, 1fr); }
+  .build-cost-input-suffix > span,
+  .build-cost-input-prefix > span {
+    display: grid;
+    place-items: center;
+    align-self: stretch;
+    background: #f5f0e8;
+    color: #755b39;
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .build-cost-input-suffix > span { border-left: 1px solid #e2dcd3; }
+  .build-cost-input-prefix > span { border-right: 1px solid #e2dcd3; }
+  .build-cost-input input {
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    padding: 7px 9px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: #171717;
+    font-size: 13px;
+  }
+  .build-cost-input-suffix:focus-within,
+  .build-cost-input-prefix:focus-within {
+    border-color: #a88655;
+    box-shadow: 0 0 0 3px rgba(168, 134, 85, .12);
+  }
+  .build-cost-total {
+    color: #2f5f49;
+    font-size: 12px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .build-level-empty {
+    padding: 14px 12px;
+    color: #81766b;
+    font-size: 11px;
+    border-bottom: 1px solid #eee8e0;
+  }
+  .build-component-add,
+  .build-level-add {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 14px;
+    padding-top: 2px;
+  }
+  .build-component-add {
+    padding: 10px 12px 12px;
+    border-top: 1px solid #eee8e0;
+  }
+  .build-component-add-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(190px, 1fr));
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+  .build-component-add label,
+  .build-level-add label,
+  .build-custom-component-add label { display: grid; min-width: min(280px, 100%); gap: 5px; }
+  .build-component-add label > span,
+  .build-level-add label > span,
+  .build-custom-component-add label > span { color: #67543e; font-size: 11px; }
+  .build-component-add select,
+  .build-level-add select,
+  .build-custom-component-row input {
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid #d7d0c6;
+    border-radius: 9px;
+    background: #fff;
+    color: #171717;
+    font-size: 13px;
+  }
+  .build-custom-component-add { margin: 0; }
+  .build-custom-component-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+  .build-custom-component-row input { width: 100%; min-width: 0; }
+  .build-custom-component-row button {
+    min-height: 40px;
+    padding: 8px 12px;
+    border: 1px solid #8d7350;
+    border-radius: 9px;
+    background: #8d7350;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .build-component-add p,
+  .build-level-add p {
+    margin: 0 0 7px;
+    color: #7b7066;
+    font-size: 10px;
+    line-height: 1.4;
+    text-align: right;
+  }
   .range-field {
     display: grid;
     gap: 7px;
@@ -5226,6 +6358,65 @@ const styles = `
   }
 
   .table-title { margin: 31px 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
+  .build-spec-metrics { margin-bottom: 32px; }
+  .build-spec-table {
+    border: 1px solid #d7dbe2;
+  }
+  .build-spec-table th:first-child,
+  .build-spec-table td:first-child {
+    text-align: left;
+  }
+  .build-spec-table th:nth-child(n + 2),
+  .build-spec-table td:nth-child(n + 2) {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .build-spec-table .build-spec-floor-heading td {
+    padding: 11px 12px;
+    background: #f7f4ee;
+    border-top: 2px solid #cfd5dc;
+    border-bottom: 1px solid #d7dbe2;
+  }
+  .build-spec-table tbody .build-spec-floor-heading:first-child td {
+    border-top: 0;
+  }
+  .build-spec-floor-heading-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+  }
+  .build-spec-floor-heading-content strong {
+    color: #2f4037;
+    font-size: 13px;
+  }
+  .build-spec-floor-heading-content span {
+    color: #71798a;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .build-spec-table .build-spec-component-row td {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .build-spec-table .build-spec-component {
+    padding-left: 24px;
+    color: #303842;
+    font-weight: 600;
+  }
+  .build-spec-table .build-spec-number {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .build-spec-table tfoot td {
+    padding-top: 12px;
+    padding-bottom: 12px;
+    border-top: 2px solid #111;
+    background: #f6f7f2;
+    font-weight: 800;
+  }
+  .build-spec-note { margin-top: 22px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead { display: table-header-group; }
   th {
@@ -5384,6 +6575,19 @@ const styles = `
     .input-actions { justify-content: flex-start; }
     .input-grid { grid-template-columns: 1fr; }
     .field-wide { grid-column: auto; }
+    .build-cost-summary { grid-template-columns: 1fr; }
+    .build-cost-table-head { display: none; }
+    .build-cost-row { grid-template-columns: 1fr 1fr; gap: 9px; }
+    .build-cost-name,
+    .build-cost-total { grid-column: 1 / -1; }
+    .build-cost-mobile-label { display: block; }
+    .build-cost-total { padding-top: 2px; text-align: left; }
+    .build-component-add,
+    .build-level-add { align-items: stretch; flex-direction: column; }
+    .build-component-add-controls { grid-template-columns: 1fr; width: 100%; }
+    .build-custom-component-row { grid-template-columns: 1fr; }
+    .build-component-add p,
+    .build-level-add p { margin: 0; text-align: left; }
     .range-control { grid-template-columns: 1fr; }
     .downpayment-card-grid,
     .investor-card-stats { grid-template-columns: 1fr; }
