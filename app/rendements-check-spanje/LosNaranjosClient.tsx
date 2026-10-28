@@ -23,7 +23,7 @@ type Downpayment = {
   amount: string;
 };
 
-type BuildLevel = "ground" | "first" | "second" | "basement" | "roof";
+type BuildLevel = string;
 type BuildComponentType = string;
 type BuildInputMode = "simple" | "detailed";
 type BuildAreaLine = {
@@ -643,9 +643,6 @@ function normalizeStoredForm(
     bankRepaymentSchedule.push({ month: "", amount: "" });
   }
 
-  const validLevels = new Set<BuildLevel>(
-    BUILD_LEVEL_OPTIONS.map((option) => option.value)
-  );
   const normalizedStoredBuildAreas = Array.isArray(stored.buildAreas)
     ? stored.buildAreas
         .filter(
@@ -653,7 +650,8 @@ function normalizeStoredForm(
             Boolean(
               line &&
                 typeof line === "object" &&
-                validLevels.has(line.level as BuildLevel) &&
+                typeof line.level === "string" &&
+                line.level.trim() !== "" &&
                 typeof line.component === "string" &&
                 line.component.trim() !== ""
             )
@@ -668,9 +666,12 @@ function normalizeStoredForm(
     : [];
 
   const storedBuildLevels = Array.isArray(stored.buildLevels)
-    ? stored.buildLevels.filter((level): level is BuildLevel =>
-        validLevels.has(level as BuildLevel)
-      )
+    ? stored.buildLevels
+        .filter(
+          (level): level is BuildLevel =>
+            typeof level === "string" && level.trim() !== ""
+        )
+        .map((level) => level.trim())
     : [];
 
   // De vorige versie maakte voor iedere verdieping automatisch Bebouwd, Terras,
@@ -688,9 +689,13 @@ function normalizeStoredForm(
       );
 
   const inferredBuildLevels = storedBuildAreas.map((line) => line.level);
-  const buildLevels = Array.from(
-    new Set<BuildLevel>(["ground", ...storedBuildLevels, ...inferredBuildLevels])
-  );
+  const buildLevelSource =
+    storedBuildLevels.length > 0
+      ? [...storedBuildLevels, ...inferredBuildLevels]
+      : inferredBuildLevels.length > 0
+        ? inferredBuildLevels
+        : ["ground"];
+  const buildLevels = Array.from(new Set<BuildLevel>(buildLevelSource));
 
   const legacySurfaceM2 = String(stored.surfaceM2 ?? base.surfaceM2 ?? "");
   const legacyBuildCostPerM2 = String(
@@ -1463,24 +1468,71 @@ export default function LosNaranjosClient({
   }
 
   function addBuildLevel(level: BuildLevel) {
+    const cleanLevel = level.trim();
+    if (!cleanLevel) return;
+
     setForm((current) => {
-      if (current.buildLevels.includes(level)) return current;
+      const duplicate = current.buildLevels.some(
+        (item) =>
+          getBuildLevelLabel(item, "nl").localeCompare(
+            getBuildLevelLabel(cleanLevel, "nl"),
+            "nl",
+            { sensitivity: "accent" }
+          ) === 0
+      );
+      if (duplicate) return current;
+
       return {
         ...current,
         buildRowsManual: true,
-        buildLevels: [...current.buildLevels, level],
+        buildLevels: [...current.buildLevels, cleanLevel],
+      };
+    });
+  }
+
+  function addCustomBuildLevel(name: string) {
+    const cleanName = name.trim();
+    if (!cleanName) return;
+    addBuildLevel(cleanName);
+  }
+
+  function renameBuildLevel(level: BuildLevel, name: string) {
+    const cleanName = name.trim();
+    if (!cleanName || cleanName === level) return;
+
+    setForm((current) => {
+      const duplicate = current.buildLevels.some(
+        (item) =>
+          item !== level &&
+          getBuildLevelLabel(item, "nl").localeCompare(cleanName, "nl", {
+            sensitivity: "accent",
+          }) === 0
+      );
+      if (duplicate) return current;
+
+      return {
+        ...current,
+        buildRowsManual: true,
+        buildLevels: current.buildLevels.map((item) =>
+          item === level ? cleanName : item
+        ),
+        buildAreas: current.buildAreas.map((line) =>
+          line.level === level ? { ...line, level: cleanName } : line
+        ),
       };
     });
   }
 
   function removeBuildLevel(level: BuildLevel) {
-    if (level === "ground") return;
-    setForm((current) => ({
-      ...current,
-      buildRowsManual: true,
-      buildLevels: current.buildLevels.filter((item) => item !== level),
-      buildAreas: current.buildAreas.filter((line) => line.level !== level),
-    }));
+    setForm((current) => {
+      if (current.buildLevels.length <= 1) return current;
+      return {
+        ...current,
+        buildRowsManual: true,
+        buildLevels: current.buildLevels.filter((item) => item !== level),
+        buildAreas: current.buildAreas.filter((line) => line.level !== level),
+      };
+    });
   }
 
   function updateCoInvestorCount(value: string) {
@@ -3542,11 +3594,42 @@ export default function LosNaranjosClient({
                 return (
                   <section className="build-level-card" key={level}>
                     <div className="build-level-header">
-                      <div>
-                        <span>Verdieping</span>
-                        <h3>{getBuildLevelLabel(level, "nl")}</h3>
-                      </div>
-                      {level !== "ground" && (
+                      <label className="build-level-name">
+                        <span>Naam verdieping / gebouw</span>
+                        <input
+                          key={level}
+                          type="text"
+                          defaultValue={getBuildLevelLabel(level, "nl")}
+                          autoComplete="off"
+                          aria-label="Naam verdieping of gebouw"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
+                          onBlur={(event) => {
+                            const nextName = event.currentTarget.value.trim();
+                            const duplicate = form.buildLevels.some(
+                              (item) =>
+                                item !== level &&
+                                getBuildLevelLabel(item, "nl").localeCompare(
+                                  nextName,
+                                  "nl",
+                                  { sensitivity: "accent" }
+                                ) === 0
+                            );
+
+                            if (!nextName || duplicate) {
+                              event.currentTarget.value = getBuildLevelLabel(
+                                level,
+                                "nl"
+                              );
+                              return;
+                            }
+
+                            renameBuildLevel(level, nextName);
+                          }}
+                        />
+                      </label>
+                      {form.buildLevels.length > 1 && (
                         <button
                           type="button"
                           className="build-level-remove"
@@ -3739,26 +3822,56 @@ export default function LosNaranjosClient({
               })}
 
               <div className="build-level-add">
-                <label>
-                  <span>Verdieping toevoegen</span>
-                  <select
-                    value=""
-                    onChange={(event) => {
-                      const level = event.currentTarget.value as BuildLevel;
-                      if (level) addBuildLevel(level);
+                <div className="build-level-add-controls">
+                  <label>
+                    <span>Standaard verdieping toevoegen</span>
+                    <select
+                      value=""
+                      onChange={(event) => {
+                        const level = event.currentTarget.value as BuildLevel;
+                        if (level) addBuildLevel(level);
+                      }}
+                    >
+                      <option value="">Kies verdieping…</option>
+                      {BUILD_LEVEL_OPTIONS.filter(
+                        (option) => !form.buildLevels.includes(option.value)
+                      ).map((option) => (
+                        <option value={option.value} key={option.value}>
+                          {option.labelNl}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <form
+                    className="build-custom-level-add"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const formElement = event.currentTarget;
+                      const formData = new FormData(formElement);
+                      const customName = String(
+                        formData.get("customBuildLevel") ?? ""
+                      );
+                      if (!customName.trim()) return;
+                      addCustomBuildLevel(customName);
+                      formElement.reset();
                     }}
                   >
-                    <option value="">Kies verdieping…</option>
-                    {BUILD_LEVEL_OPTIONS.filter(
-                      (option) => !form.buildLevels.includes(option.value)
-                    ).map((option) => (
-                      <option value={option.value} key={option.value}>
-                        {option.labelNl}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p>Een nieuwe verdieping start leeg; daarna voeg je zelf de gewenste onderdelen toe.</p>
+                    <label>
+                      <span>Eigen naam toevoegen</span>
+                      <div className="build-custom-level-row">
+                        <input
+                          name="customBuildLevel"
+                          type="text"
+                          autoComplete="off"
+                          placeholder="Bijv. Villa 1, Villa 2, Guest House…"
+                        />
+                        <button type="submit">Toevoegen</button>
+                      </div>
+                    </label>
+                  </form>
+                </div>
+                <p>Je kunt iedere verdieping of groep ook zelf een naam geven.</p>
               </div>
             </div>
           </InputGroup>
@@ -4703,10 +4816,10 @@ export default function LosNaranjosClient({
                 </tr>
               </thead>
               <tbody>
-                {BUILD_LEVEL_OPTIONS.flatMap((levelOption) => {
+                {form.buildLevels.flatMap((level) => {
                   const levelRows = data.buildBreakdown.filter(
                     (line) =>
-                      line.level === levelOption.value &&
+                      line.level === level &&
                       (line.areaM2 > 0 || line.costPerM2 > 0 || line.salePricePerM2 > 0)
                   );
 
@@ -4728,11 +4841,11 @@ export default function LosNaranjosClient({
                   return [
                     <tr
                       className="build-spec-floor-heading"
-                      key={`floor-${levelOption.value}`}
+                      key={`floor-${level}`}
                     >
                       <td colSpan={6}>
                         <div className="build-spec-floor-heading-content">
-                          <strong>{getBuildLevelLabel(levelOption.value, "en")}</strong>
+                          <strong>{getBuildLevelLabel(level, "en")}</strong>
                           <span>
                             {numberFormatter.format(levelSurface)} m² · Build {euro(levelCost)} · Sale {euro(levelSalePrice)}
                           </span>
@@ -5870,7 +5983,12 @@ const styles = `
     border-bottom: 1px solid #e2dbd2;
     background: #f6f1e9;
   }
-  .build-level-header > div { display: grid; gap: 2px; }
+  .build-level-name {
+    display: grid;
+    flex: 1;
+    gap: 4px;
+    min-width: 0;
+  }
   .build-level-header span {
     color: #8a7257;
     font-size: 9px;
@@ -5878,10 +5996,22 @@ const styles = `
     letter-spacing: .12em;
     text-transform: uppercase;
   }
-  .build-level-header h3 {
-    margin: 0;
+  .build-level-name input {
+    width: min(420px, 100%);
+    min-height: 34px;
+    padding: 5px 9px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    outline: none;
+    background: transparent;
     color: #34291f;
     font-size: 14px;
+    font-weight: 800;
+  }
+  .build-level-name input:hover,
+  .build-level-name input:focus {
+    border-color: #d7d0c6;
+    background: #fff;
   }
   .build-level-remove {
     min-height: 32px;
@@ -6012,13 +6142,16 @@ const styles = `
   }
   .build-component-add label,
   .build-level-add label,
-  .build-custom-component-add label { display: grid; min-width: min(280px, 100%); gap: 5px; }
+  .build-custom-component-add label,
+  .build-custom-level-add label { display: grid; min-width: min(280px, 100%); gap: 5px; }
   .build-component-add label > span,
   .build-level-add label > span,
-  .build-custom-component-add label > span { color: #67543e; font-size: 11px; }
+  .build-custom-component-add label > span,
+  .build-custom-level-add label > span { color: #67543e; font-size: 11px; }
   .build-component-add select,
   .build-level-add select,
-  .build-custom-component-row input {
+  .build-custom-component-row input,
+  .build-custom-level-row input {
     min-height: 40px;
     padding: 8px 10px;
     border: 1px solid #d7d0c6;
@@ -6027,14 +6160,25 @@ const styles = `
     color: #171717;
     font-size: 13px;
   }
-  .build-custom-component-add { margin: 0; }
-  .build-custom-component-row {
+  .build-custom-component-add,
+  .build-custom-level-add { margin: 0; }
+  .build-level-add-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(190px, 1fr));
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+  .build-custom-component-row,
+  .build-custom-level-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 7px;
   }
-  .build-custom-component-row input { width: 100%; min-width: 0; }
-  .build-custom-component-row button {
+  .build-custom-component-row input,
+  .build-custom-level-row input { width: 100%; min-width: 0; }
+  .build-custom-component-row button,
+  .build-custom-level-row button {
     min-height: 40px;
     padding: 8px 12px;
     border: 1px solid #8d7350;
@@ -6585,7 +6729,9 @@ const styles = `
     .build-component-add,
     .build-level-add { align-items: stretch; flex-direction: column; }
     .build-component-add-controls { grid-template-columns: 1fr; width: 100%; }
-    .build-custom-component-row { grid-template-columns: 1fr; }
+    .build-custom-component-row,
+    .build-custom-level-row { grid-template-columns: 1fr; }
+    .build-level-add-controls { grid-template-columns: 1fr; }
     .build-component-add p,
     .build-level-add p { margin: 0; text-align: left; }
     .range-control { grid-template-columns: 1fr; }
