@@ -4709,7 +4709,9 @@ export default function LosNaranjosClient({
             {data.fixedInterior > 0 && (
               <DataRow label="Built-in Furniture" value={euro(data.fixedInterior)} />
             )}
-            <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
+            {(data.looseFurniture > 0 || data.projectManagement > 0) && (
+              <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
+            )}
             {data.looseFurniture > 0 && (
               <DataRow label="Furniture" value={euro(data.looseFurniture)} />
             )}
@@ -4719,9 +4721,7 @@ export default function LosNaranjosClient({
                 value={euro(data.projectManagement)}
               />
             )}
-            {(data.looseFurniture > 0 || data.projectManagement > 0) && (
-              <DataRow label="Total Project Cost" value={euro(data.totalProjectCost)} strong />
-            )}
+            <DataRow label="Total Project Cost" value={euro(data.totalProjectCost)} strong />
           </DataBlock>
         </div>
 
