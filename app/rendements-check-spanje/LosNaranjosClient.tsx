@@ -4580,16 +4580,22 @@ export default function LosNaranjosClient({
             <DataRow label="Duration" value={`${data.durationMonths} months`} strong />
             <DataRow label="Base Build Cost" value={euro(data.baseBuildCost)} strong />
             <DataRow label={`Contingency (${percent(data.contingencyPercentage)})`} value={euro(data.contingency)} />
-            <DataRow label="Built-in Furniture" value={euro(data.fixedInterior)} />
+            {data.fixedInterior > 0 && (
+              <DataRow label="Built-in Furniture" value={euro(data.fixedInterior)} />
+            )}
             <DataRow label="Subtotal" value={euro(data.projectSubtotal)} strong />
-            <DataRow label="Furniture" value={euro(data.looseFurniture)} />
-            {data.isSharedProject && (
+            {data.looseFurniture > 0 && (
+              <DataRow label="Furniture" value={euro(data.looseFurniture)} />
+            )}
+            {data.isSharedProject && data.projectManagement > 0 && (
               <DataRow
                 label={`Project Management (${percent(data.projectManagementPercentage)})`}
                 value={euro(data.projectManagement)}
               />
             )}
-            <DataRow label="Total Project Cost" value={euro(data.totalProjectCost)} strong />
+            {(data.looseFurniture > 0 || data.projectManagement > 0) && (
+              <DataRow label="Total Project Cost" value={euro(data.totalProjectCost)} strong />
+            )}
           </DataBlock>
         </div>
 
@@ -4600,10 +4606,12 @@ export default function LosNaranjosClient({
             label={`Lawyer Fee on Sale (${percent(data.saleLawyerFeePercentage)})`}
             value={euro(data.saleLawyerFee)}
           />
-          <DataRow
-            label={`Furniture + Mark-up – added to proceeds (${percent(data.furnitureMarkupPercentage)})`}
-            value={`+${euro(data.furnitureSaleProceeds)}`}
-          />
+          {data.looseFurniture > 0 && (
+            <DataRow
+              label={`Furniture + Mark-up – added to proceeds (${percent(data.furnitureMarkupPercentage)})`}
+              value={`+${euro(data.furnitureSaleProceeds)}`}
+            />
+          )}
           <DataRow
             label={data.bankFinancingEnabled ? "Net Proceeds before Bank" : "Net Proceeds"}
             value={euro(data.netProceeds)}
