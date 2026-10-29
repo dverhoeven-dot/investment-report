@@ -2496,6 +2496,75 @@ export default function LosNaranjosClient({
         a.event.localeCompare(b.event)
     );
 
+    // Bouw de IRR op basis van de daadwerkelijke equity-cashflows.
+    // Bankopnames zijn financiering en dus geen rendement voor equity.
+    // Aflossing/rente vóór exit kan wel extra equity vragen; aflossing op exit
+    // wordt uit de verkoopopbrengst voldaan en zit daarom in de terminal proceeds.
+    const buildEquityContributionRows = (
+      rows: RawCashflowItem[],
+      exitMonth: number
+    ) => {
+      const sortedRows = [...rows].sort(
+        (a, b) =>
+          a.month - b.month ||
+          (a.sortOrder ?? 20) - (b.sortOrder ?? 20) ||
+          a.event.localeCompare(b.event)
+      );
+      let availableBankCash = 0;
+      const contributions: Array<{ month: number; amount: number }> = [];
+
+      sortedRows.forEach((item) => {
+        if (item.bankEventType === "draw" && item.inflow > 0) {
+          availableBankCash += item.inflow;
+        }
+
+        const requiresEquity =
+          item.outflow > 0 &&
+          (item.category === "acquisition" ||
+            item.category === "project" ||
+            (item.category === "financing" && item.month < exitMonth));
+
+        if (!requiresEquity) return;
+
+        const bankFundingUsed = Math.min(availableBankCash, item.outflow);
+        availableBankCash -= bankFundingUsed;
+        const equityRequired = Math.max(0, item.outflow - bankFundingUsed);
+
+        if (equityRequired > 0) {
+          contributions.push({
+            month: Math.max(0, Math.min(exitMonth, Math.round(item.month))),
+            amount: equityRequired,
+          });
+        }
+      });
+
+      return contributions;
+    };
+
+    const calculateEquityIrr = (
+      contributions: Array<{ month: number; amount: number }>,
+      terminalProceeds: number,
+      exitMonth: number
+    ) => {
+      const validContributions = contributions.filter(
+        (item) => Number.isFinite(item.amount) && item.amount > 0
+      );
+      if (validContributions.length === 0) return Number.NaN;
+
+      return calculateAnnualizedIrr([
+        ...validContributions.map((item) => ({
+          month: Math.max(0, Math.min(exitMonth, Math.round(item.month))),
+          outflow: item.amount,
+          inflow: 0,
+        })),
+        {
+          month: exitMonth,
+          outflow: terminalProceeds < 0 ? Math.abs(terminalProceeds) : 0,
+          inflow: terminalProceeds > 0 ? terminalProceeds : 0,
+        },
+      ]);
+    };
+
     const requestedMonthlyCapital = coInvestors.reduce(
       (sum, investor) => sum + investor.plannedCapital,
       0
@@ -2755,7 +2824,15 @@ export default function LosNaranjosClient({
     const partnerSalesCommission = agentCommission * partnerEquityPercentage;
     const ourSaleLawyerFee = saleLawyerFee * ourEquityPercentage;
     const partnerSaleLawyerFee = saleLawyerFee * partnerEquityPercentage;
-    const irr = calculateAnnualizedIrr(rawCashflow);
+    const baseEquityContributions = buildEquityContributionRows(
+      rawCashflow.filter((item) => item.category !== "sale"),
+      durationMonths
+    );
+    const irr = calculateEquityIrr(
+      baseEquityContributions,
+      distributableNetProceeds,
+      durationMonths
+    );
     const cashAtMonth0 = Math.max(
       0,
       cashflow
@@ -2782,26 +2859,71 @@ export default function LosNaranjosClient({
     const investmentCashflow = rawCashflow.filter(
       (item) => item.category !== "sale"
     );
+    const operatingRows = investmentCashflow.filter(
+      (item) => item.category === "acquisition" || item.category === "project"
+    );
 
     const exitScenarios = [6, 9, 12, 15, 18, durationMonths]
       .filter((month, index, values) => month > 0 && values.indexOf(month) === index)
       .sort((a, b) => a - b)
-      .map((month) => ({
-        month,
-        date: addMonthsToDate(projectStartDate, month),
-        netProfit,
-        roi,
-        irr: calculateAnnualizedIrr([
-          ...investmentCashflow,
-          {
-            month,
-            event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
-            outflow: 0,
-            inflow: netProceeds,
-            category: "sale" as const,
-          },
-        ]),
-      }));
+      .map((month) => {
+        // Alle geplande projectkosten blijven onderdeel van het scenario, maar
+        // betalingen ná de gekozen exit worden naar de exitmaand gehaald.
+        const scenarioOperatingRows = operatingRows.map((item) => ({
+          ...item,
+          month: Math.min(item.month, month),
+        }));
+
+        // Banktranches die pas ná de gekozen exit zouden worden ontvangen,
+        // bestaan in dit scenario niet. Zo kan de IRR niet kunstmatig worden
+        // verbeterd door financiering die na verkoop zou binnenkomen.
+        const scenarioBankSchedule = buildBankFinancingSchedule({
+          enabled:
+            bankFinancingEnabled &&
+            bankFinancingDrawMonthsComplete &&
+            (bankDrawScheduleMode === "standard" || customBankDrawAmountsComplete),
+          draws: bankDrawSchedule.filter((draw) => draw.month <= month),
+          annualInterestRate: bankInterestPercentage,
+          repaymentMode: bankRepaymentScheduleMode,
+          repaymentAmount: bankRepaymentAmount,
+          repaymentFrequency: bankRepaymentFrequency,
+          customRepayments: bankCustomRepayments.filter(
+            (payment) => payment.month <= month
+          ),
+          exitMonth: month,
+        });
+
+        const scenarioInvestmentRows: RawCashflowItem[] = [
+          ...scenarioOperatingRows,
+          ...scenarioBankSchedule.rows,
+        ];
+        const scenarioEquityContributions = buildEquityContributionRows(
+          scenarioInvestmentRows,
+          month
+        );
+        const scenarioEquityCapital = scenarioEquityContributions.reduce(
+          (sum, item) => sum + item.amount,
+          0
+        );
+        const scenarioProfit = operatingNetProfit - scenarioBankSchedule.interestPaid;
+        const scenarioRoi = scenarioEquityCapital
+          ? scenarioProfit / scenarioEquityCapital
+          : 0;
+        const scenarioDistributableNetProceeds =
+          scenarioEquityCapital + scenarioProfit;
+
+        return {
+          month,
+          date: addMonthsToDate(projectStartDate, month),
+          netProfit: scenarioProfit,
+          roi: scenarioRoi,
+          irr: calculateEquityIrr(
+            scenarioEquityContributions,
+            scenarioDistributableNetProceeds,
+            month
+          ),
+        };
+      });
 
     const saleSensitivity = [-0.1, -0.05, 0, 0.05, 0.1].map((change) => {
       const scenarioSalePrice = salePrice * (1 + change);
@@ -2814,21 +2936,19 @@ export default function LosNaranjosClient({
       const scenarioRoi = equityCapitalDeployed
         ? scenarioProfit / equityCapitalDeployed
         : 0;
+      const scenarioDistributableNetProceeds =
+        equityCapitalDeployed + scenarioProfit;
+
       return {
         change,
         salePrice: scenarioSalePrice,
         netProfit: scenarioProfit,
         roi: scenarioRoi,
-        irr: calculateAnnualizedIrr([
-          ...investmentCashflow,
-          {
-            month: durationMonths,
-            event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
-            outflow: 0,
-            inflow: scenarioNetProceeds,
-            category: "sale" as const,
-          },
-        ]),
+        irr: calculateEquityIrr(
+          baseEquityContributions,
+          scenarioDistributableNetProceeds,
+          durationMonths
+        ),
       };
     });
 
@@ -2838,37 +2958,43 @@ export default function LosNaranjosClient({
         const scenarioCapital = totalAcquisition + scenarioProjectCost;
         const scenarioProfit =
           netProceeds - scenarioCapital - totalBankInterest;
-        const scenarioEquityCapital = Math.max(
-          0,
-          equityCapitalDeployed + (scenarioCapital - capitalDeployed)
-        );
-        const scenarioRoi = scenarioEquityCapital
-          ? scenarioProfit / scenarioEquityCapital
-          : 0;
         const constructionCostFactor = totalProjectCost
           ? scenarioProjectCost / totalProjectCost
           : 0;
-        const scenarioInvestmentCashflow = investmentCashflow.map((item) =>
+
+        const scenarioOperatingRows = operatingRows.map((item) =>
           item.category === "project"
             ? { ...item, outflow: item.outflow * constructionCostFactor }
             : item
         );
+        const scenarioInvestmentRows: RawCashflowItem[] = [
+          ...scenarioOperatingRows,
+          ...bankSchedule.rows,
+        ];
+        const scenarioEquityContributions = buildEquityContributionRows(
+          scenarioInvestmentRows,
+          durationMonths
+        );
+        const scenarioEquityCapital = scenarioEquityContributions.reduce(
+          (sum, item) => sum + item.amount,
+          0
+        );
+        const scenarioRoi = scenarioEquityCapital
+          ? scenarioProfit / scenarioEquityCapital
+          : 0;
+        const scenarioDistributableNetProceeds =
+          scenarioEquityCapital + scenarioProfit;
 
         return {
           change,
           projectCost: scenarioProjectCost,
           netProfit: scenarioProfit,
           roi: scenarioRoi,
-          irr: calculateAnnualizedIrr([
-            ...scenarioInvestmentCashflow,
-            {
-              month: durationMonths,
-              event: "Sales proceeds (after sale costs + Furniture incl. mark-up)",
-              outflow: 0,
-              inflow: netProceeds,
-              category: "sale" as const,
-            },
-          ]),
+          irr: calculateEquityIrr(
+            scenarioEquityContributions,
+            scenarioDistributableNetProceeds,
+            durationMonths
+          ),
         };
       }
     );
@@ -4931,7 +5057,7 @@ export default function LosNaranjosClient({
             ))}
           </tbody>
         </table>
-        <p className="note"><strong>Note:</strong> IRR is calculated from the actual monthly downpayments, acquisition costs, construction draws, furniture payments and sale proceeds. Earlier exit scenarios keep the same planned costs and move the net sale proceeds to the selected exit month.</p>
+        <p className="note"><strong>Note:</strong> IRR is calculated on the actual equity cashflows. Earlier exit scenarios keep the same planned project costs, move payments scheduled after exit to the selected exit month, and exclude bank tranches that would only be received after that exit.</p>
         <PageFooter label={config.footerLabel} page={`${exitPageNumber} / ${totalPages}`} />
       </section>
 
