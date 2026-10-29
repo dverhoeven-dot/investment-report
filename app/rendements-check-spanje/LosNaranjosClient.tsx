@@ -3226,12 +3226,99 @@ export default function LosNaranjosClient({
       )
     : [];
 
+  const buildSpecificationGroups =
+    data.buildInputMode === "detailed"
+      ? form.buildLevels.flatMap((level) => {
+          const rows = data.buildBreakdown.filter(
+            (line) =>
+              line.level === level &&
+              (line.areaM2 > 0 ||
+                line.costPerM2 > 0 ||
+                line.salePricePerM2 > 0)
+          );
+
+          if (rows.length === 0) return [];
+
+          return [
+            {
+              level,
+              label: getBuildLevelLabel(level, "en"),
+              rows,
+              levelSurface: rows.reduce((sum, line) => sum + line.areaM2, 0),
+              levelCost: rows.reduce((sum, line) => sum + line.totalCost, 0),
+              levelSalePrice: rows.reduce((sum, line) => sum + line.saleTotal, 0),
+            },
+          ];
+        })
+      : [];
+
+  type BuildSpecificationPageGroup =
+    (typeof buildSpecificationGroups)[number] & { continued: boolean };
+
+  // Verdeel een lange bouwspecificatie automatisch over meerdere A4-pagina's.
+  // Op de eerste pagina staat ook de metrics-samenvatting en is daarom minder
+  // ruimte beschikbaar. Pagina's worden zo volledig mogelijk gevuld; een
+  // verdieping mag daarom over twee pagina's doorlopen.
+  const buildSpecificationPages: BuildSpecificationPageGroup[][] = [];
+  if (data.buildInputMode === "detailed") {
+    const firstPageRowCapacity = 10;
+    const continuationPageRowCapacity = 20;
+    let pageIndex = 0;
+    let currentPage: BuildSpecificationPageGroup[] = [];
+    let usedRows = 0;
+
+    const finishBuildSpecificationPage = () => {
+      buildSpecificationPages.push(currentPage);
+      currentPage = [];
+      usedRows = 0;
+      pageIndex += 1;
+    };
+
+    buildSpecificationGroups.forEach((group) => {
+      let remainingRows = [...group.rows];
+      let continued = false;
+
+      while (remainingRows.length > 0) {
+        const capacity =
+          pageIndex === 0
+            ? firstPageRowCapacity
+            : continuationPageRowCapacity;
+        const availableRows = capacity - usedRows;
+        if (availableRows <= 1) {
+          finishBuildSpecificationPage();
+          continue;
+        }
+
+        const rowsToTake = Math.min(
+          remainingRows.length,
+          availableRows - 1
+        );
+        currentPage.push({
+          ...group,
+          rows: remainingRows.slice(0, rowsToTake),
+          continued,
+        });
+        usedRows += 1 + rowsToTake;
+        remainingRows = remainingRows.slice(rowsToTake);
+        continued = true;
+
+        if (remainingRows.length > 0) {
+          finishBuildSpecificationPage();
+        }
+      }
+    });
+
+    if (currentPage.length > 0 || buildSpecificationPages.length === 0) {
+      buildSpecificationPages.push(currentPage);
+    }
+  }
+
   const sharedFinancingPageCount = data.isSharedProject
     ? investorPrintPages.length
     : 0;
   const sharedFinancingPageNumber = data.isSharedProject ? 2 : 0;
   const buildSpecificationPageCount =
-    data.buildInputMode === "detailed" ? 1 : 0;
+    data.buildInputMode === "detailed" ? buildSpecificationPages.length : 0;
   const buildSpecificationPageNumber =
     data.buildInputMode === "detailed"
       ? 2 + sharedFinancingPageCount
@@ -4904,139 +4991,151 @@ export default function LosNaranjosClient({
           );
         })}
 
-      {hasBuildSpecification && (
-        <section className="report-page build-spec-page">
-          <SectionHeading
-            number={buildSpecificationSectionNumber}
-            eyebrow="Project specification"
-            title="Surface, Build Cost & Sale Price Breakdown"
-            subtitle="Detailed overview of surface, build cost and expected sale price per project component."
-          />
+      {hasBuildSpecification &&
+        buildSpecificationPages.map((pageGroups, pageIndex) => {
+          const isFirstPage = pageIndex === 0;
+          const isLastPage =
+            pageIndex === buildSpecificationPages.length - 1;
 
-          <div className="metric-grid compact-metrics build-spec-metrics">
-            <Metric
-              label="Total Surface"
-              value={`${numberFormatter.format(data.surfaceM2)} m²`}
-              sub="All specified project components"
-            />
-            <Metric
-              label="Average Build Cost / m²"
-              value={`${euro(data.buildCostPerM2)}/m²`}
-              sub="Weighted average over total surface"
-            />
-            <Metric
-              label="Average Sale Price / m²"
-              value={`${euro(data.averageSalePricePerM2)}/m²`}
-              sub="Weighted average over total surface"
-            />
-            <Metric
-              label="Gross Sale Price"
-              value={euro(data.salePrice)}
-              sub="Specified property sale price"
-            />
-          </div>
+          return (
+            <section
+              className={`report-page build-spec-page${
+                isFirstPage ? "" : " build-spec-continuation-page"
+              }`}
+              key={`build-spec-page-${pageIndex}`}
+            >
+              <SectionHeading
+                number={buildSpecificationSectionNumber}
+                eyebrow="Project specification"
+                title={
+                  isFirstPage
+                    ? "Surface, Build Cost & Sale Price Breakdown"
+                    : "Surface, Build Cost & Sale Price Breakdown — Continued"
+                }
+                subtitle={
+                  buildSpecificationPages.length > 1
+                    ? `Specification page ${pageIndex + 1} of ${buildSpecificationPages.length} · detailed overview per project component.`
+                    : "Detailed overview of surface, build cost and expected sale price per project component."
+                }
+              />
 
-          <TableTitle>Surface, build cost & sale price specification</TableTitle>
-          <div className="table-scroll">
-            <table className="build-spec-table">
-              <thead>
-                <tr>
-                  <th>Component</th>
-                  <th>Surface</th>
-                  <th>Build / m²</th>
-                  <th>Build total</th>
-                  <th>Sale / m²</th>
-                  <th>Sale total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {form.buildLevels.flatMap((level) => {
-                  const levelRows = data.buildBreakdown.filter(
-                    (line) =>
-                      line.level === level &&
-                      (line.areaM2 > 0 || line.costPerM2 > 0 || line.salePricePerM2 > 0)
-                  );
+              {isFirstPage && (
+                <div className="metric-grid compact-metrics build-spec-metrics">
+                  <Metric
+                    label="Total Surface"
+                    value={`${numberFormatter.format(data.surfaceM2)} m²`}
+                    sub="All specified project components"
+                  />
+                  <Metric
+                    label="Average Build Cost / m²"
+                    value={`${euro(data.buildCostPerM2)}/m²`}
+                    sub="Weighted average over total surface"
+                  />
+                  <Metric
+                    label="Average Sale Price / m²"
+                    value={`${euro(data.averageSalePricePerM2)}/m²`}
+                    sub="Weighted average over total surface"
+                  />
+                  <Metric
+                    label="Gross Sale Price"
+                    value={euro(data.salePrice)}
+                    sub="Specified property sale price"
+                  />
+                </div>
+              )}
 
-                  if (levelRows.length === 0) return [];
-
-                  const levelSurface = levelRows.reduce(
-                    (sum, line) => sum + line.areaM2,
-                    0
-                  );
-                  const levelCost = levelRows.reduce(
-                    (sum, line) => sum + line.totalCost,
-                    0
-                  );
-                  const levelSalePrice = levelRows.reduce(
-                    (sum, line) => sum + line.saleTotal,
-                    0
-                  );
-
-                  return [
-                    <tr
-                      className="build-spec-floor-heading"
-                      key={`floor-${level}`}
-                    >
-                      <td colSpan={6}>
-                        <div className="build-spec-floor-heading-content">
-                          <strong>{getBuildLevelLabel(level, "en")}</strong>
-                          <span>
-                            {numberFormatter.format(levelSurface)} m² · Build {euro(levelCost)} · Sale {euro(levelSalePrice)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>,
-                    ...levelRows.map((line) => (
+              <TableTitle>
+                {isFirstPage
+                  ? "Surface, build cost & sale price specification"
+                  : "Specification — continued"}
+              </TableTitle>
+              <div className="table-scroll">
+                <table className="build-spec-table">
+                  <thead>
+                    <tr>
+                      <th>Component</th>
+                      <th>Surface</th>
+                      <th>Build / m²</th>
+                      <th>Build total</th>
+                      <th>Sale / m²</th>
+                      <th>Sale total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageGroups.flatMap((group) => [
                       <tr
-                        key={`${line.level}-${line.component}`}
-                        className="build-spec-component-row"
+                        className="build-spec-floor-heading"
+                        key={`floor-${group.level}-${pageIndex}-${
+                          group.continued ? "continued" : "start"
+                        }`}
                       >
-                        <td className="build-spec-component">
-                          {getBuildComponentLabel(line.component, "en")}
+                        <td colSpan={6}>
+                          <div className="build-spec-floor-heading-content">
+                            <strong>
+                              {group.label}
+                              {group.continued ? " — continued" : ""}
+                            </strong>
+                            <span>
+                              {numberFormatter.format(group.levelSurface)} m² · Build {euro(group.levelCost)} · Sale {euro(group.levelSalePrice)}
+                            </span>
+                          </div>
                         </td>
-                        <td className="build-spec-number">
-                          {numberFormatter.format(line.areaM2)} m²
-                        </td>
-                        <td className="build-spec-number">
-                          {euro(line.costPerM2)}/m²
-                        </td>
-                        <td className="build-spec-number">
-                          <strong>{euro(line.totalCost)}</strong>
-                        </td>
-                        <td className="build-spec-number">
-                          {euro(line.salePricePerM2)}/m²
-                        </td>
-                        <td className="build-spec-number">
-                          <strong>{euro(line.saleTotal)}</strong>
-                        </td>
+                      </tr>,
+                      ...group.rows.map((line, rowIndex) => (
+                        <tr
+                          key={`${line.level}-${line.component}-${pageIndex}-${rowIndex}`}
+                          className="build-spec-component-row"
+                        >
+                          <td className="build-spec-component">
+                            {getBuildComponentLabel(line.component, "en")}
+                          </td>
+                          <td className="build-spec-number">
+                            {numberFormatter.format(line.areaM2)} m²
+                          </td>
+                          <td className="build-spec-number">
+                            {euro(line.costPerM2)}/m²
+                          </td>
+                          <td className="build-spec-number">
+                            <strong>{euro(line.totalCost)}</strong>
+                          </td>
+                          <td className="build-spec-number">
+                            {euro(line.salePricePerM2)}/m²
+                          </td>
+                          <td className="build-spec-number">
+                            <strong>{euro(line.saleTotal)}</strong>
+                          </td>
+                        </tr>
+                      )),
+                    ])}
+                  </tbody>
+                  {isLastPage && (
+                    <tfoot>
+                      <tr>
+                        <td>Total</td>
+                        <td>{numberFormatter.format(data.surfaceM2)} m²</td>
+                        <td>{euro(data.buildCostPerM2)}/m² avg.</td>
+                        <td>{euro(data.baseBuildCost)}</td>
+                        <td>{euro(data.averageSalePricePerM2)}/m² avg.</td>
+                        <td>{euro(data.salePrice)}</td>
                       </tr>
-                    )),
-                  ];
-                })}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td>Total</td>
-                  <td>{numberFormatter.format(data.surfaceM2)} m²</td>
-                  <td>{euro(data.buildCostPerM2)}/m² avg.</td>
-                  <td>{euro(data.baseBuildCost)}</td>
-                  <td>{euro(data.averageSalePricePerM2)}/m² avg.</td>
-                  <td>{euro(data.salePrice)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
 
-          <p className="note build-spec-note">
-            <strong>Weighted averages:</strong> Average Build Cost / m² and Average Sale Price / m² are calculated from their respective totals divided by Total Surface.
-          </p>
+              {isLastPage && (
+                <p className="note build-spec-note">
+                  <strong>Weighted averages:</strong> Average Build Cost / m² and Average Sale Price / m² are calculated from their respective totals divided by Total Surface.
+                </p>
+              )}
 
-          <PageFooter
-            label={config.footerLabel}
-            page={`${buildSpecificationPageNumber} / ${totalPages}`}
-          />
-        </section>
-      )}
+              <PageFooter
+                label={config.footerLabel}
+                page={`${buildSpecificationPageNumber + pageIndex} / ${totalPages}`}
+              />
+            </section>
+          );
+        })}
 
       <section className="report-page">
         <SectionHeading number={exitSectionNumber} eyebrow="Exit analysis" title="Returns by Exit Timeline" subtitle="Returns under different exit scenarios." />
@@ -6561,6 +6660,17 @@ const styles = `
     box-shadow: 0 24px 70px rgba(32, 31, 28, .18);
     overflow: hidden;
   }
+  /* Op het scherm gebruikt pagina 2 exact dezelfde kaartmaat als de overige rapportpagina's.
+     Alleen tijdens printen wordt deze pagina fysiek 210 × 297 mm A4. */
+  .build-spec-page {
+    box-sizing: border-box;
+    width: min(980px, 100%);
+    height: 1320px;
+    min-height: 1320px;
+    max-height: 1320px;
+    padding: 54px 56px 86px;
+    overflow: hidden;
+  }
   .report-header { padding-bottom: 22px; border-bottom: 3px solid #111; }
   .report-header h1 { margin: 0; font-size: 38px; line-height: 1.04; }
   .report-header p,
@@ -6826,6 +6936,7 @@ const styles = `
 
   @media (max-width: 1000px) {
     .report-page { width: min(980px, 100%); }
+    .build-spec-page { width: min(980px, 100%); }
   }
   @media (max-width: 850px) {
     .cloud-project-bar { align-items: stretch; flex-direction: column; }
@@ -6842,6 +6953,14 @@ const styles = `
     .metric:nth-child(-n+2) { border-bottom: 1px solid #cdd2da; }
     .two-column { grid-template-columns: 1fr; }
     .report-page { min-height: auto; overflow: visible; }
+    /* Ook op smallere schermen blijft pagina 2 visueel gelijk aan de overige rapportpagina's. */
+    .build-spec-page {
+      width: 100%;
+      height: 1320px;
+      min-height: 1320px;
+      max-height: 1320px;
+      overflow: hidden;
+    }
     .photo-stack { grid-template-rows: none; min-height: 0; }
     .photo-stack img { height: auto; max-height: 420px; }
     .photo-placeholder { min-height: 600px; }
@@ -6937,6 +7056,88 @@ const styles = `
     .report-page:last-child {
       break-after: auto !important;
       page-break-after: auto !important;
+    }
+
+    .build-spec-page {
+      width: 210mm !important;
+      height: 297mm !important;
+      min-height: 297mm !important;
+      max-height: 297mm !important;
+      overflow: hidden !important;
+    }
+
+    .build-spec-page .build-spec-metrics {
+      margin-top: 4mm !important;
+      margin-bottom: 4mm !important;
+    }
+
+    .build-spec-page .metric {
+      min-height: 20mm !important;
+      padding: 3.2mm 3mm !important;
+    }
+
+    .build-spec-page .metric strong {
+      margin-top: 2mm !important;
+      font-size: 13.5pt !important;
+    }
+
+    .build-spec-page .metric small {
+      margin-top: 1.3mm !important;
+      font-size: 6.8pt !important;
+      line-height: 1.2 !important;
+    }
+
+    .build-spec-page .table-title {
+      margin-top: 4mm !important;
+      margin-bottom: 1.5mm !important;
+      padding-bottom: 1.8mm !important;
+    }
+
+    .build-spec-page .build-spec-table {
+      table-layout: fixed !important;
+      width: 100% !important;
+      font-size: 7.4pt !important;
+    }
+
+    .build-spec-page .build-spec-table th {
+      padding: 1.8mm 1.4mm !important;
+      font-size: 6.2pt !important;
+      letter-spacing: .08em !important;
+    }
+
+    .build-spec-page .build-spec-table td {
+      padding: 1.8mm 1.4mm !important;
+      line-height: 1.12 !important;
+    }
+
+    .build-spec-page .build-spec-floor-heading td {
+      padding: 2mm 1.6mm !important;
+    }
+
+    .build-spec-page .build-spec-floor-heading-content {
+      gap: 4mm !important;
+    }
+
+    .build-spec-page .build-spec-floor-heading-content strong {
+      font-size: 7.5pt !important;
+    }
+
+    .build-spec-page .build-spec-floor-heading-content span {
+      font-size: 6.5pt !important;
+    }
+
+    .build-spec-page .build-spec-component {
+      padding-left: 4mm !important;
+    }
+
+    .build-spec-page .build-spec-note {
+      margin-top: 3mm !important;
+      font-size: 6.8pt !important;
+    }
+
+    .build-spec-page tr {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
     }
 
     /* De voorbeeldpagina begint direct met 01 · Overview. */
