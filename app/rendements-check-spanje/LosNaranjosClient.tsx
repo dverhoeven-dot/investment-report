@@ -11,6 +11,7 @@ export type LosNaranjosConfig = {
 type ProjectOwnership = "own" | "shared";
 type ProjectType = "New Build" | "Renovation";
 type PurchaseVatChoice = "no" | "yes";
+type ProfitTaxChoice = "no" | "yes";
 type BankFinancingChoice = "no" | "yes";
 type BankRepaymentFrequency = "monthly" | "yearly";
 type BankScheduleMode = "standard" | "custom";
@@ -87,6 +88,8 @@ export type LosNaranjosInitialData = {
   salePrice: number;
   agentCommissionPercentage: number;
   saleLawyerFeePercentage?: number;
+  profitTaxEnabled?: ProfitTaxChoice;
+  profitTaxPercentage?: number;
 
   firstPaymentMonth: number;
   firstPaymentAmount: number;
@@ -153,6 +156,8 @@ type FormState = {
   salePrice: string;
   agentCommissionPercentage: string;
   saleLawyerFeePercentage: string;
+  profitTaxEnabled: ProfitTaxChoice;
+  profitTaxPercentage: string;
 
   downpaymentCount: string;
   downpayments: Downpayment[];
@@ -435,6 +440,8 @@ function createInitialForm(data: LosNaranjosInitialData): FormState {
     salePrice: "0",
     agentCommissionPercentage: "0",
     saleLawyerFeePercentage: "0",
+    profitTaxEnabled: data.profitTaxEnabled === "yes" ? "yes" : "no",
+    profitTaxPercentage: String(data.profitTaxPercentage ?? 0),
 
     downpaymentCount: "0",
     downpayments,
@@ -781,6 +788,11 @@ function normalizeStoredForm(
       stored.purchaseVatEnabled === "yes" ? "yes" : "no",
     purchaseVatPercentage: String(
       stored.purchaseVatPercentage ?? base.purchaseVatPercentage
+    ),
+    profitTaxEnabled:
+      stored.profitTaxEnabled === "yes" ? "yes" : "no",
+    profitTaxPercentage: String(
+      stored.profitTaxPercentage ?? base.profitTaxPercentage
     ),
     fixedInterior: String(
       stored.fixedInterior ?? stored.furniture ?? base.fixedInterior
@@ -2658,15 +2670,45 @@ export default function LosNaranjosClient({
       0
     );
     const equityCapitalDeployed = ourInvestment + partnerInvestment;
+
+    const profitTaxEnabled = form.profitTaxEnabled === "yes";
+    const profitTaxPercentage = profitTaxEnabled
+      ? Math.min(1, Math.max(0, parsePercent(form.profitTaxPercentage)))
+      : 0;
+    const applyProfitTax = (profitBeforeTax: number) => {
+      const taxAmount =
+        profitTaxEnabled && profitBeforeTax > 0
+          ? profitBeforeTax * profitTaxPercentage
+          : 0;
+      return {
+        taxAmount,
+        profitAfterTax: profitBeforeTax - taxAmount,
+      };
+    };
+
     const totalBankInterest = bankSchedule.interestPaid;
-    const netProfit = operatingNetProfit - totalBankInterest;
+    const netProfitBeforeTax = operatingNetProfit - totalBankInterest;
+    const {
+      taxAmount: profitTaxAmount,
+      profitAfterTax: netProfitAfterTax,
+    } = applyProfitTax(netProfitBeforeTax);
+    const netProfit = profitTaxEnabled
+      ? netProfitAfterTax
+      : netProfitBeforeTax;
     const roi = equityCapitalDeployed
       ? netProfit / equityCapitalDeployed
       : 0;
-    const distributableNetProceeds = equityCapitalDeployed + netProfit;
+    const distributableNetProceedsBeforeTax =
+      equityCapitalDeployed + netProfitBeforeTax;
+    const distributableNetProceedsAfterTax =
+      equityCapitalDeployed + netProfitAfterTax;
+    const distributableNetProceeds = profitTaxEnabled
+      ? distributableNetProceedsAfterTax
+      : distributableNetProceedsBeforeTax;
+    // Houd de bankcorrectie los van winstbelasting; belasting wordt apart getoond.
     const bankExitAdjustment = Math.max(
       0,
-      netProceeds - distributableNetProceeds
+      netProceeds - distributableNetProceedsBeforeTax
     );
     const ourEquityPercentage = equityCapitalDeployed
       ? ourInvestment / equityCapitalDeployed
@@ -2675,6 +2717,12 @@ export default function LosNaranjosClient({
       ? partnerInvestment / equityCapitalDeployed
       : 0;
 
+    const ourNetProfitBeforeTax =
+      netProfitBeforeTax * ourEquityPercentage;
+    const partnerNetProfitBeforeTax =
+      netProfitBeforeTax * partnerEquityPercentage;
+    const ourTaxAmount = profitTaxAmount * ourEquityPercentage;
+    const partnerTaxAmount = profitTaxAmount * partnerEquityPercentage;
     const ourNetProfit = netProfit * ourEquityPercentage;
     const partnerNetProfit = netProfit * partnerEquityPercentage;
     const ourNetProceeds = ourInvestment + ourNetProfit;
@@ -2905,7 +2953,15 @@ export default function LosNaranjosClient({
           (sum, item) => sum + item.amount,
           0
         );
-        const scenarioProfit = operatingNetProfit - scenarioBankSchedule.interestPaid;
+        const scenarioProfitBeforeTax =
+          operatingNetProfit - scenarioBankSchedule.interestPaid;
+        const {
+          taxAmount: scenarioTaxAmount,
+          profitAfterTax: scenarioProfitAfterTax,
+        } = applyProfitTax(scenarioProfitBeforeTax);
+        const scenarioProfit = profitTaxEnabled
+          ? scenarioProfitAfterTax
+          : scenarioProfitBeforeTax;
         const scenarioRoi = scenarioEquityCapital
           ? scenarioProfit / scenarioEquityCapital
           : 0;
@@ -2915,6 +2971,9 @@ export default function LosNaranjosClient({
         return {
           month,
           date: addMonthsToDate(projectStartDate, month),
+          netProfitBeforeTax: scenarioProfitBeforeTax,
+          taxAmount: scenarioTaxAmount,
+          netProfitAfterTax: scenarioProfitAfterTax,
           netProfit: scenarioProfit,
           roi: scenarioRoi,
           irr: calculateEquityIrr(
@@ -2931,8 +2990,15 @@ export default function LosNaranjosClient({
         scenarioSalePrice *
           (1 - agentCommissionPercentage - saleLawyerFeePercentage) +
         furnitureSaleProceeds;
-      const scenarioProfit =
+      const scenarioProfitBeforeTax =
         scenarioNetProceeds - capitalDeployed - totalBankInterest;
+      const {
+        taxAmount: scenarioTaxAmount,
+        profitAfterTax: scenarioProfitAfterTax,
+      } = applyProfitTax(scenarioProfitBeforeTax);
+      const scenarioProfit = profitTaxEnabled
+        ? scenarioProfitAfterTax
+        : scenarioProfitBeforeTax;
       const scenarioRoi = equityCapitalDeployed
         ? scenarioProfit / equityCapitalDeployed
         : 0;
@@ -2942,6 +3008,9 @@ export default function LosNaranjosClient({
       return {
         change,
         salePrice: scenarioSalePrice,
+        netProfitBeforeTax: scenarioProfitBeforeTax,
+        taxAmount: scenarioTaxAmount,
+        netProfitAfterTax: scenarioProfitAfterTax,
         netProfit: scenarioProfit,
         roi: scenarioRoi,
         irr: calculateEquityIrr(
@@ -2956,8 +3025,15 @@ export default function LosNaranjosClient({
       (change) => {
         const scenarioProjectCost = totalProjectCost * (1 + change);
         const scenarioCapital = totalAcquisition + scenarioProjectCost;
-        const scenarioProfit =
+        const scenarioProfitBeforeTax =
           netProceeds - scenarioCapital - totalBankInterest;
+        const {
+          taxAmount: scenarioTaxAmount,
+          profitAfterTax: scenarioProfitAfterTax,
+        } = applyProfitTax(scenarioProfitBeforeTax);
+        const scenarioProfit = profitTaxEnabled
+          ? scenarioProfitAfterTax
+          : scenarioProfitBeforeTax;
         const constructionCostFactor = totalProjectCost
           ? scenarioProjectCost / totalProjectCost
           : 0;
@@ -2988,6 +3064,9 @@ export default function LosNaranjosClient({
         return {
           change,
           projectCost: scenarioProjectCost,
+          netProfitBeforeTax: scenarioProfitBeforeTax,
+          taxAmount: scenarioTaxAmount,
+          netProfitAfterTax: scenarioProfitAfterTax,
           netProfit: scenarioProfit,
           roi: scenarioRoi,
           irr: calculateEquityIrr(
@@ -3020,6 +3099,10 @@ export default function LosNaranjosClient({
       partnerEquityPercentage,
       ourInvestment,
       partnerInvestment,
+      ourNetProfitBeforeTax,
+      partnerNetProfitBeforeTax,
+      ourTaxAmount,
+      partnerTaxAmount,
       ourNetProfit,
       partnerNetProfit,
       ourNetProceeds,
@@ -3090,6 +3173,8 @@ export default function LosNaranjosClient({
         0
       ),
       equityCapitalDeployed,
+      distributableNetProceedsBeforeTax,
+      distributableNetProceedsAfterTax,
       distributableNetProceeds,
       bankExitAdjustment,
       baseBuildCost,
@@ -3106,6 +3191,11 @@ export default function LosNaranjosClient({
       saleLawyerFee,
       netSaleProceedsBeforeFurniture,
       netProceeds,
+      profitTaxEnabled,
+      profitTaxPercentage,
+      profitTaxAmount,
+      netProfitBeforeTax,
+      netProfitAfterTax,
       netProfit,
       roi,
       irr,
@@ -3261,7 +3351,7 @@ export default function LosNaranjosClient({
   // verdieping mag daarom over twee pagina's doorlopen.
   const buildSpecificationPages: BuildSpecificationPageGroup[][] = [];
   if (data.buildInputMode === "detailed") {
-    const firstPageRowCapacity = 10;
+    const firstPageRowCapacity = 16;
     const continuationPageRowCapacity = 20;
     let pageIndex = 0;
     let currentPage: BuildSpecificationPageGroup[] = [];
@@ -3446,7 +3536,7 @@ export default function LosNaranjosClient({
               </tr>
             )}
             <tr className="sale-row">
-              <td><strong>Net proceeds to equity</strong></td>
+              <td><strong>{data.profitTaxEnabled ? "Net proceeds to equity after tax" : "Net proceeds to equity before tax"}</strong></td>
               <td className="positive"><strong>{euro(data.distributableNetProceeds)}</strong></td>
               <td className="positive"><strong>{euro(data.ourNetProceeds)}</strong></td>
               {entries.map(({ summary, investorIndex }) => (
@@ -3457,16 +3547,44 @@ export default function LosNaranjosClient({
             </tr>
             <tr className="split-profit-row">
               <td><strong>Net profit before tax / (loss)</strong></td>
-              <td className={data.netProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfit)}</td>
-              <td className={data.ourNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfit)}</td>
-              {entries.map(({ summary, investorIndex }) => (
-                <td className={summary.netProfit >= 0 ? "positive" : "negative"} key={`profit-${investorIndex}`}>
-                  {signedEuro(summary.netProfit)}
-                </td>
-              ))}
+              <td className={data.netProfitBeforeTax >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfitBeforeTax)}</td>
+              <td className={data.ourNetProfitBeforeTax >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfitBeforeTax)}</td>
+              {entries.map(({ summary, investorIndex }) => {
+                const participantProfitBeforeTax =
+                  data.netProfitBeforeTax * summary.capitalShare;
+                return (
+                  <td className={participantProfitBeforeTax >= 0 ? "positive" : "negative"} key={`profit-before-tax-${investorIndex}`}>
+                    {signedEuro(participantProfitBeforeTax)}
+                  </td>
+                );
+              })}
             </tr>
+            {data.profitTaxEnabled && (
+              <>
+                <tr>
+                  <td><strong>Tax ({percent(data.profitTaxPercentage)})</strong></td>
+                  <td>-{euro(data.profitTaxAmount)}</td>
+                  <td>-{euro(data.ourTaxAmount)}</td>
+                  {entries.map(({ summary, investorIndex }) => (
+                    <td key={`tax-${investorIndex}`}>
+                      -{euro(data.profitTaxAmount * summary.capitalShare)}
+                    </td>
+                  ))}
+                </tr>
+                <tr className="split-profit-row">
+                  <td><strong>Net profit after tax / (loss)</strong></td>
+                  <td className={data.netProfitAfterTax >= 0 ? "positive" : "negative"}>{signedEuro(data.netProfitAfterTax)}</td>
+                  <td className={data.ourNetProfit >= 0 ? "positive" : "negative"}>{signedEuro(data.ourNetProfit)}</td>
+                  {entries.map(({ summary, investorIndex }) => (
+                    <td className={summary.netProfit >= 0 ? "positive" : "negative"} key={`profit-after-tax-${investorIndex}`}>
+                      {signedEuro(summary.netProfit)}
+                    </td>
+                  ))}
+                </tr>
+              </>
+            )}
             <tr className="split-return-row">
-              <td><strong>ROI</strong></td>
+              <td><strong>{data.profitTaxEnabled ? "ROI after tax" : "ROI before tax"}</strong></td>
               <td className={data.roi >= 0 ? "positive" : "negative"}>{percent(data.roi, true)}</td>
               <td className={data.ourRoi >= 0 ? "positive" : "negative"}>{percent(data.ourRoi, true)}</td>
               {entries.map(({ summary, investorIndex }) => (
@@ -3476,7 +3594,7 @@ export default function LosNaranjosClient({
               ))}
             </tr>
             <tr className="split-return-row">
-              <td><strong>IRR ({data.durationMonths}M annualised)</strong></td>
+              <td><strong>{data.profitTaxEnabled ? "IRR after tax" : "IRR before tax"} ({data.durationMonths}M annualised)</strong></td>
               <td className={data.irr >= 0 ? "positive" : "negative"}>{percent(data.irr, true)}</td>
               <td className={data.ourIrr >= 0 ? "positive" : "negative"}>{percent(data.ourIrr, true)}</td>
               {entries.map(({ summary, investorIndex }) => (
@@ -4336,6 +4454,26 @@ export default function LosNaranjosClient({
               updateField("saleLawyerFeePercentage", value)
             }
           />
+          <SelectField
+            label="Belasting over winst?"
+            value={form.profitTaxEnabled}
+            options={[
+              { value: "no", label: "Nee" },
+              { value: "yes", label: "Ja" },
+            ]}
+            onChange={(value) =>
+              updateField("profitTaxEnabled", value as ProfitTaxChoice)
+            }
+          />
+          {form.profitTaxEnabled === "yes" && (
+            <InputField
+              label="Belasting %"
+              value={form.profitTaxPercentage}
+              onChange={(value) =>
+                updateField("profitTaxPercentage", value)
+              }
+            />
+          )}
         </InputGroup>
 
         <InputGroup title="Bankfinanciering">
@@ -4738,9 +4876,29 @@ export default function LosNaranjosClient({
         />
 
         <div className="metric-grid">
-          <Metric label="Net Profit before Tax" value={signedEuro(data.netProfit)} positive={data.netProfit >= 0} />
-          <Metric label="ROI" value={percent(data.roi, true)} positive={data.roi >= 0} />
-          <Metric label={`IRR (${data.durationMonths}M EXIT)`} value={percent(data.irr, true)} positive={data.irr >= 0} />
+          <Metric
+            label={
+              data.profitTaxEnabled
+                ? "Net Profit after Tax"
+                : "Net Profit before Tax"
+            }
+            value={signedEuro(data.netProfit)}
+            positive={data.netProfit >= 0}
+          />
+          <Metric
+            label={data.profitTaxEnabled ? "ROI after Tax" : "ROI before Tax"}
+            value={percent(data.roi, true)}
+            positive={data.roi >= 0}
+          />
+          <Metric
+            label={
+              data.profitTaxEnabled
+                ? `IRR after Tax (${data.durationMonths}M EXIT)`
+                : `IRR before Tax (${data.durationMonths}M EXIT)`
+            }
+            value={percent(data.irr, true)}
+            positive={data.irr >= 0}
+          />
           <Metric label="Capital Deployed" value={euro(data.capitalDeployed)} />
         </div>
 
@@ -4833,11 +4991,34 @@ export default function LosNaranjosClient({
           {data.bankFinancingEnabled && (
             <>
               <DataRow label="Bank financing adjustment at exit" value={`-${euro(data.bankExitAdjustment)}`} />
-              <DataRow label="Net Proceeds to Equity" value={euro(data.distributableNetProceeds)} strong />
+              <DataRow
+                label={data.profitTaxEnabled ? "Net Proceeds to Equity after Tax" : "Net Proceeds to Equity before Tax"}
+                value={euro(data.distributableNetProceeds)}
+                strong
+              />
               <DataRow label="Total Bank Interest" value={`-${euro(data.totalBankInterest)}`} />
             </>
           )}
-          <DataRow label="Net Profit before Tax / (Loss)" value={signedEuro(data.netProfit)} strong positive={data.netProfit >= 0} />
+          <DataRow
+            label="Net Profit before Tax / (Loss)"
+            value={signedEuro(data.netProfitBeforeTax)}
+            strong={!data.profitTaxEnabled}
+            positive={data.netProfitBeforeTax >= 0}
+          />
+          {data.profitTaxEnabled && (
+            <>
+              <DataRow
+                label={`Tax (${percent(data.profitTaxPercentage)})`}
+                value={`-${euro(data.profitTaxAmount)}`}
+              />
+              <DataRow
+                label="Net Profit after Tax / (Loss)"
+                value={signedEuro(data.netProfitAfterTax)}
+                strong
+                positive={data.netProfitAfterTax >= 0}
+              />
+            </>
+          )}
         </DataBlock>
 
         <AllocationBar
@@ -4846,7 +5027,9 @@ export default function LosNaranjosClient({
           project={data.totalProjectCost}
           commission={data.agentCommission}
           legalCosts={data.saleLawyerFee}
+          tax={data.profitTaxEnabled ? data.profitTaxAmount : 0}
           profit={data.netProfit}
+          profitAfterTax={data.profitTaxEnabled}
         />
         <PageFooter label={config.footerLabel} page={`1 / ${totalPages}`} />
       </section>
@@ -5142,7 +5325,13 @@ export default function LosNaranjosClient({
         <TableTitle>Returns by exit timeline</TableTitle>
         <table>
           <thead>
-            <tr><th>Exit</th><th>Datum</th><th>Net Profit before Tax</th><th>ROI</th><th>IRR (Ann.)</th></tr>
+            <tr>
+              <th>Exit</th>
+              <th>Datum</th>
+              <th>{data.profitTaxEnabled ? "Net Profit after Tax" : "Net Profit before Tax"}</th>
+              <th>{data.profitTaxEnabled ? "ROI after Tax" : "ROI before Tax"}</th>
+              <th>{data.profitTaxEnabled ? "IRR after Tax (Ann.)" : "IRR before Tax (Ann.)"}</th>
+            </tr>
           </thead>
           <tbody>
             {data.exitScenarios.map((row) => (
@@ -5156,7 +5345,7 @@ export default function LosNaranjosClient({
             ))}
           </tbody>
         </table>
-        <p className="note"><strong>Note:</strong> IRR is calculated on the actual equity cashflows. Earlier exit scenarios keep the same planned project costs, move payments scheduled after exit to the selected exit month, and exclude bank tranches that would only be received after that exit.</p>
+        <p className="note"><strong>Note:</strong> IRR is calculated on the actual equity cashflows {data.profitTaxEnabled ? "after profit tax" : "before profit tax"}. Earlier exit scenarios keep the same planned project costs, move payments scheduled after exit to the selected exit month, and exclude bank tranches that would only be received after that exit.</p>
         <PageFooter label={config.footerLabel} page={`${exitPageNumber} / ${totalPages}`} />
       </section>
 
@@ -5236,7 +5425,15 @@ export default function LosNaranjosClient({
                 </>
               )}
               <tr className="sale-row">
-                <td><strong>{data.bankFinancingEnabled ? "Net proceeds to equity" : "Net sale proceeds"}</strong></td>
+                <td><strong>{
+                  data.bankFinancingEnabled
+                    ? data.profitTaxEnabled
+                      ? "Net proceeds to equity after tax"
+                      : "Net proceeds to equity before tax"
+                    : data.profitTaxEnabled
+                      ? "Net sale proceeds before profit tax"
+                      : "Net sale proceeds"
+                }</strong></td>
                 <td className="positive">{euro(
                   data.bankFinancingEnabled
                     ? data.distributableNetProceeds
@@ -5425,6 +5622,7 @@ export default function LosNaranjosClient({
             rows={data.saleSensitivity}
             valueKey="salePrice"
             valueLabel="Sale Price"
+            taxEnabled={data.profitTaxEnabled}
           />
         </section>
 
@@ -5434,6 +5632,7 @@ export default function LosNaranjosClient({
             rows={data.projectCostSensitivity}
             valueKey="projectCost"
             valueLabel="Project Cost"
+            taxEnabled={data.profitTaxEnabled}
           />
         </section>
 
@@ -5734,14 +5933,39 @@ function TableTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="table-title">{children}</h3>;
 }
 
-function AllocationBar({ salePrice, acquisition, project, commission, legalCosts, profit }: { salePrice: number; acquisition: number; project: number; commission: number; legalCosts: number; profit: number }) {
+function AllocationBar({
+  salePrice,
+  acquisition,
+  project,
+  commission,
+  legalCosts,
+  tax,
+  profit,
+  profitAfterTax,
+}: {
+  salePrice: number;
+  acquisition: number;
+  project: number;
+  commission: number;
+  legalCosts: number;
+  tax: number;
+  profit: number;
+  profitAfterTax: boolean;
+}) {
   const total = Math.max(salePrice, 1);
   const items = [
     { label: "Acquisition", value: acquisition, className: "acquisition" },
     { label: "Build / project", value: project, className: "project" },
     { label: "Commission", value: commission, className: "commission" },
     { label: "Sale legal costs", value: legalCosts, className: "commission" },
-    { label: "Net profit before tax", value: Math.max(0, profit), className: "profit" },
+    ...(tax > 0
+      ? [{ label: "Tax", value: tax, className: "commission" }]
+      : []),
+    {
+      label: profitAfterTax ? "Net profit after tax" : "Net profit before tax",
+      value: Math.max(0, profit),
+      className: "profit",
+    },
   ];
 
   return (
@@ -5802,10 +6026,28 @@ type SensitivityRow = {
   projectCost?: number;
 };
 
-function SensitivityTable({ rows, valueKey, valueLabel }: { rows: SensitivityRow[]; valueKey: "salePrice" | "projectCost"; valueLabel: string }) {
+function SensitivityTable({
+  rows,
+  valueKey,
+  valueLabel,
+  taxEnabled,
+}: {
+  rows: SensitivityRow[];
+  valueKey: "salePrice" | "projectCost";
+  valueLabel: string;
+  taxEnabled: boolean;
+}) {
   return (
     <table>
-      <thead><tr><th></th><th>{valueLabel}</th><th>Net Profit before Tax</th><th>ROI</th><th>IRR</th></tr></thead>
+      <thead>
+        <tr>
+          <th></th>
+          <th>{valueLabel}</th>
+          <th>{taxEnabled ? "Net Profit after Tax" : "Net Profit before Tax"}</th>
+          <th>{taxEnabled ? "ROI after Tax" : "ROI before Tax"}</th>
+          <th>{taxEnabled ? "IRR after Tax" : "IRR before Tax"}</th>
+        </tr>
+      </thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.change}>
