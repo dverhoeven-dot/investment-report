@@ -816,19 +816,10 @@ export default function FurnitureProcurementClient() {
                   </div>
 
                   <div className="card-status">
-                    <select
-                      value={item.status}
-                      onChange={(event) =>
-                        updateQuickStatus(item.id, event.target.value)
-                      }
-                    >
-                      {statusOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                    <span className={`payment payment-${item.paymentStatus.replace(/\s/g, "-").toLowerCase()}`}>
-                      {paymentStatusLabel(item.paymentStatus)}
-                    </span>
+                    <div className="quantity-badge">
+                      <span>Quantity</span>
+                      <strong>{item.quantity || 1}</strong>
+                    </div>
                   </div>
 
                   <div className="card-footer">
@@ -1490,22 +1481,29 @@ export default function FurnitureProcurementClient() {
         .discount-row strong { font-size: 13px; color: #355b39; }
         .card-status {
           display: flex;
-          gap: 7px;
-          align-items: center;
+          justify-content: flex-end;
           margin-top: 10px;
         }
-        .card-status select { flex: 1; min-width: 0; min-height: 36px; font-size: 10px; padding-left: 9px; }
-        .payment {
-          white-space: nowrap;
-          font-size: 9px;
-          font-weight: 800;
-          border-radius: 999px;
-          padding: 7px 8px;
+        .quantity-badge {
+          min-width: 82px;
+          min-height: 36px;
+          padding: 6px 9px;
+          border-radius: 10px;
           background: #f1eee8;
           color: #776d61;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
         }
-        .payment-volledig-betaald { background: #e3efe5; color: #47704c; }
-        .payment-aanbetaling { background: #f3e8cd; color: #856729; }
+        .quantity-badge span {
+          font-size: 9px;
+          font-weight: 700;
+        }
+        .quantity-badge strong {
+          font-size: 13px;
+          color: #2d241b;
+        }
         .card-footer {
           border-top: 1px solid #eee8df;
           margin-top: 12px;
