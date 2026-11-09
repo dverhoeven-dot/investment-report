@@ -22,9 +22,7 @@ export default function Shell({
             LEOVARI <span>& L3 CAPITAL</span>
           </Link>
         </header>
-
         <main>{children}</main>
-
         <footer>Leovari & L3 Capital · Besloten portaal</footer>
       </div>
     );
@@ -33,14 +31,12 @@ export default function Shell({
   return (
     <div className={"office-shell" + (legacy ? "" : " portal-shell")}>
       <Sidebar user={user} />
-
       <div className="office-body">
         <header className="office-topbar">
           <span>
             PRIVATE OFFICE
             <span className="office-muted"> / Nederland & Spanje</span>
           </span>
-
           <span>{user.name}</span>
         </header>
 
