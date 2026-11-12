@@ -1743,7 +1743,11 @@ export default function LosNaranjosClient({
       if (!response.ok) {
         throw new Error(result.error || "Projecten konden niet worden geladen.");
       }
-      setCloudProjects(Array.isArray(result.projects) ? result.projects : []);
+      const projects = (Array.isArray(result.projects) ? result.projects : []).filter(
+        (project: { name?: unknown }) =>
+          !String(project?.name || "").startsWith("Bedrijfsmatig · ")
+      );
+      setCloudProjects(projects);
       setProjectListStatus("ready");
     } catch (error) {
       console.warn("Projectlijst kon niet worden geladen.", error);
