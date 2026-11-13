@@ -2,6 +2,18 @@
 
 import {usePortalAccess} from "@/components/portal/ReadOnlyBoundary";
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+type ActivityEntry = {
+  id: string;
+  itemId: string | null;
+  itemName: string;
+  action: string;
+  fieldName: string;
+  oldValue: string;
+  newValue: string;
+  actorName: string;
+  createdAt: string;
+};
+
 type FurnitureItem = {
   id: string;
   itemNo: string;
@@ -173,6 +185,7 @@ const emptyDraft = (): DraftItem => ({
 
 export default function FurnitureProcurementClient() {
  const {readOnly}=usePortalAccess();
+  const [actorName,setActorName]=useState("Loading...");
   const [properties,setProperties]=useState<string[]>([]);
   const [propertyName,setPropertyName]=useState("");
   const [showPropertyForm,setShowPropertyForm]=useState(false);
@@ -195,6 +208,10 @@ export default function FurnitureProcurementClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftItem>(emptyDraft());
   const [notice, setNotice] = useState("");
+  const [showActivityLog, setShowActivityLog] = useState(false);
+  const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState("");
   const [importingProduct, setImportingProduct] = useState(false);
   const [productImportError, setProductImportError] = useState("");
   const [productImportInfo, setProductImportInfo] = useState("");
@@ -295,9 +312,99 @@ export default function FurnitureProcurementClient() {
     window.setTimeout(() => setNotice(""), 2200);
   }
 
-  async function saveProperty(event:FormEvent){
-    event.preventDefault();if(readOnly||propertyBusy)return;setPropertyBusy(true);setPropertyError("");
-    try{const response=await fetch("/api/furniture-properties",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:propertyName.trim()})});const data=await response.json();if(!response.ok)throw new Error(data.error||"The property could not be saved.");setProperties(data.properties);setLocation(data.properties.find((name:string)=>name.toLowerCase()===propertyName.trim().toLowerCase())??propertyName.trim());setShowPropertyForm(false);setPropertyName("");flash("Property added. You can now link furniture to this property.");}catch(error){setPropertyError(error instanceof Error?error.message:"The property could not be saved.");}finally{setPropertyBusy(false);}
+  function ensureActorName() {
+    return actorName;
+  }
+
+  function actorHeaders(_name?: string) {
+    return { "Content-Type": "application/json" };
+  }
+
+  async function loadActivityLog() {
+    setActivityLoading(true);
+    setActivityError("");
+    try {
+      const response = await fetch("/api/furniture-activity", { cache: "no-store" });
+      const payload = (await response.json().catch(() => null)) as
+        | { entries?: ActivityEntry[]; currentUser?: { id?: string; name?: string }; error?: string }
+        | null;
+      if (!response.ok) throw new Error(payload?.error || "Activity log could not be loaded.");
+      setActivityEntries(payload?.entries ?? []);
+      setActorName(payload?.currentUser?.name?.trim() || "Portal user");
+    } catch (error) {
+      setActivityError(error instanceof Error ? error.message : "Activity log could not be loaded.");
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+
+  function openActivityLog() {
+    setShowActivityLog(true);
+    void loadActivityLog();
+  }
+
+  function formatActivityDate(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function activityText(entry: ActivityEntry) {
+    if (entry.action === "created") return `added ${entry.itemName}`;
+    if (entry.action === "deleted") return `deleted ${entry.itemName}`;
+    if (entry.action === "property_added") return `added property ${entry.itemName}`;
+    const field = entry.fieldName || "item";
+    const oldValue = entry.oldValue || "empty";
+    const newValue = entry.newValue || "empty";
+    return `changed ${field} from “${oldValue}” to “${newValue}” for ${entry.itemName}`;
+  }
+
+  async function saveProperty(event: FormEvent) {
+    event.preventDefault();
+    if (readOnly || propertyBusy) return;
+    const actor = ensureActorName();
+    if (!actor) return;
+    const nextPropertyName = propertyName.trim();
+    setPropertyBusy(true);
+    setPropertyError("");
+    try {
+      const response = await fetch("/api/furniture-properties", {
+        method: "POST",
+        headers: actorHeaders(actor),
+        body: JSON.stringify({ name: nextPropertyName }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "The property could not be saved.");
+      setProperties(data.properties);
+      setLocation(
+        data.properties.find((name: string) =>
+          name.toLowerCase() === nextPropertyName.toLowerCase()
+        ) ?? nextPropertyName
+      );
+      setShowPropertyForm(false);
+      setPropertyName("");
+      void fetch("/api/furniture-activity", {
+        method: "POST",
+        headers: actorHeaders(actor),
+        body: JSON.stringify({
+          action: "property_added",
+          itemName: nextPropertyName,
+        }),
+      });
+      flash("Property added. You can now link furniture to this property.");
+    } catch (error) {
+      setPropertyError(
+        error instanceof Error ? error.message : "The property could not be saved."
+      );
+    } finally {
+      setPropertyBusy(false);
+    }
   }
 
   function openNewItem() {
@@ -457,6 +564,8 @@ export default function FurnitureProcurementClient() {
     if(readOnly) return;
     event.preventDefault();
     if (!draft.name.trim()) return;
+    const actor = ensureActorName();
+    if (!actor) return;
 
     setSaveState("saving");
     setStorageError("");
@@ -501,7 +610,7 @@ export default function FurnitureProcurementClient() {
         editingId ? `/api/furniture-items/${editingId}` : "/api/furniture-items",
         {
           method: editingId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: actorHeaders(actor),
           body: JSON.stringify(itemPayload),
         }
       );
@@ -547,10 +656,13 @@ export default function FurnitureProcurementClient() {
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
     if (!window.confirm(`Delete "${item.name}"?`)) return;
+    const actor = ensureActorName();
+    if (!actor) return;
 
     try {
       const response = await fetch(`/api/furniture-items/${id}`, {
         method: "DELETE",
+        headers: {},
       });
       const payload = (await response.json().catch(() => null)) as
         | { ok?: boolean; error?: string }
@@ -567,21 +679,43 @@ export default function FurnitureProcurementClient() {
     }
   }
 
-  async function assignProperty(id:string,nextProperty:string){
-    if(readOnly||assigning.includes(id))return;
-    setAssigning(current=>[...current,id]);
-    try{
-      const response=await fetch(`/api/furniture-items/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({placementLocation:nextProperty})});
-      const payload=await response.json().catch(()=>null);
-      if(!response.ok||!payload?.item)throw new Error(payload?.error||"The property assignment could not be saved.");
-      setItems(current=>current.map(item=>item.id===id?{...item,placementLocation:payload.item.placementLocation??nextProperty}:item));
-      flash(nextProperty?"Property assignment saved.":"Property assignment removed.");
-    }catch(error){flash(error instanceof Error?error.message:"The property assignment could not be saved. Please try again.");}
-    finally{setAssigning(current=>current.filter(value=>value!==id));}
+  async function assignProperty(id: string, nextProperty: string) {
+    if (readOnly || assigning.includes(id)) return;
+    const actor = ensureActorName();
+    if (!actor) return;
+    setAssigning((current) => [...current, id]);
+    try {
+      const response = await fetch(`/api/furniture-items/${id}`, {
+        method: "PATCH",
+        headers: actorHeaders(actor),
+        body: JSON.stringify({ placementLocation: nextProperty }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.item)
+        throw new Error(payload?.error || "The property assignment could not be saved.");
+      setItems((current) =>
+        current.map((item) =>
+          item.id === id
+            ? { ...item, placementLocation: payload.item.placementLocation ?? nextProperty }
+            : item
+        )
+      );
+      flash(nextProperty ? "Property assignment saved." : "Property assignment removed.");
+    } catch (error) {
+      flash(
+        error instanceof Error
+          ? error.message
+          : "The property assignment could not be saved. Please try again."
+      );
+    } finally {
+      setAssigning((current) => current.filter((value) => value !== id));
+    }
   }
 
   async function updateQuickStatus(id: string, nextStatus: string) {
     if(readOnly) return;
+    const actor = ensureActorName();
+    if (!actor) return;
     const previous = items;
     setItems((current) =>
       current.map((item) =>
@@ -593,7 +727,7 @@ export default function FurnitureProcurementClient() {
     try {
       const response = await fetch(`/api/furniture-items/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: actorHeaders(actor),
         body: JSON.stringify({ status: nextStatus }),
       });
       const payload = (await response.json().catch(() => null)) as
@@ -707,6 +841,7 @@ export default function FurnitureProcurementClient() {
                 ☰ Table
               </button>
             </div>
+            <button className="secondary-button activity-button" onClick={openActivityLog}>Activity log</button>
             <button data-portal-edit disabled={readOnly} className="primary-button" onClick={()=>{setShowPropertyForm(true);setPropertyError("");}}>+ Add property</button>
             <button data-portal-edit disabled={readOnly} className="primary-button" onClick={openNewItem}>
               + New furniture item
@@ -1194,6 +1329,47 @@ export default function FurnitureProcurementClient() {
               <span>
                 Image {lightbox.imageIndex + 1} / {activeLightboxItem.images.length}
               </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showActivityLog && (
+        <div className="modal-backdrop" onMouseDown={() => setShowActivityLog(false)}>
+          <div className="activity-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <p className="eyebrow">AUDIT TRAIL</p>
+                <h2>Activity log</h2>
+                <p className="activity-intro">See who changed what on the Furniture Procurement page.</p>
+              </div>
+              <button type="button" className="close-button" onClick={() => setShowActivityLog(false)}>×</button>
+            </div>
+
+            <div className="activity-user-row">
+              <span>Current user</span>
+              <strong>{actorName}</strong>
+              <button type="button" onClick={() => void loadActivityLog()}>Refresh</button>
+            </div>
+
+            {activityLoading ? (
+              <div className="activity-empty">Loading activity…</div>
+            ) : activityError ? (
+              <div className="activity-empty error">{activityError}</div>
+            ) : activityEntries.length === 0 ? (
+              <div className="activity-empty">No activity has been logged yet.</div>
+            ) : (
+              <div className="activity-list">
+                {activityEntries.map((entry) => (
+                  <article className="activity-entry" key={entry.id}>
+                    <div className="activity-dot" />
+                    <div>
+                      <p><strong>{entry.actorName || "Unknown user"}</strong> {activityText(entry)}</p>
+                      <small>{formatActivityDate(entry.createdAt)}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -1717,6 +1893,66 @@ export default function FurnitureProcurementClient() {
           padding: 7px 11px;
         }
         .zoom-controls span { font-size: 11px; color: #d6d0c8; }
+
+        .activity-button { white-space: nowrap; }
+        .activity-modal {
+          width: min(760px, calc(100vw - 28px));
+          max-height: min(82vh, 760px);
+          overflow: hidden;
+          background: #fff;
+          border: 1px solid #ddd3c4;
+          border-radius: 18px;
+          box-shadow: 0 28px 90px rgba(32,25,18,.25);
+          padding: 22px;
+          display: flex;
+          flex-direction: column;
+        }
+        .activity-intro { margin: 5px 0 0; color: #7f7568; font-size: 12px; }
+        .activity-user-row {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 10px 12px;
+          margin: 10px 0 14px;
+          background: #f7f3eb;
+          border-radius: 11px;
+          font-size: 11px;
+        }
+        .activity-user-row span { color: #8a8176; }
+        .activity-user-row strong { margin-right: auto; }
+        .activity-user-row button {
+          border: 0;
+          background: transparent;
+          color: #6b5232;
+          font-size: 10px;
+          font-weight: 800;
+        }
+        .activity-list { overflow-y: auto; padding: 2px 2px 6px; }
+        .activity-entry {
+          position: relative;
+          display: grid;
+          grid-template-columns: 14px 1fr;
+          gap: 10px;
+          padding: 12px 4px;
+          border-bottom: 1px solid #eee8df;
+        }
+        .activity-entry:last-child { border-bottom: 0; }
+        .activity-dot {
+          width: 8px;
+          height: 8px;
+          margin-top: 5px;
+          border-radius: 999px;
+          background: #c7a56a;
+        }
+        .activity-entry p { margin: 0; font-size: 12px; line-height: 1.55; color: #443a30; }
+        .activity-entry small { display: block; margin-top: 4px; color: #93887a; font-size: 10px; }
+        .activity-empty {
+          padding: 28px 10px;
+          text-align: center;
+          color: #82786c;
+          font-size: 12px;
+        }
+        .activity-empty.error { color: #9a554e; }
 
         .toast {
           position: fixed;

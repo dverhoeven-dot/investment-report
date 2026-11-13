@@ -1,10 +1,17 @@
-import {requirePermission} from "@/lib/portal/auth";
+import { requirePermission } from "@/lib/portal/auth";
 import ReadOnlyBoundary from "@/components/portal/ReadOnlyBoundary";
 import FurnitureProcurementClient from "./FurnitureProcurementClient";
 
 export default async function Page() {
- const user=await requirePermission("furniture");
-  return (<ReadOnlyBoundary readOnly={false} userId={user.id}>
-<FurnitureProcurementClient />
-</ReadOnlyBoundary>);
+  const user = await requirePermission("furniture");
+
+  return (
+    <ReadOnlyBoundary
+      readOnly={false}
+      userId={user.id}
+      userName={user.name}
+    >
+      <FurnitureProcurementClient />
+    </ReadOnlyBoundary>
+  );
 }
