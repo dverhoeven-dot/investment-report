@@ -1,6 +1,8 @@
 import {authorizeApi} from "@/lib/portal/api";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { writeActivity } from "../furniture-activity/activityLog";
+import { currentPortalActor } from "../furniture-activity/currentPortalActor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,13 +118,13 @@ export async function GET() {
 
     return NextResponse.json({ items: (data ?? []).map(fromRow) });
   } catch (error) {
-    console.error("Furniture items laden mislukt", error);
+    console.error("Failed to load furniture items", error);
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : "Furniture items konden niet worden geladen.",
+            : "Furniture items could not be loaded.",
       },
       { status: 500 }
     );
@@ -139,7 +141,7 @@ export async function POST(request: Request) {
 
     const normalized = normalizeItem(body);
     if (!normalized.name) {
-      return NextResponse.json({ error: "Productnaam ontbreekt." }, { status: 400 });
+      return NextResponse.json({ error: "Product name is required." }, { status: 400 });
     }
 
     const { data, error } = await supabase
@@ -152,13 +154,22 @@ export async function POST(request: Request) {
       .single();
 
     if (error) throw error;
+
+    const actor = await currentPortalActor();
+    await writeActivity(supabase, {
+      itemId: data.id,
+      itemName: data.name ?? normalized.name,
+      action: "created",
+      actorName: actor.name,
+    });
+
     return NextResponse.json({ item: fromRow(data) });
   } catch (error) {
-    console.error("Furniture item opslaan mislukt", error);
+    console.error("Failed to save furniture item", error);
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Furniture item opslaan mislukt.",
+          error instanceof Error ? error.message : "Failed to save furniture item.",
       },
       { status: 500 }
     );

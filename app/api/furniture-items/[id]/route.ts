@@ -1,6 +1,12 @@
 import {authorizeApi} from "@/lib/portal/api";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  activityFieldMap,
+  activityValue,
+  writeActivity,
+} from "../../furniture-activity/activityLog";
+import { currentPortalActor } from "../../furniture-activity/currentPortalActor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -112,6 +118,14 @@ async function updateItem(request: Request, context: RouteContext) {
     const update = buildUpdate(body);
 
     const supabase = getAdminClient();
+    const { data: before, error: beforeError } = await supabase
+      .from("furniture_items")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (beforeError) throw beforeError;
+
     const { data, error } = await supabase
       .from("furniture_items")
       .update(update)
@@ -120,13 +134,34 @@ async function updateItem(request: Request, context: RouteContext) {
       .single();
 
     if (error) throw error;
+
+    const actorName = (await currentPortalActor()).name;
+    const itemName = data.name ?? before.name ?? "Unnamed item";
+
+    for (const [inputKey, config] of Object.entries(activityFieldMap)) {
+      if (!(inputKey in body)) continue;
+      const oldValue = activityValue(inputKey, before[config.db]);
+      const newValue = activityValue(inputKey, data[config.db]);
+      if (oldValue === newValue) continue;
+
+      await writeActivity(supabase, {
+        itemId: id,
+        itemName,
+        action: "updated",
+        fieldName: config.label,
+        oldValue,
+        newValue,
+        actorName,
+      });
+    }
+
     return NextResponse.json({ item: fromRow(data) });
   } catch (error) {
-    console.error("Furniture item wijzigen mislukt", error);
+    console.error("Failed to update furniture item", error);
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Furniture item wijzigen mislukt.",
+          error instanceof Error ? error.message : "Failed to update furniture item.",
       },
       { status: 500 }
     );
@@ -147,24 +182,39 @@ export async function PATCH(request: Request, context: RouteContext) {
   return updateItem(request, context);
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
- const access=await authorizeApi("furniture",true,_request);
- if(access.response) return access.response;
+export async function DELETE(request: Request, context: RouteContext) {
+  const access = await authorizeApi("furniture", true, request);
+  if (access.response) return access.response;
 
   try {
     const { id } = await context.params;
     const supabase = getAdminClient();
 
+    const { data: existing, error: lookupError } = await supabase
+      .from("furniture_items")
+      .select("id,name")
+      .eq("id", id)
+      .single();
+
+    if (lookupError) throw lookupError;
+
     const { error } = await supabase.from("furniture_items").delete().eq("id", id);
     if (error) throw error;
 
+    await writeActivity(supabase, {
+      itemId: id,
+      itemName: existing?.name ?? "Unnamed item",
+      action: "deleted",
+      actorName: (await currentPortalActor()).name,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error("Furniture item verwijderen mislukt", error);
+    console.error("Failed to delete furniture item", error);
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Furniture item verwijderen mislukt.",
+          error instanceof Error ? error.message : "Failed to delete furniture item.",
       },
       { status: 500 }
     );
